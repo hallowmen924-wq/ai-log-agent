@@ -1,0 +1,20 @@
+# 가상환경
+venv/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 환경파일
+.env
+
+# VSCode 설정
+.vscode/
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# Ollama 관련 (중요)
+blobs/
+manifests/
