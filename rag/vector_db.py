@@ -12,15 +12,18 @@ db = None
 def load_knowledge():
     global db
 
-    # 1. 기존 txt
     with open("data/knowledge.txt", "r", encoding="utf-8") as f:
         texts = f.readlines()
 
-    # 2. 엑셀 추가 ⭐
     excel_texts = load_excel_knowledge()
 
-    # 3. 합치기
+    # ⭐ 여기 추가
+    print("엑셀 데이터 개수:", len(excel_texts))
+    print("엑셀 샘플:", excel_texts[:3])
+
     all_texts = texts + excel_texts
+
+    print("전체 데이터 개수:", len(all_texts))
 
     db = FAISS.from_texts(all_texts, embeddings)
 

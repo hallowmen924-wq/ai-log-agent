@@ -1,13 +1,17 @@
 import streamlit as st
-from agent.multi_agent import run_multi_agent
-from utils.log_loader import load_logs
+from rag.vector_db import search_knowledge
+from rag.vector_db import load_knowledge
 
-st.title("📊 대출 로그 AI 분석기")
+load_knowledge()  # ⭐ 이거 꼭 있어야 함
 
-logs = load_logs()
 
-selected_log = st.selectbox("로그 선택", range(len(logs)))
+st.title("📊 RAG 테스트")
 
-if st.button("분석"):
-    result = run_multi_agent(logs[selected_log])
+query = st.text_input("코드 입력 (예: A6001)")
+
+
+if st.button("검색"):
+    result = search_knowledge(query)
     st.write(result)
+
+
