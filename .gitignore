@@ -18,3 +18,22 @@ Thumbs.db
 # Ollama 관련 (중요)
 blobs/
 manifests/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# FAISS
+faiss_db/
+
+# 환경변수
+.env
+
+# React / Node
+node_modules/
+frontend/node_modules/
+build/
+
+# 기타
+.DS_Store
