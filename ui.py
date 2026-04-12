@@ -196,7 +196,7 @@ def render_dashboard():
         return
     results = st.session_state.results
 
-    st.subheader("📊 제품별 실시간 리스크 대시보드 (C6, C9, C11, C12)")
+    st.subheader("📊 제품별 실시간 리스크 대시보드")
     products = ["C6", "C9", "C11", "C12"]
     per_prod = {p: [] for p in products}
     raw_by_product = {p: [] for p in products}
@@ -245,7 +245,7 @@ def render_dashboard():
 
     # Top-right: 제품별 등급 분포
     with top_right:
-        st.markdown("### 제품별 등급 분포")
+        st.markdown("### 1차 상품별 심사 등급 분석")
         rows = []
         for p, items in raw_by_product.items():
             for it in items:
@@ -316,65 +316,26 @@ def render_dashboard():
                 fig_bar.update_layout(height=180, margin=dict(l=10, r=10, t=30, b=10))
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Bottom-right: 벡터 DB 시각화
+    # Bottom-right: 벡터 DB 상태 모니터링 (간단한 요약)
     with bot_right:
-        st.markdown("### 벡터 DB: 주요 키워드 & 저장 상태")
-        # 작은 Lottie 애니메이션으로 '활성' 느낌 추가
-        try:
-                render_lottie_url(VECTOR_LOTTIE, height=80, loop=True, autoplay=True, max_width=120)
-        except Exception:
-            pass
-        top_keywords = []
-        try:
-            vb = __import__("rag.vector_db", fromlist=["get_top_keywords"]) 
-            if hasattr(vb, "get_top_keywords"):
-                top_keywords = vb.get_top_keywords(10)
-        except Exception:
-            top_keywords = []
-        if not top_keywords:
-            snippets_for_vec = get_news_snippets(50)
-            kw_items = extract_keywords(snippets_for_vec, top_n=10)
-            top_keywords = [{"keyword": k, "count": v} for k, v in kw_items]
-        if top_keywords:
-            kw_df = pd.DataFrame(top_keywords)
-            if kw_df.shape[1] == 2 and 'keyword' in kw_df.columns:
-                kw_df = kw_df
-            else:
-                kw_df = pd.DataFrame(top_keywords, columns=['keyword', 'count'])
+        st.markdown("### 🧠 벡터 DB 상태")
+        vc = get_vector_count()
+        st.metric("🔢 저장된 벡터 수", int(vc))
+        
+        vh = st.session_state.get("vector_history", [])
+        if len(vh) > 1:
+            df_v = pd.DataFrame({"count": vh})
             if _HAS_ECHARTS:
-                kws = kw_df['keyword'].astype(str).tolist()
-                counts = kw_df['count'].astype(int).tolist()
                 option = {
-                    "xAxis": {"type": "category", "data": kws},
+                    "xAxis": {"type": "category", "data": list(range(len(vh)))},
                     "yAxis": {"type": "value"},
-                    "series": [{"data": counts, "type": "bar", "itemStyle": {"color": "#06b6d4"}}],
+                    "series": [{"data": vh, "type": "line", "smooth": True, "areaStyle": {"color": "rgba(6,182,212,0.3)"}}],
                     "tooltip": {"trigger": "axis"}
                 }
-                st_echarts(options=option, height="220px")
+                st_echarts(options=option, height="180px")
             else:
-                fig_vk = px.bar(kw_df, x='keyword', y='count', title='벡터 DB에 저장된 상위 키워드')
-                fig_vk.update_layout(height=220, margin=dict(l=8, r=8, t=32, b=8))
-                st.plotly_chart(fig_vk, use_container_width=True)
+                fig_v = px.line(df_v, y="count")
+                fig_v.update_layout(height=180, margin=dict(l=6, r=6, t=6, b=6))
+                st.plotly_chart(fig_v, use_container_width=True)
         else:
-            st.info("벡터 키워드 정보를 불러올 수 없습니다.")
-        vc = get_vector_count()
-        vh = st.session_state.get("vector_history", [])
-        vh.append(int(vc))
-        if len(vh) > 60:
-            vh = vh[-60:]
-        st.session_state.vector_history = vh
-        st.caption(f"벡터 카운트: {int(vc)}")
-        df_v = pd.DataFrame({"vector_count": st.session_state.vector_history})
-        df_v.index = pd.RangeIndex(start=0, stop=len(df_v))
-        if _HAS_ECHARTS:
-            option = {
-                "xAxis": {"type": "category", "data": df_v.index.tolist()},
-                "yAxis": {"type": "value"},
-                "series": [{"data": df_v['vector_count'].tolist(), "type": "line", "smooth": True, "areaStyle": {}}],
-                "tooltip": {"trigger": "axis"}
-            }
-            st_echarts(options=option, height="100px")
-        else:
-            v_fig = px.line(df_v, y="vector_count")
-            v_fig.update_layout(height=90, margin=dict(l=6, r=6, t=6, b=6))
-            st.plotly_chart(v_fig, use_container_width=True)
+            st.info("벡터 데이터 수집 중...")
