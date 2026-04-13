@@ -6,5 +6,3 @@ if str(ROOT) not in sys.path:
 	sys.path.insert(0, str(ROOT))
 
 from backend.app_main import app
-
-__all__ = ["app"]

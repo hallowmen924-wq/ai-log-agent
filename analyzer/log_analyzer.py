@@ -1,9 +1,11 @@
 from analyzer.log_parser import parse_logs, parse_logs_fast
 from analyzer.log_field_parser import parse_fields
 from mapper.excel_mapper import get_excel_sheet, load_excel_mapping
+from pathlib import Path
 import time
 
-EXCEL_PATH = "data/R-CLIPS code def.xlsx"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+EXCEL_PATH = str((PROJECT_ROOT / "data" / "R-CLIPS code def.xlsx").resolve())
 
 def analyze_logs(raw_logs):
 

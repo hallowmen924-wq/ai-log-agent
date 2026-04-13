@@ -1,33 +1,63 @@
-# AI Log Agent — React + FastAPI Dashboard
+# AI Log Agent
 
-이 리포지토리는 기존 Streamlit 앱을 React (create-react-app) + FastAPI로 분해한 예시입니다.
+현재 구조는 기존 분석 코드 위에 FastAPI + Worker 레이어를 추가한 형태입니다. Streamlit은 직접 모듈 호출 대신 HTTP API로 바로 붙일 수 있습니다.
 
 구성
-- backend/: FastAPI 앱
-- frontend/: React 앱 (create-react-app 스타일)
+- backend/app_main.py: FastAPI 엔트리포인트
+- backend/services.py: 뉴스/로그/FAISS/전략챗 서비스 레이어
+- backend/worker.py: 10초 주기 뉴스 수집 + 벡터 빌드 워커
+- backend/streamlit_client.py: Streamlit 연동용 API 클라이언트
+- app.py: 기존 Streamlit 대시보드
 
-빠른 시작 (Windows)
+빠른 시작
 
-1) 백엔드 설치 및 실행
+1. 공통 의존성 설치
+
+```powershell
+pip install -r requirements.txt
+```
+
+2. 백엔드 실행
 
 ```powershell
 cd backend
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+C:/Python314/python.exe -m uvicorn main:app --host 127.0.0.1 --port 18000
 ```
 
-2) 프론트엔드 실행
+3. Streamlit 실행
 
 ```powershell
-cd frontend
-npm install
-npm start
+cd ..
+streamlit run app.py
 ```
 
-프론트엔드는 기본적으로 `http://localhost:3000`에서, 백엔드는 `http://localhost:8000`에서 실행됩니다.
+지원 API
+- GET /health
+- POST /news/collect
+- POST /logs/analyze
+- POST /faiss/build
+- POST /faiss/search
+- POST /chat/strategy
+- POST /analysis/run
+- GET /analysis/status
+- POST /worker/start
+- POST /worker/stop
 
-노트
-- 실제 배포 전에는 `agent`, `analyzer`, `rag` 모듈들의 의존성(오픈AI 등)과 환경변수를 점검하세요.
-- 프론트엔드는 `REACT_APP_API` 환경변수로 백엔드 주소를 오버라이드할 수 있습니다.
+Streamlit 연동 예시
+
+```python
+from backend.streamlit_client import BackendClient
+
+client = BackendClient("http://127.0.0.1:18000")
+status = client.get_status()
+result = client.run_full_analysis()
+chat = client.strategy_chat("승인율을 높이려면?")
+```
+
+현재 활성 파일
+- app.py: Streamlit 메인 화면
+- backend/main.py: FastAPI 엔트리포인트
+- backend/worker.py: 백그라운드 뉴스/FAISS 워커
+
+보관 파일
+- 파일명 앞에 `~`가 붙은 파이썬 파일은 예제, 구버전, 실험용 코드입니다.

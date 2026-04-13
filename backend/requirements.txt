@@ -3,3 +3,15 @@ uvicorn==0.22.0
 pandas
 numpy
 python-multipart
+requests
+pydantic>=2.7.0
+faiss-cpu
+langchain
+langchain-community
+langchain-huggingface
+langchain-openai
+langchain-core
+langchain-text-splitters
+sentence-transformers
+feedparser
+openpyxl

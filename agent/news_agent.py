@@ -1,5 +1,6 @@
 import feedparser
 
+
 def collect_news():
 
     url = "https://news.google.com/rss/search?q=카드론+대출&hl=ko&gl=KR&ceid=KR:ko"
@@ -10,7 +11,9 @@ def collect_news():
     for entry in feed.entries[:40]:
         news.append({
             "title": entry.title,
-            "summary": entry.summary
+            "summary": entry.summary,
+            "link": getattr(entry, "link", ""),
+            "published": getattr(entry, "published", "")
         })
 
     return news
