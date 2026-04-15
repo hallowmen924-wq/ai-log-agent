@@ -9,15 +9,15 @@ warnings.filterwarnings(
 )
 
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 _embeddings = None
+import io
 import json
 import logging
 import re
-import io
 
 # 모듈 수준 파일 로거 설정 (RAG ingest 로그 저장)
 _LOG_DIR = os.path.join("logs")
@@ -25,7 +25,9 @@ try:
     os.makedirs(_LOG_DIR, exist_ok=True)
 except Exception:
     pass
-_LOG_FILE = os.environ.get("RAG_INGEST_LOG_FILE", os.path.join(_LOG_DIR, "rag_ingest.log"))
+_LOG_FILE = os.environ.get(
+    "RAG_INGEST_LOG_FILE", os.path.join(_LOG_DIR, "rag_ingest.log")
+)
 ingest_logger = logging.getLogger("rag_ingest")
 if not ingest_logger.handlers:
     _fh = logging.FileHandler(_LOG_FILE, encoding="utf-8")
@@ -37,7 +39,9 @@ if not ingest_logger.handlers:
 def get_embeddings():
     global _embeddings
     if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        _embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
     return _embeddings
 
 
@@ -60,7 +64,10 @@ def load_existing_agent_report_docs():
     except Exception:
         return []
 
-db=None
+
+db = None
+
+
 def apply_mapping(fields, mapping):
     result = []
 
@@ -70,6 +77,7 @@ def apply_mapping(fields, mapping):
         result.append(f"{meaning}: {v}")
 
     return ", ".join(result)
+
 
 def build_vector_db(logs, news):
     global db
@@ -128,7 +136,13 @@ def build_vector_db(logs, news):
                 label = str(mapping.get(k, k))
                 scan_fields.append((k, label, v))
                 # case id 후보
-                if features["case_id"] is None and str(k).lower() in ("case_id", "id", "req_no", "request_id", "caseid"):
+                if features["case_id"] is None and str(k).lower() in (
+                    "case_id",
+                    "id",
+                    "req_no",
+                    "request_id",
+                    "caseid",
+                ):
                     features["case_id"] = str(v)
 
         # 보조 키워드 및 단위 처리
@@ -139,13 +153,18 @@ def build_vector_db(logs, news):
 
             # 금액 추출
             if features["available_amount"] is None and (
-                any(tok in l_low for tok in ("대출", "한도", "금액", "limit", "available"))
+                any(
+                    tok in l_low
+                    for tok in ("대출", "한도", "금액", "limit", "available")
+                )
                 or re.search(r"\b(원|만원|억|천원|만)\b", v_low)
             ):
                 num = _parse_number(val_str)
                 if num is not None:
                     multiplier = 1
-                    if "만원" in v_low or ("만" in v_low and re.search(r"\d+만", v_low)):
+                    if "만원" in v_low or (
+                        "만" in v_low and re.search(r"\d+만", v_low)
+                    ):
                         multiplier = 10000
                     elif "억" in v_low:
                         multiplier = 100000000
@@ -157,9 +176,16 @@ def build_vector_db(logs, news):
                         features["available_amount"] = int(float(num) * multiplier)
 
             # 대출기간 추출 (개월/년)
-            if features["loan_term_months"] is None and ("개월" in v_low or "년" in v_low or any(tok in l_low for tok in ("기간", "term", "months", "years"))):
+            if features["loan_term_months"] is None and (
+                "개월" in v_low
+                or "년" in v_low
+                or any(tok in l_low for tok in ("기간", "term", "months", "years"))
+            ):
                 # 숫자+단위(예: 36개월, 3년)
-                m = re.search(r"(\d+(?:\.\d+)?)\s*(개월|개월|개월|월|년|yr|y|months|years)?", v_low)
+                m = re.search(
+                    r"(\d+(?:\.\d+)?)\s*(개월|개월|개월|월|년|yr|y|months|years)?",
+                    v_low,
+                )
                 if m:
                     val = float(m.group(1))
                     unit = m.group(2) or ""
@@ -185,7 +211,9 @@ def build_vector_db(logs, news):
                     features["applied_rate"] = float(num)
 
             # 신용등급/점수 추출
-            if features["credit_grade"] is None and any(tok in l_low for tok in ("등급", "grade", "신용")):
+            if features["credit_grade"] is None and any(
+                tok in l_low for tok in ("등급", "grade", "신용")
+            ):
                 # 등급 문자(A,B,C,S) 또는 숫자(300-900)
                 g = re.search(r"\b([A-D][+-]?|S|[0-9]{3,4})\b", val_str, re.I)
                 if g:
@@ -199,26 +227,38 @@ def build_vector_db(logs, news):
                         features["credit_grade"] = gval.upper()
 
             # 연소득/소득 추출
-            if features["annual_income"] is None and any(tok in l_low for tok in ("소득", "연소득", "income", "salary")):
+            if features["annual_income"] is None and any(
+                tok in l_low for tok in ("소득", "연소득", "income", "salary")
+            ):
                 num = _parse_number(val_str)
                 if num is not None:
                     multiplier = 1
-                    if "만원" in v_low or ("만" in v_low and re.search(r"\d+만", v_low)):
+                    if "만원" in v_low or (
+                        "만" in v_low and re.search(r"\d+만", v_low)
+                    ):
                         multiplier = 10000
                     elif "억" in v_low:
                         multiplier = 100000000
                     features["annual_income"] = int(num * multiplier)
 
             # 용도, 담보, 이자유형
-            if features["purpose"] is None and any(tok in l_low for tok in ("용도", "purpose")):
+            if features["purpose"] is None and any(
+                tok in l_low for tok in ("용도", "purpose")
+            ):
                 features["purpose"] = val_str
-            if features["collateral"] is None and any(tok in l_low for tok in ("담보", "collateral")):
+            if features["collateral"] is None and any(
+                tok in l_low for tok in ("담보", "collateral")
+            ):
                 features["collateral"] = val_str
-            if features["interest_type"] is None and any(tok in l_low for tok in ("변동", "고정", "fixed", "variable")):
+            if features["interest_type"] is None and any(
+                tok in l_low for tok in ("변동", "고정", "fixed", "variable")
+            ):
                 features["interest_type"] = val_str
 
             # KO 코드 탐지
-            if re.match(r"^(K|KO)[0-9A-Za-z_\-]*$", str(k), re.I) or re.match(r"^(K|KO)[0-9A-Za-z_\-]*$", label, re.I):
+            if re.match(r"^(K|KO)[0-9A-Za-z_\-]*$", str(k), re.I) or re.match(
+                r"^(K|KO)[0-9A-Za-z_\-]*$", label, re.I
+            ):
                 features["ko_codes"].append(str(k))
 
             for m in re.findall(r"\b(KO?-?[0-9A-Za-z_]+)\b", val_str):
@@ -233,7 +273,10 @@ def build_vector_db(logs, news):
     for i, log in enumerate(logs):
         # 원본 로그 전체를 파일로 기록
         try:
-            logger.info("---- RAG INGEST: original log ----\n%s", json.dumps(log, ensure_ascii=False, indent=2))
+            logger.info(
+                "---- RAG INGEST: original log ----\n%s",
+                json.dumps(log, ensure_ascii=False, indent=2),
+            )
         except Exception:
             logger.info("---- RAG INGEST: original log ---- %s", str(log))
 
@@ -278,7 +321,10 @@ def build_vector_db(logs, news):
     for i, n in enumerate(news):
         # 원본 뉴스 아이템 전체 파일로 기록
         try:
-            ingest_logger.info("---- RAG INGEST: original news ----\n%s", json.dumps(n, ensure_ascii=False, indent=2))
+            ingest_logger.info(
+                "---- RAG INGEST: original news ----\n%s",
+                json.dumps(n, ensure_ascii=False, indent=2),
+            )
         except Exception:
             ingest_logger.info("---- RAG INGEST: original news ---- %s", str(n))
 
@@ -289,31 +335,18 @@ def build_vector_db(logs, news):
 
         text = f"제목: {title}\n내용: {content}"
 
-        documents.append(
-            Document(
-                page_content=text,
-                metadata={"type": "news"}
-            )
-        )
+        documents.append(Document(page_content=text, metadata={"type": "news"}))
 
     print(f"✅ document 개수: {len(documents)}")
 
     # chunk
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 
     split_docs = []
     for doc in documents:
         chunks = splitter.split_text(doc.page_content)
         for chunk in chunks:
-            split_docs.append(
-                Document(
-                    page_content=chunk,
-                    metadata=doc.metadata
-                )
-            )
+            split_docs.append(Document(page_content=chunk, metadata=doc.metadata))
 
     print(f"🔥 총 chunk 수: {len(split_docs)}")
 
@@ -325,6 +358,7 @@ def build_vector_db(logs, news):
 
     print(f"⏱️ 완료: {time.time() - start:.2f}초")
 
+
 def load_db():
     global db
 
@@ -335,11 +369,12 @@ def load_db():
             db = FAISS.load_local(
                 "faiss_db",
                 get_embeddings(),
-                allow_dangerous_deserialization=True   # 🔥 핵심
+                allow_dangerous_deserialization=True,  # 🔥 핵심
             )
 
+
 def search_context(query, k=5):
-    load_db()   # 🔥 추가
+    load_db()  # 🔥 추가
 
     docs = db.similarity_search(query, k=k)
 
@@ -364,8 +399,7 @@ def search_context(query, k=5):
         else:
             rules.append(d.page_content)
 
-    return logs, news, rules    
-
+    return logs, news, rules
 
 
 def search_similar_logs(query):
@@ -373,15 +407,14 @@ def search_similar_logs(query):
 
     return db.similarity_search(query, k=3)
 
+
 def get_vector_count():
 
     if not os.path.exists("faiss_db"):
         return 0
 
     db = FAISS.load_local(
-        "faiss_db",
-        get_embeddings(),
-        allow_dangerous_deserialization=True
+        "faiss_db", get_embeddings(), allow_dangerous_deserialization=True
     )
 
     return len(db.index_to_docstore_id)
@@ -400,7 +433,10 @@ def save_agent_reports(reports):
     for report in reports:
         # 에이전트 리포트도 저장 전 원본을 파일로 기록합니다.
         try:
-            ingest_logger.info("---- RAG INGEST: agent report ----\n%s", json.dumps(report, ensure_ascii=False, indent=2))
+            ingest_logger.info(
+                "---- RAG INGEST: agent report ----\n%s",
+                json.dumps(report, ensure_ascii=False, indent=2),
+            )
         except Exception:
             ingest_logger.info("---- RAG INGEST: agent report ---- %s", str(report))
 
@@ -428,7 +464,9 @@ def save_agent_reports(reports):
     return len(db.index_to_docstore_id)
 
 
-def ingest_files(files_data: list[tuple[str, bytes]], doc_type: str = "regulation") -> int:
+def ingest_files(
+    files_data: list[tuple[str, bytes]], doc_type: str = "regulation"
+) -> int:
     """
     files_data: list of (name, raw_bytes)
     Adds split chunks of provided files into the FAISS DB with metadata type `doc_type`.
@@ -445,6 +483,7 @@ def ingest_files(files_data: list[tuple[str, bytes]], doc_type: str = "regulatio
             except Exception:
                 try:
                     import PyPDF2
+
                     reader = PyPDF2.PdfReader(io.BytesIO(raw))
                     pages = [p.extract_text() or "" for p in reader.pages]
                     text = "\n".join(pages)
@@ -458,12 +497,20 @@ def ingest_files(files_data: list[tuple[str, bytes]], doc_type: str = "regulatio
 
         # 기록
         try:
-            ingest_logger.info("---- RAG INGEST: uploaded file ----\n%s", json.dumps({"name": name, "size": len(raw)}, ensure_ascii=False))
+            ingest_logger.info(
+                "---- RAG INGEST: uploaded file ----\n%s",
+                json.dumps({"name": name, "size": len(raw)}, ensure_ascii=False),
+            )
         except Exception:
             ingest_logger.info("---- RAG INGEST: uploaded file ---- %s", name)
 
         # create Document
-        documents.append(Document(page_content=f"제목: {name}\n내용: {text}", metadata={"type": doc_type, "source": "upload", "name": name}))
+        documents.append(
+            Document(
+                page_content=f"제목: {name}\n내용: {text}",
+                metadata={"type": doc_type, "source": "upload", "name": name},
+            )
+        )
 
     if not documents:
         return get_vector_count()
@@ -487,5 +534,7 @@ def ingest_files(files_data: list[tuple[str, bytes]], doc_type: str = "regulatio
 
     db.save_local("faiss_db")
 
-    ingest_logger.info("Ingested %d chunks for %d files", len(split_docs), len(files_data))
+    ingest_logger.info(
+        "Ingested %d chunks for %d files", len(split_docs), len(files_data)
+    )
     return len(db.index_to_docstore_id)

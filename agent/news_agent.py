@@ -9,12 +9,14 @@ def collect_news():
     news = []
 
     for entry in feed.entries[:40]:
-        news.append({
-            "title": entry.title,
-            "summary": entry.summary,
-            "link": getattr(entry, "link", ""),
-            "published": getattr(entry, "published", "")
-        })
+        news.append(
+            {
+                "title": entry.title,
+                "summary": entry.summary,
+                "link": getattr(entry, "link", ""),
+                "published": getattr(entry, "published", ""),
+            }
+        )
 
     return news
 

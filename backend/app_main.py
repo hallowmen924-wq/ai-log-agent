@@ -32,14 +32,16 @@ from backend.services import (
     collect_news_bundle,
     enrich_results,
     get_chart_payloads,
+    run_full_analysis,
     search_faiss,
     state,
-    run_full_analysis,
 )
 from backend.worker import worker
 
 app = FastAPI(title="AI Log Agent API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 
 @app.get("/health")
@@ -63,7 +65,9 @@ def news_collect() -> NewsCollectResponse:
 
 @app.post("/logs/analyze", response_model=LogAnalyzeResponse)
 def logs_analyze(payload: LogAnalyzeRequest) -> LogAnalyzeResponse:
-    results, file_count = analyze_logs_bundle(raw_logs=payload.raw_logs, log_dir=payload.log_dir)
+    results, file_count = analyze_logs_bundle(
+        raw_logs=payload.raw_logs, log_dir=payload.log_dir
+    )
     return LogAnalyzeResponse(file_count=file_count, results=enrich_results(results))
 
 
@@ -138,7 +142,9 @@ def worker_start(payload: WorkerConfigRequest) -> GenericMessage:
     worker.update_interval(payload.interval_seconds)
     started = worker.start()
     detail = f"worker interval={worker.interval_seconds}s"
-    return GenericMessage(status="started" if started else "already_running", detail=detail)
+    return GenericMessage(
+        status="started" if started else "already_running", detail=detail
+    )
 
 
 @app.post("/worker/stop", response_model=GenericMessage)

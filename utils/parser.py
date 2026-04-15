@@ -1,5 +1,6 @@
 import re
 
+
 def parse_log(log: str) -> dict:
     result = {}
 

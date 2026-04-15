@@ -12,7 +12,6 @@ from backend.services import (
     state,
 )
 
-
 # 이 워커는 백그라운드에서 주기적으로 뉴스를 새로 받고,
 # 이미 분석된 로그가 있으면 FAISS 벡터 DB도 다시 빌드합니다.
 # 즉, 메인 화면을 다시 열지 않아도 데이터가 조금씩 최신 상태로 갱신됩니다.
@@ -60,7 +59,11 @@ class NewsVectorWorker:
                 # 워커는 뉴스를 누적 모드로 모아서 새 기사만 계속 state.news에 쌓습니다.
                 news, _ = collect_news_bundle(accumulate=True)
                 with state.lock:
-                    has_new_items = bool(state.last_new_item_time and state.last_news_time and state.last_new_item_time == state.last_news_time)
+                    has_new_items = bool(
+                        state.last_new_item_time
+                        and state.last_news_time
+                        and state.last_new_item_time == state.last_news_time
+                    )
                 with state.lock:
                     has_results = bool(state.results)
                 if news:

@@ -7,13 +7,16 @@ import threading
 import time
 from typing import Any
 
-from agent.news_agent import analyze_news, collect_news
 from agent.log_generator import append_synthetic_log
-from agent.strategy_chat import run_periodic_log_agent, run_periodic_news_agent, strategy_chat
+from agent.news_agent import analyze_news, collect_news
+from agent.strategy_chat import (
+    run_periodic_log_agent,
+    run_periodic_news_agent,
+    strategy_chat,
+)
 from analyzer.log_analyzer import analyze_logs
 from analyzer.risk_analyzer import calculate_risk
 from rag.vector_db import build_vector_db, get_vector_count, search_context
-
 
 # services.py는 "실제 일"을 하는 계층입니다.
 # API 파일은 요청/응답만 담당하고, 여기서 로그 분석, 뉴스 수집, 벡터 생성, 차트 데이터 계산을 처리합니다.
@@ -63,24 +66,62 @@ class BackendState:
                 "file_count": self.file_count,
                 "vector_count": vector_count,
                 "total_time": self.total_time,
-                "last_news_time": self.last_news_time.isoformat() if self.last_news_time else None,
-                "last_new_item_time": self.last_new_item_time.isoformat() if self.last_new_item_time else None,
-                "last_run_time": self.last_run_time.isoformat() if self.last_run_time else None,
+                "last_news_time": (
+                    self.last_news_time.isoformat() if self.last_news_time else None
+                ),
+                "last_new_item_time": (
+                    self.last_new_item_time.isoformat()
+                    if self.last_new_item_time
+                    else None
+                ),
+                "last_run_time": (
+                    self.last_run_time.isoformat() if self.last_run_time else None
+                ),
                 "latest_strategy_question": self.latest_strategy_question,
-                "last_strategy_time": self.last_strategy_time.isoformat() if self.last_strategy_time else None,
-                "last_log_ingest_time": self.last_log_ingest_time.isoformat() if self.last_log_ingest_time else None,
+                "last_strategy_time": (
+                    self.last_strategy_time.isoformat()
+                    if self.last_strategy_time
+                    else None
+                ),
+                "last_log_ingest_time": (
+                    self.last_log_ingest_time.isoformat()
+                    if self.last_log_ingest_time
+                    else None
+                ),
                 "latest_log_briefing": self.latest_log_briefing,
-                "last_log_briefing_time": self.last_log_briefing_time.isoformat() if self.last_log_briefing_time else None,
-                "latest_log_prompt_input": safe_serialize(self.latest_log_prompt_input or {}),
-                "last_log_prompt_input_time": self.last_log_prompt_input_time.isoformat() if self.last_log_prompt_input_time else None,
+                "last_log_briefing_time": (
+                    self.last_log_briefing_time.isoformat()
+                    if self.last_log_briefing_time
+                    else None
+                ),
+                "latest_log_prompt_input": safe_serialize(
+                    self.latest_log_prompt_input or {}
+                ),
+                "last_log_prompt_input_time": (
+                    self.last_log_prompt_input_time.isoformat()
+                    if self.last_log_prompt_input_time
+                    else None
+                ),
                 "latest_news_briefing": self.latest_news_briefing,
-                "last_news_briefing_time": self.last_news_briefing_time.isoformat() if self.last_news_briefing_time else None,
-                "latest_news_prompt_input": safe_serialize(self.latest_news_prompt_input or {}),
-                "last_news_prompt_input_time": self.last_news_prompt_input_time.isoformat() if self.last_news_prompt_input_time else None,
+                "last_news_briefing_time": (
+                    self.last_news_briefing_time.isoformat()
+                    if self.last_news_briefing_time
+                    else None
+                ),
+                "latest_news_prompt_input": safe_serialize(
+                    self.latest_news_prompt_input or {}
+                ),
+                "last_news_prompt_input_time": (
+                    self.last_news_prompt_input_time.isoformat()
+                    if self.last_news_prompt_input_time
+                    else None
+                ),
                 "agent_statuses": safe_serialize(self.agent_statuses),
                 "agent_activity_log": safe_serialize(self.agent_activity_log),
                 "vector_events": safe_serialize(self.vector_events),
-                "last_chart_time": self.last_chart_time.isoformat() if self.last_chart_time else None,
+                "last_chart_time": (
+                    self.last_chart_time.isoformat() if self.last_chart_time else None
+                ),
                 "chart_payloads": self.chart_payloads,
             }
 
@@ -90,11 +131,15 @@ state = BackendState()
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
-def _push_front(items: list[dict[str, Any]], item: dict[str, Any], limit: int = 30) -> list[dict[str, Any]]:
+def _push_front(
+    items: list[dict[str, Any]], item: dict[str, Any], limit: int = 30
+) -> list[dict[str, Any]]:
     return ([item] + items)[:limit]
 
 
-def record_activity_event(source: str, status: str, detail: str, update_status: bool = False) -> None:
+def record_activity_event(
+    source: str, status: str, detail: str, update_status: bool = False
+) -> None:
     timestamp = datetime.datetime.now().isoformat()
     event = {
         "source": source,
@@ -112,7 +157,9 @@ def record_activity_event(source: str, status: str, detail: str, update_status: 
             }
 
 
-def record_vector_event(source: str, action: str, before_count: int, after_count: int, detail: str) -> None:
+def record_vector_event(
+    source: str, action: str, before_count: int, after_count: int, detail: str
+) -> None:
     timestamp = datetime.datetime.now().isoformat()
     event = {
         "source": source,
@@ -130,18 +177,44 @@ def record_vector_event(source: str, action: str, before_count: int, after_count
 def reset_strategy_runtime(question: str) -> None:
     timestamp = datetime.datetime.now()
     default_statuses = {
-        "orchestrator": {"status": "running", "detail": "질문을 접수하고 실행 순서를 준비 중입니다.", "updated_at": timestamp.isoformat()},
-        "log_agent": {"status": "pending", "detail": "대기 중", "updated_at": timestamp.isoformat()},
-        "news_agent": {"status": "pending", "detail": "대기 중", "updated_at": timestamp.isoformat()},
-        "regulation_agent": {"status": "pending", "detail": "대기 중", "updated_at": timestamp.isoformat()},
-        "decision_agent": {"status": "pending", "detail": "대기 중", "updated_at": timestamp.isoformat()},
-        "vector_store": {"status": "pending", "detail": "대기 중", "updated_at": timestamp.isoformat()},
+        "orchestrator": {
+            "status": "running",
+            "detail": "질문을 접수하고 실행 순서를 준비 중입니다.",
+            "updated_at": timestamp.isoformat(),
+        },
+        "log_agent": {
+            "status": "pending",
+            "detail": "대기 중",
+            "updated_at": timestamp.isoformat(),
+        },
+        "news_agent": {
+            "status": "pending",
+            "detail": "대기 중",
+            "updated_at": timestamp.isoformat(),
+        },
+        "regulation_agent": {
+            "status": "pending",
+            "detail": "대기 중",
+            "updated_at": timestamp.isoformat(),
+        },
+        "decision_agent": {
+            "status": "pending",
+            "detail": "대기 중",
+            "updated_at": timestamp.isoformat(),
+        },
+        "vector_store": {
+            "status": "pending",
+            "detail": "대기 중",
+            "updated_at": timestamp.isoformat(),
+        },
     }
     with state.lock:
         state.latest_strategy_question = question
         state.last_strategy_time = timestamp
         state.agent_statuses = default_statuses
-    record_activity_event("orchestrator", "running", f"질문 접수: {question}", update_status=True)
+    record_activity_event(
+        "orchestrator", "running", f"질문 접수: {question}", update_status=True
+    )
 
 
 def resolve_project_path(path_str: str) -> str:
@@ -220,7 +293,9 @@ def enrich_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             out_fields = row.get("out_fields", {})
             in_mapping = row.get("in_mapping", {})
             out_mapping = row.get("out_mapping", {})
-            risk = calculate_risk(in_fields, out_fields, in_mapping, out_mapping, product=product)
+            risk = calculate_risk(
+                in_fields, out_fields, in_mapping, out_mapping, product=product
+            )
             enriched.append(
                 {
                     "product": product,
@@ -269,7 +344,9 @@ def build_chart_payloads(results: list[dict[str, Any]] | None = None) -> dict[st
         grade_counts[grade] = grade_counts.get(grade, 0) + 1
         if product not in product_grade_counts:
             product_grade_counts[product] = {}
-        product_grade_counts[product][grade] = product_grade_counts[product].get(grade, 0) + 1
+        product_grade_counts[product][grade] = (
+            product_grade_counts[product].get(grade, 0) + 1
+        )
 
     try:
         vector_count = get_vector_count()
@@ -306,7 +383,9 @@ def build_chart_payloads(results: list[dict[str, Any]] | None = None) -> dict[st
     return payloads
 
 
-def collect_news_bundle(accumulate: bool = True) -> tuple[list[dict[str, Any]], list[str]]:
+def collect_news_bundle(
+    accumulate: bool = True,
+) -> tuple[list[dict[str, Any]], list[str]]:
     record_activity_event("news_collector", "running", "뉴스 RSS를 수집하고 있습니다.")
     news = collect_news()
     with state.lock:
@@ -337,14 +416,22 @@ def collect_news_bundle(accumulate: bool = True) -> tuple[list[dict[str, Any]], 
     return effective_news, issues
 
 
-def analyze_logs_bundle(raw_logs: str | None = None, log_dir: str = "data/logs") -> tuple[list[dict[str, Any]], int]:
+def analyze_logs_bundle(
+    raw_logs: str | None = None, log_dir: str = "data/logs"
+) -> tuple[list[dict[str, Any]], int]:
     record_activity_event("log_analyzer", "running", "로그 분석을 시작했습니다.")
-    raw_text, file_count = (raw_logs, 0) if raw_logs is not None else load_all_logs(log_dir)
+    raw_text, file_count = (
+        (raw_logs, 0) if raw_logs is not None else load_all_logs(log_dir)
+    )
     results = analyze_logs(raw_text or "")
     with state.lock:
         state.results = results
         state.file_count = file_count
-    record_activity_event("log_analyzer", "completed", f"로그 파일 {file_count}개, 분석 결과 {len(results)}건")
+    record_activity_event(
+        "log_analyzer",
+        "completed",
+        f"로그 파일 {file_count}개, 분석 결과 {len(results)}건",
+    )
     build_chart_payloads(results)
     return results, file_count
 
@@ -361,10 +448,20 @@ def build_faiss_bundle(
         before_count = get_vector_count()
     except Exception:
         before_count = 0
-    record_activity_event(source, "running", f"벡터 DB를 갱신 중입니다. 로그 {len(effective_logs)}건, 뉴스 {len(effective_news)}건")
+    record_activity_event(
+        source,
+        "running",
+        f"벡터 DB를 갱신 중입니다. 로그 {len(effective_logs)}건, 뉴스 {len(effective_news)}건",
+    )
     build_vector_db(effective_logs, effective_news)
     count = get_vector_count()
-    record_vector_event(source, "rebuild", before_count, count, f"로그 {len(effective_logs)}건과 뉴스 {len(effective_news)}건으로 재구성")
+    record_vector_event(
+        source,
+        "rebuild",
+        before_count,
+        count,
+        f"로그 {len(effective_logs)}건과 뉴스 {len(effective_news)}건으로 재구성",
+    )
     record_activity_event(source, "completed", f"벡터 DB 갱신 완료. 총 벡터 {count}건")
     build_chart_payloads(effective_logs)
     return count
@@ -389,7 +486,9 @@ def run_full_analysis(log_dir: str = "data/logs") -> dict[str, Any]:
             state.total_time = time.time() - start
             state.last_run_time = datetime.datetime.now()
             state.running = False
-        record_activity_event("system", "completed", f"전체 분석 완료. 소요 {state.total_time:.1f}초")
+        record_activity_event(
+            "system", "completed", f"전체 분석 완료. 소요 {state.total_time:.1f}초"
+        )
         snapshot = state.snapshot()
         snapshot["results"] = enrich_results(results)
         snapshot["issues"] = issues
@@ -399,7 +498,9 @@ def run_full_analysis(log_dir: str = "data/logs") -> dict[str, Any]:
     except Exception:
         with state.lock:
             state.running = False
-        record_activity_event("system", "failed", "전체 분석 파이프라인이 실패했습니다.")
+        record_activity_event(
+            "system", "failed", "전체 분석 파이프라인이 실패했습니다."
+        )
         raise
 
 
@@ -409,21 +510,39 @@ def ask_strategy(question: str) -> dict[str, Any]:
     def on_agent_event(agent: str, status: str, detail: str) -> None:
         record_activity_event(agent, status, detail, update_status=True)
 
-    def on_vector_event(source: str, action: str, before_count: int, after_count: int, detail: str) -> None:
+    def on_vector_event(
+        source: str, action: str, before_count: int, after_count: int, detail: str
+    ) -> None:
         record_vector_event(source, action, before_count, after_count, detail)
 
     try:
-        result = strategy_chat(question, event_callback=on_agent_event, vector_callback=on_vector_event)
-        record_activity_event("orchestrator", "completed", "멀티 에이전트 보고서 생성이 완료되었습니다.", update_status=True)
+        result = strategy_chat(
+            question, event_callback=on_agent_event, vector_callback=on_vector_event
+        )
+        record_activity_event(
+            "orchestrator",
+            "completed",
+            "멀티 에이전트 보고서 생성이 완료되었습니다.",
+            update_status=True,
+        )
         with state.lock:
             state.last_strategy_time = datetime.datetime.now()
-            state.latest_log_prompt_input = result.get("prompt_inputs", {}).get("log_agent")
+            state.latest_log_prompt_input = result.get("prompt_inputs", {}).get(
+                "log_agent"
+            )
             state.last_log_prompt_input_time = datetime.datetime.now()
-            state.latest_news_prompt_input = result.get("prompt_inputs", {}).get("news_agent")
+            state.latest_news_prompt_input = result.get("prompt_inputs", {}).get(
+                "news_agent"
+            )
             state.last_news_prompt_input_time = datetime.datetime.now()
         return result
     except Exception:
-        record_activity_event("orchestrator", "failed", "멀티 에이전트 실행 중 오류가 발생했습니다.", update_status=True)
+        record_activity_event(
+            "orchestrator",
+            "failed",
+            "멀티 에이전트 실행 중 오류가 발생했습니다.",
+            update_status=True,
+        )
         raise
 
 
@@ -434,7 +553,9 @@ def run_background_news_agent_cycle(should_persist: bool = True) -> dict[str, An
     def on_agent_event(agent: str, status: str, detail: str) -> None:
         record_activity_event(agent, status, detail, update_status=True)
 
-    def on_vector_event(source: str, action: str, before_count: int, after_count: int, detail: str) -> None:
+    def on_vector_event(
+        source: str, action: str, before_count: int, after_count: int, detail: str
+    ) -> None:
         record_vector_event(source, action, before_count, after_count, detail)
 
     result = run_periodic_news_agent(
@@ -473,7 +594,9 @@ def run_background_log_agent_cycle(should_persist: bool = True) -> dict[str, Any
     def on_agent_event(agent: str, status: str, detail: str) -> None:
         record_activity_event(agent, status, detail, update_status=True)
 
-    def on_vector_event(source: str, action: str, before_count: int, after_count: int, detail: str) -> None:
+    def on_vector_event(
+        source: str, action: str, before_count: int, after_count: int, detail: str
+    ) -> None:
         record_vector_event(source, action, before_count, after_count, detail)
 
     result = run_periodic_log_agent(

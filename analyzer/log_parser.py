@@ -1,11 +1,12 @@
 import re
 
+
 def parse_logs(raw_logs):
 
     results = []
 
-    in_pattern = r'in_data = \[(.*?)\]'
-    out_pattern = r'out_data = \[(.*?)\]'
+    in_pattern = r"in_data = \[(.*?)\]"
+    out_pattern = r"out_data = \[(.*?)\]"
 
     in_matches = re.findall(in_pattern, raw_logs, re.DOTALL)
     out_matches = re.findall(out_pattern, raw_logs, re.DOTALL)
@@ -17,13 +18,12 @@ def parse_logs(raw_logs):
 
         product_code = extract_product_code(in_data)
 
-        results.append({
-            "product": product_code,
-            "in_data": in_data,
-            "out_data": out_data
-        })
+        results.append(
+            {"product": product_code, "in_data": in_data, "out_data": out_data}
+        )
 
     return results
+
 
 def parse_logs_fast(raw_logs):
 
@@ -43,15 +43,14 @@ def parse_logs_fast(raw_logs):
 
             product = extract_product_code(in_data)
 
-            results.append({
-                "product": product,
-                "in_data": in_data,
-                "out_data": out_data
-            })
+            results.append(
+                {"product": product, "in_data": in_data, "out_data": out_data}
+            )
 
             current_in = None
 
     return results
+
 
 def extract_product_code(in_data):
 

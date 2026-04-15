@@ -13,7 +13,13 @@ R0003 등) as long as the mapping contains meaningful Korean labels.
 from typing import Any, Dict, Optional
 
 
-def calculate_risk(in_fields: Dict[str, Any], out_fields: Dict[str, Any], in_mapping: Optional[Dict[str, str]] = None, out_mapping: Optional[Dict[str, str]] = None, product: Optional[str] = None) -> Dict[str, Any]:
+def calculate_risk(
+    in_fields: Dict[str, Any],
+    out_fields: Dict[str, Any],
+    in_mapping: Optional[Dict[str, str]] = None,
+    out_mapping: Optional[Dict[str, str]] = None,
+    product: Optional[str] = None,
+) -> Dict[str, Any]:
 
     in_mapping = in_mapping or {}
     out_mapping = out_mapping or {}
@@ -33,25 +39,50 @@ def calculate_risk(in_fields: Dict[str, Any], out_fields: Dict[str, Any], in_map
     # 제품별 규칙: 카테고리별 가중치와 키워드 기반 특화 체크
     product_rules = {
         "C9": {
-            "multipliers": {"financial": 0.7, "credit": 1.0, "behavior": 1.1, "regulation": 1.0},
+            "multipliers": {
+                "financial": 0.7,
+                "credit": 1.0,
+                "behavior": 1.1,
+                "regulation": 1.0,
+            },
             "keywords": ["중고차", "자동차", "차량"],
         },
         "C6": {
-            "multipliers": {"financial": 1.2, "credit": 1.2, "behavior": 1.0, "regulation": 1.0},
+            "multipliers": {
+                "financial": 1.2,
+                "credit": 1.2,
+                "behavior": 1.0,
+                "regulation": 1.0,
+            },
             "keywords": ["신용", "무담보", "일시"],
         },
         "C11": {
-            "multipliers": {"financial": 1.1, "credit": 0.9, "behavior": 1.0, "regulation": 0.9},
+            "multipliers": {
+                "financial": 1.1,
+                "credit": 0.9,
+                "behavior": 1.0,
+                "regulation": 0.9,
+            },
             "keywords": ["사업", "자영업", "법인"],
         },
         "C12": {
-            "multipliers": {"financial": 1.0, "credit": 1.0, "behavior": 1.1, "regulation": 1.2},
+            "multipliers": {
+                "financial": 1.0,
+                "credit": 1.0,
+                "behavior": 1.1,
+                "regulation": 1.2,
+            },
             "keywords": ["대환", "재대출", "재융자"],
         },
     }
 
     # 기본 가중치
-    category_multipliers = {"financial": 1.0, "credit": 1.0, "behavior": 1.0, "regulation": 1.0}
+    category_multipliers = {
+        "financial": 1.0,
+        "credit": 1.0,
+        "behavior": 1.0,
+        "regulation": 1.0,
+    }
     if product and product in product_rules:
         category_multipliers.update(product_rules[product].get("multipliers", {}))
 
@@ -87,20 +118,40 @@ def calculate_risk(in_fields: Dict[str, Any], out_fields: Dict[str, Any], in_map
             return None
 
     # --- identify likely fields via mapping names ---
-    amount_code = find_code_by_keywords(in_mapping, ["대출금액", "대출잔액", "신청금액", "한도", "총대출", "한도금액", "대출신청금액"]) or \
-                  find_code_by_keywords(in_mapping, ["A2001", "A2035", "A2025"])  # fallback common codes
+    amount_code = find_code_by_keywords(
+        in_mapping,
+        [
+            "대출금액",
+            "대출잔액",
+            "신청금액",
+            "한도",
+            "총대출",
+            "한도금액",
+            "대출신청금액",
+        ],
+    ) or find_code_by_keywords(
+        in_mapping, ["A2001", "A2035", "A2025"]
+    )  # fallback common codes
 
-    income_code = find_code_by_keywords(in_mapping, ["소득", "연봉", "연간소득", "INCOME"]) or find_code_by_keywords(in_mapping, ["A2027", "A2028"]) 
+    income_code = find_code_by_keywords(
+        in_mapping, ["소득", "연봉", "연간소득", "INCOME"]
+    ) or find_code_by_keywords(in_mapping, ["A2027", "A2028"])
 
-    credit_code = find_code_by_keywords(in_mapping, ["신용등급", "신용점수", "CREDIT", "신용점수"]) or find_code_by_keywords(in_mapping, ["CREDIT_SCORE"]) 
+    credit_code = find_code_by_keywords(
+        in_mapping, ["신용등급", "신용점수", "CREDIT", "신용점수"]
+    ) or find_code_by_keywords(in_mapping, ["CREDIT_SCORE"])
 
-    loancnt_code = find_code_by_keywords(in_mapping, ["대출건수", "다중", "LOAN_CNT"]) or find_code_by_keywords(in_mapping, ["LOAN_CNT"]) 
+    loancnt_code = find_code_by_keywords(
+        in_mapping, ["대출건수", "다중", "LOAN_CNT"]
+    ) or find_code_by_keywords(in_mapping, ["LOAN_CNT"])
 
-    job_code = find_code_by_keywords(in_mapping, ["직업", "JOB", "직업유형"]) 
+    job_code = find_code_by_keywords(in_mapping, ["직업", "JOB", "직업유형"])
 
-    overdue_code = find_code_by_keywords(out_mapping, ["연체", "연체여부", "OVERDUE"]) 
+    overdue_code = find_code_by_keywords(out_mapping, ["연체", "연체여부", "OVERDUE"])
 
-    dsr_code = find_code_by_keywords(out_mapping, ["DSR", "DSR가이드", "R0003"]) or find_code_by_keywords(out_mapping, ["R0003", "R0020"]) 
+    dsr_code = find_code_by_keywords(
+        out_mapping, ["DSR", "DSR가이드", "R0003"]
+    ) or find_code_by_keywords(out_mapping, ["R0003", "R0020"])
 
     # --- extract values ---
     amount = safe_int(in_fields.get(amount_code)) if amount_code else None
@@ -181,7 +232,9 @@ def calculate_risk(in_fields: Dict[str, Any], out_fields: Dict[str, Any], in_map
 
     # --- 제품별 특화 추가 규칙 ---
     # 매핑명에 제품 키워드가 포함되는지 탐지하여 추가 규칙 적용
-    mapping_text = " ".join([str(v) for v in list(in_mapping.values()) + list(out_mapping.values())])
+    mapping_text = " ".join(
+        [str(v) for v in list(in_mapping.values()) + list(out_mapping.values())]
+    )
     prod_spec = product_rules.get(product) if product else None
     # 차량대출 특화 (C9 또는 매핑에 차량 관련 키워드가 있으면 적용)
     vehicle_kw = ["중고차", "자동차", "차량"]
@@ -214,7 +267,6 @@ def calculate_risk(in_fields: Dict[str, Any], out_fields: Dict[str, Any], in_map
         # out_fields/매핑에 '대환' 키워드가 있으면 규제 가중
         if any(kw in mapping_text for kw in ["대환", "재대출", "재융자"]):
             add_risk("regulation", 25, "C12: 대환 관련 항목 존재")
-
 
     # Final grade
     result["grade"] = _score_to_grade(result["score"])

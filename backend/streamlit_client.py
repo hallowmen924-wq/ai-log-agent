@@ -4,7 +4,6 @@ from typing import Any
 
 import requests
 
-
 # Streamlit이 FastAPI를 쉽게 부를 수 있도록 만든 작은 API 클라이언트입니다.
 # 화면 코드는 URL 문자열을 직접 조립하지 않고 이 클래스 메서드만 사용하면 됩니다.
 
@@ -42,7 +41,9 @@ class BackendClient:
     def collect_news(self) -> dict[str, Any]:
         return requests.post(f"{self.base_url}/news/collect", timeout=30).json()
 
-    def analyze_logs(self, raw_logs: str | None = None, log_dir: str = "data/logs") -> dict[str, Any]:
+    def analyze_logs(
+        self, raw_logs: str | None = None, log_dir: str = "data/logs"
+    ) -> dict[str, Any]:
         return requests.post(
             f"{self.base_url}/logs/analyze",
             json={"raw_logs": raw_logs, "log_dir": log_dir},
@@ -50,7 +51,9 @@ class BackendClient:
         ).json()
 
     def build_faiss(self) -> dict[str, Any]:
-        return requests.post(f"{self.base_url}/faiss/build", json={}, timeout=180).json()
+        return requests.post(
+            f"{self.base_url}/faiss/build", json={}, timeout=180
+        ).json()
 
     def search_faiss(self, query: str, k: int = 5) -> dict[str, Any]:
         return requests.post(

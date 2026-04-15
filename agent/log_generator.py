@@ -6,7 +6,6 @@ from typing import Any
 
 from analyzer.log_parser import parse_logs_fast
 
-
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE_LOG = PROJECT_ROOT / "data" / "logs" / "stdout.log.20260407.txt"
 TARGET_LOG = PROJECT_ROOT / "data" / "logs" / "generated_live.log"

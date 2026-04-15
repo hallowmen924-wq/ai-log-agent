@@ -1,19 +1,18 @@
-import time
-import html
 import datetime
+import html
 import threading
+import time
 
 # 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
 _background_results: dict = {}
 _background_lock = threading.Lock()
-import streamlit as st
 import pandas as pd
 import plotly.express as px
+import streamlit as st
 
-from backend.streamlit_client import BackendClient
 from agent.strategy_chat import regulation_agent
-from rag.vector_db import ingest_files, search_context, get_vector_count
-
+from backend.streamlit_client import BackendClient
+from rag.vector_db import get_vector_count, ingest_files, search_context
 
 # 이 파일은 최종 Streamlit 진입점입니다.
 # 핵심 역할은 "직접 분석하지 않고" FastAPI 백엔드에서 준비한 데이터를 받아
@@ -32,6 +31,7 @@ def fragment_decorator(*args, **kwargs):
     if HAS_FRAGMENT_REFRESH:
         return st.fragment(*args, **kwargs)
     return lambda func: func
+
 
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = time.time()
@@ -138,10 +138,11 @@ def render_loading_styles():
         """,
         unsafe_allow_html=True,
     )
-    
 
 
-def render_loading_checklist(target, active_step: int, eta_text: str, elapsed_text: str = ""):
+def render_loading_checklist(
+    target, active_step: int, eta_text: str, elapsed_text: str = ""
+):
     steps = [
         "백엔드 연결 상태 확인",
         "로그 파일 분석 요청",
@@ -224,12 +225,20 @@ def sync_session_from_backend(payload: dict):
     st.session_state.last_log_ingest_time = payload.get("last_log_ingest_time")
     st.session_state.latest_log_briefing = payload.get("latest_log_briefing")
     st.session_state.last_log_briefing_time = payload.get("last_log_briefing_time")
-    st.session_state.latest_log_prompt_input = payload.get("latest_log_prompt_input", {})
-    st.session_state.last_log_prompt_input_time = payload.get("last_log_prompt_input_time")
+    st.session_state.latest_log_prompt_input = payload.get(
+        "latest_log_prompt_input", {}
+    )
+    st.session_state.last_log_prompt_input_time = payload.get(
+        "last_log_prompt_input_time"
+    )
     st.session_state.latest_news_briefing = payload.get("latest_news_briefing")
     st.session_state.last_news_briefing_time = payload.get("last_news_briefing_time")
-    st.session_state.latest_news_prompt_input = payload.get("latest_news_prompt_input", {})
-    st.session_state.last_news_prompt_input_time = payload.get("last_news_prompt_input_time")
+    st.session_state.latest_news_prompt_input = payload.get(
+        "latest_news_prompt_input", {}
+    )
+    st.session_state.last_news_prompt_input_time = payload.get(
+        "last_news_prompt_input_time"
+    )
     st.session_state.agent_statuses = payload.get("agent_statuses", {})
     st.session_state.agent_activity_log = payload.get("agent_activity_log", [])
     st.session_state.vector_events = payload.get("vector_events", [])
@@ -382,13 +391,15 @@ def render_strategy_response(message):
         vector_cols[1].metric("적재 후 벡터", vector_update.get("after_count", 0))
         vector_cols[2].metric("이번 추가량", vector_update.get("added_count", 0))
 
-    tab_log, tab_news, tab_regulation, tab_decision, tab_context = st.tabs([
-        "📄 로그 분석",
-        "📰 뉴스 영향",
-        "⚖️ 규제 판단",
-        "🧠 최종 결론",
-        "📚 참고 컨텍스트",
-    ])
+    tab_log, tab_news, tab_regulation, tab_decision, tab_context = st.tabs(
+        [
+            "📄 로그 분석",
+            "📰 뉴스 영향",
+            "⚖️ 규제 판단",
+            "🧠 최종 결론",
+            "📚 참고 컨텍스트",
+        ]
+    )
 
     with tab_log:
         st.write(log_text)
@@ -450,7 +461,11 @@ def render_runtime_dashboard():
                 result = payload.get("result")
                 done_time = payload.get("updated_at")
                 statuses = st.session_state.get("agent_statuses", {})
-                statuses["regulation_agent"] = {"status": "completed", "updated_at": done_time, "detail": "규제 분석 완료"}
+                statuses["regulation_agent"] = {
+                    "status": "completed",
+                    "updated_at": done_time,
+                    "detail": "규제 분석 완료",
+                }
                 st.session_state.agent_statuses = statuses
                 st.session_state.latest_regulation_analysis = result
                 st.session_state.last_regulation_time = done_time
@@ -460,10 +475,25 @@ def render_runtime_dashboard():
                 if vector_count is not None:
                     st.session_state.vector_count = vector_count
                     ve = st.session_state.get("vector_events", [])
-                    ve.insert(0, {"time": done_time, "added_count": added or 0, "source": "regulation_upload"})
+                    ve.insert(
+                        0,
+                        {
+                            "time": done_time,
+                            "added_count": added or 0,
+                            "source": "regulation_upload",
+                        },
+                    )
                     st.session_state.vector_events = ve
                 log = st.session_state.get("agent_activity_log", [])
-                log.insert(0, {"agent": "regulation", "title": "uploaded regulation analysis", "content": result, "time": done_time})
+                log.insert(
+                    0,
+                    {
+                        "agent": "regulation",
+                        "title": "uploaded regulation analysis",
+                        "content": result,
+                        "time": done_time,
+                    },
+                )
                 st.session_state.agent_activity_log = log
                 with _background_lock:
                     del _background_results[task_id]
@@ -471,7 +501,11 @@ def render_runtime_dashboard():
                 err = payload.get("error")
                 err_time = payload.get("updated_at")
                 statuses = st.session_state.get("agent_statuses", {})
-                statuses["regulation_agent"] = {"status": "failed", "updated_at": err_time, "detail": f"분석 실패: {err}"}
+                statuses["regulation_agent"] = {
+                    "status": "failed",
+                    "updated_at": err_time,
+                    "detail": f"분석 실패: {err}",
+                }
                 st.session_state.agent_statuses = statuses
                 with _background_lock:
                     del _background_results[task_id]
@@ -480,7 +514,9 @@ def render_runtime_dashboard():
 
     latest_question = st.session_state.get("latest_strategy_question")
     last_strategy_time = st.session_state.get("last_strategy_time")
-    last_log_ingest_time = parse_status_time(st.session_state.get("last_log_ingest_time"))
+    last_log_ingest_time = parse_status_time(
+        st.session_state.get("last_log_ingest_time")
+    )
     if latest_question:
         st.caption(
             f"최근 질문: {latest_question} | 마지막 실행: {format_status_time(last_strategy_time)}"
@@ -504,9 +540,9 @@ def render_runtime_dashboard():
     last_news_time = parse_status_time(st.session_state.get("last_news_time"))
     last_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
     has_fresh_news_cycle = (
-        last_news_time is not None and
-        last_new_item_time is not None and
-        last_news_time == last_new_item_time
+        last_news_time is not None
+        and last_new_item_time is not None
+        and last_news_time == last_new_item_time
     )
 
     if has_fresh_news_cycle:
@@ -544,7 +580,10 @@ def render_runtime_dashboard():
             unsafe_allow_html=True,
         )
 
-    if last_log_ingest_time is not None and (datetime.datetime.now() - last_log_ingest_time).total_seconds() <= 12:
+    if (
+        last_log_ingest_time is not None
+        and (datetime.datetime.now() - last_log_ingest_time).total_seconds() <= 12
+    ):
         st.markdown(
             """
             <div style="
@@ -583,7 +622,9 @@ def render_runtime_dashboard():
     for index, (agent_key, title) in enumerate(display_names):
         info = statuses.get(agent_key, {})
         status_code = info.get("status", "pending")
-        label, background, color = status_map.get(status_code, (status_code, "#e2e8f0", "#334155"))
+        label, background, color = status_map.get(
+            status_code, (status_code, "#e2e8f0", "#334155")
+        )
         updated_at = format_status_time(info.get("updated_at"))
         detail = info.get("detail", "아직 실행 이력이 없습니다.")
         agent_cols[index % 3].markdown(
@@ -686,8 +727,12 @@ def render_runtime_dashboard():
     latest_vector_event = vector_events[0] if vector_events else {}
     vector_metric_cols = st.columns(3)
     vector_metric_cols[0].metric("현재 벡터 수", get_vector_count())
-    vector_metric_cols[1].metric("마지막 증감", latest_vector_event.get("added_count", 0))
-    vector_metric_cols[2].metric("최근 적재 소스", latest_vector_event.get("source", "-"))
+    vector_metric_cols[1].metric(
+        "마지막 증감", latest_vector_event.get("added_count", 0)
+    )
+    vector_metric_cols[2].metric(
+        "최근 적재 소스", latest_vector_event.get("source", "-")
+    )
 
     event_col, vector_col = st.columns([1.2, 1])
     with event_col:
@@ -723,7 +768,11 @@ def render_runtime_dashboard():
                 timestamp = parse_status_time(event.get("timestamp"))
                 chart_rows.append(
                     {
-                        "time": timestamp if timestamp is not None else event.get("timestamp"),
+                        "time": (
+                            timestamp
+                            if timestamp is not None
+                            else event.get("timestamp")
+                        ),
                         "after_count": event.get("after_count", 0),
                         "added_count": event.get("added_count", 0),
                         "source": event.get("source", "-"),
@@ -746,7 +795,9 @@ def render_runtime_dashboard():
                     xaxis_title="시간",
                     yaxis_title="누적 벡터 수",
                 )
-                st.plotly_chart(fig_vector, width="stretch", key="vector_event_timeline")
+                st.plotly_chart(
+                    fig_vector, width="stretch", key="vector_event_timeline"
+                )
 
                 fig_delta = px.bar(
                     df_vector,
@@ -787,7 +838,9 @@ def render_runtime_dashboard():
                 )
 
 
-def render_agent_prompt_panel(agent_key: str, title: str, accent_color: str, soft_background: str):
+def render_agent_prompt_panel(
+    agent_key: str, title: str, accent_color: str, soft_background: str
+):
     prompt_input = st.session_state.get(f"latest_{agent_key}_prompt_input", {}) or {}
     updated_at = st.session_state.get(f"last_{agent_key}_prompt_input_time")
 
@@ -851,6 +904,7 @@ def render_chart_dashboard():
     with top_left_chart:
         st.markdown("#### 리스크 점수 추이")
         trend = charts.get("score_trend", {})
+
         def render_sidebar_news_cards():
             news_items = st.session_state.get("news", [])
             st.subheader("📰 실시간 뉴스 (최대 2개)")
@@ -860,11 +914,13 @@ def render_chart_dashboard():
                 return
 
             latest_news_time = parse_status_time(st.session_state.get("last_news_time"))
-            latest_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
+            latest_new_item_time = parse_status_time(
+                st.session_state.get("last_new_item_time")
+            )
             has_fresh_news_cycle = (
-                latest_news_time is not None and
-                latest_new_item_time is not None and
-                latest_news_time == latest_new_item_time
+                latest_news_time is not None
+                and latest_new_item_time is not None
+                and latest_news_time == latest_new_item_time
             )
 
             header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
@@ -893,11 +949,19 @@ def render_chart_dashboard():
                 summary = str(news_item.get("summary", "")).strip()
                 summary = summary.replace("<b>", "").replace("</b>", "")
                 summary = summary.replace("<br>", " ").replace("<br/>", " ")
-                preview = summary[:110] + ("..." if len(summary) > 110 else "") if summary else "요약 정보가 없습니다."
-                published = news_item.get("published") or st.session_state.get("last_news_time")
+                preview = (
+                    summary[:110] + ("..." if len(summary) > 110 else "")
+                    if summary
+                    else "요약 정보가 없습니다."
+                )
+                published = news_item.get("published") or st.session_state.get(
+                    "last_news_time"
+                )
                 link = str(news_item.get("link", "")).strip()
 
-                badge_label = "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
+                badge_label = (
+                    "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
+                )
                 badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
                 safe_title = html.escape(title)
                 safe_preview = html.escape(preview)
@@ -934,9 +998,20 @@ def render_chart_dashboard():
                     for i, news_item in enumerate(remaining, start=3):
                         title = str(news_item.get("title", "")).strip() or "제목 없음"
                         summary = str(news_item.get("summary", "")).strip()
-                        summary = summary.replace("<b>", "").replace("</b>", "").replace("<br>", " ").replace("<br/>", " ")
-                        preview = summary[:200] + ("..." if len(summary) > 200 else "") if summary else "요약 정보가 없습니다."
-                        published = news_item.get("published") or st.session_state.get("last_news_time")
+                        summary = (
+                            summary.replace("<b>", "")
+                            .replace("</b>", "")
+                            .replace("<br>", " ")
+                            .replace("<br/>", " ")
+                        )
+                        preview = (
+                            summary[:200] + ("..." if len(summary) > 200 else "")
+                            if summary
+                            else "요약 정보가 없습니다."
+                        )
+                        published = news_item.get("published") or st.session_state.get(
+                            "last_news_time"
+                        )
                         safe_title = html.escape(title)
                         safe_preview = html.escape(preview)
                         badge_label = f"#{i}"
@@ -959,6 +1034,8 @@ def render_chart_dashboard():
                             st.markdown(wrapped, unsafe_allow_html=True)
                         else:
                             st.markdown(card_html, unsafe_allow_html=True)
+
+
 @fragment_decorator(run_every="3s")
 def render_live_operations_fragment():
     try:
@@ -980,9 +1057,9 @@ def render_sidebar_news_cards():
     latest_news_time = parse_status_time(st.session_state.get("last_news_time"))
     latest_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
     has_fresh_news_cycle = (
-        latest_news_time is not None and
-        latest_new_item_time is not None and
-        latest_news_time == latest_new_item_time
+        latest_news_time is not None
+        and latest_new_item_time is not None
+        and latest_news_time == latest_new_item_time
     )
 
     header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
@@ -1011,7 +1088,11 @@ def render_sidebar_news_cards():
         summary = str(news_item.get("summary", "")).strip()
         summary = summary.replace("<b>", "").replace("</b>", "")
         summary = summary.replace("<br>", " ").replace("<br/>", " ")
-        preview = summary[:110] + ("..." if len(summary) > 110 else "") if summary else "요약 정보가 없습니다."
+        preview = (
+            summary[:110] + ("..." if len(summary) > 110 else "")
+            if summary
+            else "요약 정보가 없습니다."
+        )
         published = news_item.get("published") or st.session_state.get("last_news_time")
         link = str(news_item.get("link", "")).strip()
 
@@ -1059,9 +1140,20 @@ def render_sidebar_news_cards():
             for i, news_item in enumerate(remaining, start=3):
                 title = str(news_item.get("title", "")).strip() or "제목 없음"
                 summary = str(news_item.get("summary", "")).strip()
-                summary = summary.replace("<b>", "").replace("</b>", "").replace("<br>", " ").replace("<br/>", " ")
-                preview = summary[:200] + ("..." if len(summary) > 200 else "") if summary else "요약 정보가 없습니다."
-                published = news_item.get("published") or st.session_state.get("last_news_time")
+                summary = (
+                    summary.replace("<b>", "")
+                    .replace("</b>", "")
+                    .replace("<br>", " ")
+                    .replace("<br/>", " ")
+                )
+                preview = (
+                    summary[:200] + ("..." if len(summary) > 200 else "")
+                    if summary
+                    else "요약 정보가 없습니다."
+                )
+                published = news_item.get("published") or st.session_state.get(
+                    "last_news_time"
+                )
                 safe_title = html.escape(title)
                 safe_preview = html.escape(preview)
                 badge_label = f"#{i}"
@@ -1085,9 +1177,9 @@ def render_sidebar_news_compact():
     latest_news_time = parse_status_time(st.session_state.get("last_news_time"))
     latest_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
     has_fresh_news_cycle = (
-        latest_news_time is not None and
-        latest_new_item_time is not None and
-        latest_news_time == latest_new_item_time
+        latest_news_time is not None
+        and latest_new_item_time is not None
+        and latest_news_time == latest_new_item_time
     )
 
     header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
@@ -1157,8 +1249,15 @@ def render_sidebar_news_compact():
                     st.markdown(card_html, unsafe_allow_html=True)
 
     # 사이드바 하단: 규제 문서 업로드
-    st.markdown("#### 규제 문서 업로드 — 금감원/여신협회 문서를 업로드하면 규제 에이전트가 분석합니다.")
-    uploaded = st.file_uploader("규제 문서 업로드 (PDF/TXT/MD)", type=["pdf", "txt", "md"], accept_multiple_files=True, key="sidebar_reg_upload")
+    st.markdown(
+        "#### 규제 문서 업로드 — 금감원/여신협회 문서를 업로드하면 규제 에이전트가 분석합니다."
+    )
+    uploaded = st.file_uploader(
+        "규제 문서 업로드 (PDF/TXT/MD)",
+        type=["pdf", "txt", "md"],
+        accept_multiple_files=True,
+        key="sidebar_reg_upload",
+    )
     if uploaded:
         if st.button("규제 문서 분석 실행", key="sidebar_reg_run"):
             # 메인 스레드에서 파일 바이트를 읽고 상태를 'running'으로 표시
@@ -1172,7 +1271,11 @@ def render_sidebar_news_compact():
 
             now = datetime.datetime.now().isoformat()
             statuses = st.session_state.get("agent_statuses", {})
-            statuses["regulation_agent"] = {"status": "running", "updated_at": now, "detail": "규제 문서 분석 실행 중..."}
+            statuses["regulation_agent"] = {
+                "status": "running",
+                "updated_at": now,
+                "detail": "규제 문서 분석 실행 중...",
+            }
             st.session_state.agent_statuses = statuses
 
             def _run_and_store(files_data, task_id):
@@ -1189,21 +1292,37 @@ def render_sidebar_news_compact():
                     rule_context = "\n\n".join(rules_found)
 
                     # 3) 규제 에이전트를 호출 (검색된 규제 문맥을 전달)
-                    result = regulation_agent(rule_context, "", "업로드된 규제 문서 분석 및 요약을 작성하라")
+                    result = regulation_agent(
+                        rule_context, "", "업로드된 규제 문서 분석 및 요약을 작성하라"
+                    )
 
                     done_time = datetime.datetime.now().isoformat()
                     with _background_lock:
-                        _background_results[task_id] = {"status": "completed", "updated_at": done_time, "result": result, "vector_count": new_count, "added": added}
+                        _background_results[task_id] = {
+                            "status": "completed",
+                            "updated_at": done_time,
+                            "result": result,
+                            "vector_count": new_count,
+                            "added": added,
+                        }
                 except Exception as e:
                     err_time = datetime.datetime.now().isoformat()
                     with _background_lock:
-                        _background_results[task_id] = {"status": "failed", "updated_at": err_time, "error": str(e)}
+                        _background_results[task_id] = {
+                            "status": "failed",
+                            "updated_at": err_time,
+                            "error": str(e),
+                        }
 
             # 고유 task id 생성
             task_id = f"reg_{int(time.time() * 1000)}"
-            thread = threading.Thread(target=_run_and_store, args=(files_data, task_id), daemon=True)
+            thread = threading.Thread(
+                target=_run_and_store, args=(files_data, task_id), daemon=True
+            )
             thread.start()
-            st.success("규제 문서 분석을 백그라운드에서 시작했습니다. 상태를 대시보드에서 확인하세요.")
+            st.success(
+                "규제 문서 분석을 백그라운드에서 시작했습니다. 상태를 대시보드에서 확인하세요."
+            )
 
 
 @fragment_decorator(run_every="3s")
@@ -1224,7 +1343,12 @@ def render_live_news_prompt_fragment():
         sync_session_from_backend(status_payload)
     except Exception:
         pass
-    render_agent_prompt_panel("news", "📰 뉴스 에이전트 프롬프트 입력값", "#0f766e", "linear-gradient(135deg, rgba(236,254,255,0.98), rgba(240,249,255,0.98))")
+    render_agent_prompt_panel(
+        "news",
+        "📰 뉴스 에이전트 프롬프트 입력값",
+        "#0f766e",
+        "linear-gradient(135deg, rgba(236,254,255,0.98), rgba(240,249,255,0.98))",
+    )
 
 
 @fragment_decorator(run_every="3s")
@@ -1234,7 +1358,12 @@ def render_live_log_prompt_fragment():
         sync_session_from_backend(status_payload)
     except Exception:
         pass
-    render_agent_prompt_panel("log", "📄 로그 에이전트 프롬프트 입력값", "#92400e", "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))")
+    render_agent_prompt_panel(
+        "log",
+        "📄 로그 에이전트 프롬프트 입력값",
+        "#92400e",
+        "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))",
+    )
 
 
 def run_full_analysis(show_progress: bool = False, initial_load: bool = False):
@@ -1255,7 +1384,9 @@ def run_full_analysis(show_progress: bool = False, initial_load: bool = False):
             summary_box = st.empty()
         with loading_right:
             skeleton_box = st.empty()
-        render_loading_checklist(checklist_box, active_step=0, eta_text="20~40초", elapsed_text="0초")
+        render_loading_checklist(
+            checklist_box, active_step=0, eta_text="20~40초", elapsed_text="0초"
+        )
         render_loading_skeleton(skeleton_box)
 
     if progress is not None:
@@ -1263,19 +1394,34 @@ def run_full_analysis(show_progress: bool = False, initial_load: bool = False):
 
     status.info("🔌 백엔드 연결 및 분석 요청 준비 중...")
     if checklist_box is not None:
-        render_loading_checklist(checklist_box, active_step=1, eta_text="15~35초", elapsed_text=f"{int(time.time() - start)}초")
+        render_loading_checklist(
+            checklist_box,
+            active_step=1,
+            eta_text="15~35초",
+            elapsed_text=f"{int(time.time() - start)}초",
+        )
     if progress is not None:
         progress.progress(40)
 
     status.info("🔍 로그 분석, 뉴스 수집, FAISS 생성을 백엔드에서 처리 중...")
     if checklist_box is not None:
-        render_loading_checklist(checklist_box, active_step=2, eta_text="10~25초", elapsed_text=f"{int(time.time() - start)}초")
+        render_loading_checklist(
+            checklist_box,
+            active_step=2,
+            eta_text="10~25초",
+            elapsed_text=f"{int(time.time() - start)}초",
+        )
     if progress is not None:
         progress.progress(70)
 
     status.info("🧠 결과 수신 및 화면 데이터 반영 중...")
     if checklist_box is not None:
-        render_loading_checklist(checklist_box, active_step=3, eta_text="5~10초", elapsed_text=f"{int(time.time() - start)}초")
+        render_loading_checklist(
+            checklist_box,
+            active_step=3,
+            eta_text="5~10초",
+            elapsed_text=f"{int(time.time() - start)}초",
+        )
     try:
         payload = get_backend_client().run_full_analysis(log_dir="data/logs")
     except Exception:
@@ -1297,7 +1443,9 @@ def run_full_analysis(show_progress: bool = False, initial_load: bool = False):
     else:
         status.error("백엔드 호출에 실패했습니다. FastAPI 서버 상태를 확인하세요.")
         if summary_box is not None:
-            summary_box.error("초기 화면 준비에 실패했습니다. 백엔드 서버 상태 또는 포트를 확인하세요.")
+            summary_box.error(
+                "초기 화면 준비에 실패했습니다. 백엔드 서버 상태 또는 포트를 확인하세요."
+            )
 
 
 if "initial_analysis_done" not in st.session_state:
@@ -1308,9 +1456,13 @@ if "initial_analysis_done" not in st.session_state:
     startup_status.info("백엔드 워커를 시작하고 초기 분석을 준비하고 있습니다...")
     try:
         get_backend_client().start_worker(interval_seconds=10)
-        startup_status.info("백엔드 워커 시작 완료. 로그/뉴스/FAISS 초기 분석을 진행합니다...")
+        startup_status.info(
+            "백엔드 워커 시작 완료. 로그/뉴스/FAISS 초기 분석을 진행합니다..."
+        )
     except Exception:
-        startup_status.warning("백엔드 워커 시작에 실패했습니다. 초기 분석만 시도합니다.")
+        startup_status.warning(
+            "백엔드 워커 시작에 실패했습니다. 초기 분석만 시도합니다."
+        )
     run_full_analysis(show_progress=True, initial_load=True)
     startup_header.empty()
     startup_status.empty()
@@ -1348,12 +1500,9 @@ with col_main:
         now = datetime.datetime.now()
         last_news_at = parse_status_time(st.session_state.get("last_news_time"))
 
-        if (
-            "news" in st.session_state and
-            (
-                st.session_state.last_news_time is None or
-                (last_news_at is not None and (now - last_news_at).seconds > 10)
-            )
+        if "news" in st.session_state and (
+            st.session_state.last_news_time is None
+            or (last_news_at is not None and (now - last_news_at).seconds > 10)
         ):
             try:
                 payload = get_backend_client().get_status()
@@ -1362,13 +1511,15 @@ with col_main:
             except Exception:
                 pass
 
-    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, charts_tab = st.tabs([
-        "🤖 운영 현황",
-        "💬 AI 심사 전략",
-        "📰 뉴스 에이전트 입력",
-        "📄 로그 에이전트 입력",
-        "📊 차트",
-    ])
+    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, charts_tab = st.tabs(
+        [
+            "🤖 운영 현황",
+            "💬 AI 심사 전략",
+            "📰 뉴스 에이전트 입력",
+            "📄 로그 에이전트 입력",
+            "📊 차트",
+        ]
+    )
 
     with operations_tab:
         if HAS_FRAGMENT_REFRESH:
@@ -1391,7 +1542,10 @@ with col_main:
                     latest_status = get_backend_client().get_status()
                     sync_session_from_backend(latest_status)
                 except Exception:
-                    response_payload = {"answer": "백엔드 전략 챗 호출에 실패했습니다.", "sections": {}}
+                    response_payload = {
+                        "answer": "백엔드 전략 챗 호출에 실패했습니다.",
+                        "sections": {},
+                    }
 
             st.session_state.chat_history.append(("user", user_input))
             st.session_state.chat_history.append(("ai", response_payload))
@@ -1407,15 +1561,27 @@ with col_main:
         if HAS_FRAGMENT_REFRESH:
             render_live_news_prompt_fragment()
         else:
-            render_agent_prompt_panel("news", "📰 뉴스 에이전트 프롬프트 입력값", "#0f766e", "linear-gradient(135deg, rgba(236,254,255,0.98), rgba(240,249,255,0.98))")
+            render_agent_prompt_panel(
+                "news",
+                "📰 뉴스 에이전트 프롬프트 입력값",
+                "#0f766e",
+                "linear-gradient(135deg, rgba(236,254,255,0.98), rgba(240,249,255,0.98))",
+            )
 
-        st.info("규제 문서 업로드는 왼쪽 사이드바 '실시간 뉴스 더보기' 아래로 이동했습니다.")
+        st.info(
+            "규제 문서 업로드는 왼쪽 사이드바 '실시간 뉴스 더보기' 아래로 이동했습니다."
+        )
 
     with log_prompt_tab:
         if HAS_FRAGMENT_REFRESH:
             render_live_log_prompt_fragment()
         else:
-            render_agent_prompt_panel("log", "📄 로그 에이전트 프롬프트 입력값", "#92400e", "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))")
+            render_agent_prompt_panel(
+                "log",
+                "📄 로그 에이전트 프롬프트 입력값",
+                "#92400e",
+                "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))",
+            )
 
     with charts_tab:
         render_chart_dashboard()
@@ -1430,8 +1596,10 @@ now = datetime.datetime.now()
 
 # fragment 미지원 환경에서만 전체 상태를 주기 동기화합니다.
 if not HAS_FRAGMENT_REFRESH:
-    if (st.session_state.last_backend_sync_time is None or 
-        (now - st.session_state.last_backend_sync_time).total_seconds() >= 10):
+    if (
+        st.session_state.last_backend_sync_time is None
+        or (now - st.session_state.last_backend_sync_time).total_seconds() >= 10
+    ):
         try:
             status_payload = get_backend_client().get_status()
             sync_session_from_backend(status_payload)

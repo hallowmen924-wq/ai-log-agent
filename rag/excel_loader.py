@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def load_excel_knowledge(file_path="data/R-CLIPS code def.xlsx"):
     xls = pd.ExcelFile(file_path)
 
