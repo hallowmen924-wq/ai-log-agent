@@ -896,7 +896,7 @@ def render_chart_dashboard():
 
     with top_left_chart:
         st.markdown("#### 리스크 점수 추이")
-        trend = charts.get("score_trend", {})
+        # trend data not used directly here
 
         def render_sidebar_news_cards():
             news_items = st.session_state.get("news", [])
@@ -1087,8 +1087,6 @@ def render_sidebar_news_cards():
             else "요약 정보가 없습니다."
         )
         published = news_item.get("published") or st.session_state.get("last_news_time")
-        link = str(news_item.get("link", "")).strip()
-
         badge_label = "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
         badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
         safe_title = html.escape(title)
