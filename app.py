@@ -1,11 +1,19 @@
 import time
 import html
 import datetime
+import threading
+import io
+
+# 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
+_background_results: dict = {}
+_background_lock = threading.Lock()
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
 from backend.streamlit_client import BackendClient
+from agent.strategy_chat import regulation_agent
+from rag.vector_db import ingest_files, search_context, get_vector_count
 
 
 # 이 파일은 최종 Streamlit 진입점입니다.
@@ -131,6 +139,7 @@ def render_loading_styles():
         """,
         unsafe_allow_html=True,
     )
+    
 
 
 def render_loading_checklist(target, active_step: int, eta_text: str, elapsed_text: str = ""):
@@ -432,6 +441,44 @@ def get_chart_snapshots() -> dict:
 def render_runtime_dashboard():
     st.subheader("🤖 에이전트 실시간 작업 현황")
 
+    # 백그라운드 작업 결과를 메인 스레드로 폴링하여 session_state로 반영
+    try:
+        with _background_lock:
+            tasks = list(_background_results.items())
+        for task_id, payload in tasks:
+            # 반영 처리
+            if payload.get("status") == "completed":
+                result = payload.get("result")
+                done_time = payload.get("updated_at")
+                statuses = st.session_state.get("agent_statuses", {})
+                statuses["regulation_agent"] = {"status": "completed", "updated_at": done_time, "detail": "규제 분석 완료"}
+                st.session_state.agent_statuses = statuses
+                st.session_state.latest_regulation_analysis = result
+                st.session_state.last_regulation_time = done_time
+                # 벡터 카운트 및 이벤트 갱신
+                vector_count = payload.get("vector_count")
+                added = payload.get("added")
+                if vector_count is not None:
+                    st.session_state.vector_count = vector_count
+                    ve = st.session_state.get("vector_events", [])
+                    ve.insert(0, {"time": done_time, "added_count": added or 0, "source": "regulation_upload"})
+                    st.session_state.vector_events = ve
+                log = st.session_state.get("agent_activity_log", [])
+                log.insert(0, {"agent": "regulation", "title": "uploaded regulation analysis", "content": result, "time": done_time})
+                st.session_state.agent_activity_log = log
+                with _background_lock:
+                    del _background_results[task_id]
+            elif payload.get("status") == "failed":
+                err = payload.get("error")
+                err_time = payload.get("updated_at")
+                statuses = st.session_state.get("agent_statuses", {})
+                statuses["regulation_agent"] = {"status": "failed", "updated_at": err_time, "detail": f"분석 실패: {err}"}
+                st.session_state.agent_statuses = statuses
+                with _background_lock:
+                    del _background_results[task_id]
+    except Exception:
+        pass
+
     latest_question = st.session_state.get("latest_strategy_question")
     last_strategy_time = st.session_state.get("last_strategy_time")
     last_log_ingest_time = parse_status_time(st.session_state.get("last_log_ingest_time"))
@@ -610,6 +657,31 @@ def render_runtime_dashboard():
             unsafe_allow_html=True,
         )
 
+        # 규제 에이전트 최신 결과 표시
+        reg_text = st.session_state.get("latest_regulation_analysis")
+        reg_time = st.session_state.get("last_regulation_time")
+        if reg_text:
+            st.markdown("#### ⚖️ 최신 규제 에이전트 분석")
+            st.markdown(
+                f"""
+                <div style="
+                    margin-bottom: 14px;
+                    padding: 16px 18px;
+                    border-radius: 18px;
+                    background: linear-gradient(135deg, rgba(255,250,240,0.98), rgba(255,247,237,0.98));
+                    border: 1px solid rgba(245,158,11,0.22);
+                    box-shadow: 0 12px 28px rgba(146,64,14,0.06);
+                ">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:10px;">
+                        <div style="font-size:14px; font-weight:800; color:#0f172a;">규제 문서 분석 결과</div>
+                        <div style="font-size:12px; color:#c2410c; font-weight:700;">업데이트: {format_status_time(reg_time)}</div>
+                    </div>
+                    <div style="font-size:13px; line-height:1.7; color:#334155; white-space:pre-wrap;">{reg_text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
     st.markdown("#### 🧠 벡터 DB 적재 현황")
     vector_events = st.session_state.get("vector_events", [])
     latest_vector_event = vector_events[0] if vector_events else {}
@@ -780,72 +852,114 @@ def render_chart_dashboard():
     with top_left_chart:
         st.markdown("#### 리스크 점수 추이")
         trend = charts.get("score_trend", {})
-        if trend.get("labels"):
-            df_trend = pd.DataFrame({
-                "label": trend.get("labels", []),
-                "score": trend.get("scores", []),
-            })
-            fig = px.line(df_trend, x="label", y="score", markers=True)
-            fig.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20))
-            st.plotly_chart(fig, width="stretch", key="chart_score_trend")
-        else:
-            st.info("리스크 점수 데이터가 없습니다.")
+        def render_sidebar_news_cards():
+            news_items = st.session_state.get("news", [])
+            st.subheader("📰 실시간 뉴스 (최대 2개)")
 
-    with top_right_chart:
-        st.markdown("#### 리스크 구성 요소")
-        components = charts.get("risk_components", {})
-        labels = components.get("labels", [])
-        series = components.get("series", {})
-        if labels:
-            df_components = pd.DataFrame({
-                "label": labels,
-                "financial": series.get("financial", []),
-                "credit": series.get("credit", []),
-                "behavior": series.get("behavior", []),
-                "regulation": series.get("regulation", []),
-            })
-            fig = px.bar(
-                df_components,
-                x="label",
-                y=["financial", "credit", "behavior", "regulation"],
-                barmode="stack",
+            if not news_items:
+                st.info("표시할 뉴스가 없습니다.")
+                return
+
+            latest_news_time = parse_status_time(st.session_state.get("last_news_time"))
+            latest_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
+            has_fresh_news_cycle = (
+                latest_news_time is not None and
+                latest_new_item_time is not None and
+                latest_news_time == latest_new_item_time
             )
-            fig.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20))
-            st.plotly_chart(fig, width="stretch", key="chart_risk_components")
-        else:
-            st.info("리스크 구성 데이터가 없습니다.")
 
-    with bottom_left_chart:
-        st.markdown("#### 상품별 심사 등급 분포")
-        grades = charts.get("grade_distribution", {}).get("by_product", {})
-        if grades:
-            rows = []
-            for product, grade_map in grades.items():
-                for grade_name, count in grade_map.items():
-                    rows.append({"product": product, "grade": grade_name, "count": count})
-            df_grade = pd.DataFrame(rows)
-            fig = px.bar(df_grade, x="product", y="count", color="grade", barmode="stack")
-            fig.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20))
-            st.plotly_chart(fig, width="stretch", key="chart_grade_distribution")
-        else:
-            st.info("등급 분포 데이터가 없습니다.")
+            header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
+            header_background = "#dcfce7" if has_fresh_news_cycle else "#e0f2fe"
+            header_color = "#166534" if has_fresh_news_cycle else "#075985"
+            st.markdown(
+                f"""
+                <div style="margin-bottom: 12px;">
+                    <span style="
+                        display:inline-block;
+                        padding:6px 10px;
+                        border-radius:999px;
+                        font-size:12px;
+                        font-weight:800;
+                        background:{header_background};
+                        color:{header_color};
+                        border:1px solid rgba(15,23,42,0.08);
+                    ">{header_badge}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    with bottom_right_chart:
-        st.markdown("#### 벡터 / 뉴스 상태")
-        vector = charts.get("vector_status", {})
-        vector_count = vector.get("vector_count", 0)
-        news_count = vector.get("news_count", 0)
-        issues_count = vector.get("issues_count", 0)
-        fig = px.pie(
-            names=["Vectors", "News", "Issues"],
-            values=[max(vector_count, 0), max(news_count, 0), max(issues_count, 0)],
-            hole=0.55,
-        )
-        fig.update_layout(height=300, margin=dict(l=20, r=20, t=20, b=20))
-        st.plotly_chart(fig, width="stretch", key="chart_vector_status")
-        st.caption(f"마지막 차트 갱신은 백엔드 워커 기준으로 반영됩니다. 현재 벡터 수: {vector_count}")
+            for index, news_item in enumerate(news_items[:2]):
+                title = str(news_item.get("title", "")).strip() or "제목 없음"
+                summary = str(news_item.get("summary", "")).strip()
+                summary = summary.replace("<b>", "").replace("</b>", "")
+                summary = summary.replace("<br>", " ").replace("<br/>", " ")
+                preview = summary[:110] + ("..." if len(summary) > 110 else "") if summary else "요약 정보가 없습니다."
+                published = news_item.get("published") or st.session_state.get("last_news_time")
+                link = str(news_item.get("link", "")).strip()
 
+                badge_label = "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
+                badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
+                safe_title = html.escape(title)
+                safe_preview = html.escape(preview)
 
+                card_html = f"""
+                    <div style="
+                        margin-bottom: 12px;
+                        padding: 14px;
+                        border-radius: 18px;
+                        background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98));
+                        border: 1px solid rgba(148,163,184,0.18);
+                        box-shadow: 0 10px 24px rgba(15,23,42,0.05);
+                    ">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;">
+                            <div style="font-size:13px; font-weight:800; color:#0f172a; line-height:1.5;">{safe_title}</div>
+                            <span style="flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;">{badge_label}</span>
+                        </div>
+                        <div style="font-size:12px; color:#64748b; margin-bottom:8px;">{format_status_time(published)}</div>
+                        <div style="font-size:13px; line-height:1.6; color:#334155; margin-bottom:10px;">{safe_preview}</div>
+                    </div>
+                """
+
+                if link:
+                    safe_link = html.escape(link)
+                    wrapped = f'<a href="{safe_link}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; color:inherit;">{card_html}</a>'
+                    st.markdown(wrapped, unsafe_allow_html=True)
+                else:
+                    st.markdown(card_html, unsafe_allow_html=True)
+
+            # 나머지 항목은 접이식으로 제공
+            remaining = news_items[2:5]
+            if remaining:
+                with st.expander(f"더보기 ({len(remaining)}건)"):
+                    for i, news_item in enumerate(remaining, start=3):
+                        title = str(news_item.get("title", "")).strip() or "제목 없음"
+                        summary = str(news_item.get("summary", "")).strip()
+                        summary = summary.replace("<b>", "").replace("</b>", "").replace("<br>", " ").replace("<br/>", " ")
+                        preview = summary[:200] + ("..." if len(summary) > 200 else "") if summary else "요약 정보가 없습니다."
+                        published = news_item.get("published") or st.session_state.get("last_news_time")
+                        safe_title = html.escape(title)
+                        safe_preview = html.escape(preview)
+                        badge_label = f"#{i}"
+                        badge_background = "#0f172a"
+
+                        card_html = f"""
+                            <div style="margin-bottom:12px; padding:14px; border-radius:18px; background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98)); border:1px solid rgba(148,163,184,0.18); box-shadow:0 10px 24px rgba(15,23,42,0.05);">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;">
+                                    <div style="font-size:13px; font-weight:800; color:#0f172a; line-height:1.5;">{safe_title}</div>
+                                    <span style="flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;">{badge_label}</span>
+                                </div>
+                                <div style="font-size:12px; color:#64748b; margin-bottom:8px;">{format_status_time(published)}</div>
+                                <div style="font-size:13px; line-height:1.6; color:#334155; margin-bottom:10px;">{safe_preview}</div>
+                            </div>
+                            """
+
+                        link = str(news_item.get("link", "")).strip()
+                        if link:
+                            wrapped = f'<a href="{html.escape(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; color:inherit;">{card_html}</a>'
+                            st.markdown(wrapped, unsafe_allow_html=True)
+                        else:
+                            st.markdown(card_html, unsafe_allow_html=True)
 @fragment_decorator(run_every="3s")
 def render_live_operations_fragment():
     try:
@@ -858,7 +972,7 @@ def render_live_operations_fragment():
 
 def render_sidebar_news_cards():
     news_items = st.session_state.get("news", [])
-    st.subheader("📰 실시간 뉴스")
+    st.subheader("📰 실시간 뉴스 (최대 2개)")
 
     if not news_items:
         st.info("표시할 뉴스가 없습니다.")
@@ -893,7 +1007,7 @@ def render_sidebar_news_cards():
         unsafe_allow_html=True,
     )
 
-    for index, news_item in enumerate(news_items[:5]):
+    for index, news_item in enumerate(news_items[:2]):
         title = str(news_item.get("title", "")).strip() or "제목 없음"
         summary = str(news_item.get("summary", "")).strip()
         summary = summary.replace("<b>", "").replace("</b>", "")
@@ -906,12 +1020,8 @@ def render_sidebar_news_cards():
         badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
         safe_title = html.escape(title)
         safe_preview = html.escape(preview)
-        safe_link = html.escape(link, quote=True)
-        link_html = (
-            f'<a href="{safe_link}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; justify-content:center; padding:7px 12px; border-radius:999px; background:rgba(14,165,233,0.10); color:#0369a1; font-size:12px; font-weight:800; text-decoration:none;">기사 보기</a>'
-            if link else
-            '<span style="font-size:12px; color:#94a3b8; font-weight:700;">링크 없음</span>'
-        )
+        # 외부 링크는 표시하지 않음 (보안/프라이버시 이유)
+        link_html = '<span style="font-size:12px; color:#94a3b8; font-weight:700;">원문 링크 생략</span>'
 
         st.markdown(
             f"""
@@ -943,6 +1053,159 @@ def render_sidebar_news_cards():
             unsafe_allow_html=True,
         )
 
+    # 나머지 항목은 접이식으로 제공
+    remaining = news_items[2:5]
+    if remaining:
+        with st.expander(f"더보기 ({len(remaining)}건)"):
+            for i, news_item in enumerate(remaining, start=3):
+                title = str(news_item.get("title", "")).strip() or "제목 없음"
+                summary = str(news_item.get("summary", "")).strip()
+                summary = summary.replace("<b>", "").replace("</b>", "").replace("<br>", " ").replace("<br/>", " ")
+                preview = summary[:200] + ("..." if len(summary) > 200 else "") if summary else "요약 정보가 없습니다."
+                published = news_item.get("published") or st.session_state.get("last_news_time")
+                safe_title = html.escape(title)
+                safe_preview = html.escape(preview)
+                badge_label = f"#{i}"
+                badge_background = "#0f172a"
+                st.markdown(
+                    f"""
+                    <div style=\"margin-bottom:12px; padding:14px; border-radius:18px; background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98)); border:1px solid rgba(148,163,184,0.18); box-shadow:0 10px 24px rgba(15,23,42,0.05);\">\n                        <div style=\"display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;\">\n                            <div style=\"font-size:13px; font-weight:800; color:#0f172a; line-height:1.5;\">{safe_title}</div>\n                            <span style=\"flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;\">{badge_label}</span>\n                        </div>\n                        <div style=\"font-size:12px; color:#64748b; margin-bottom:8px;\">{format_status_time(published)}</div>\n                        <div style=\"font-size:13px; line-height:1.6; color:#334155; margin-bottom:10px;\">{safe_preview}</div>\n                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+
+def render_sidebar_news_compact():
+    news_items = st.session_state.get("news", [])
+    st.subheader("📰 실시간 뉴스 (최대 2개)")
+
+    if not news_items:
+        st.info("표시할 뉴스가 없습니다.")
+        return
+
+    latest_news_time = parse_status_time(st.session_state.get("last_news_time"))
+    latest_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
+    has_fresh_news_cycle = (
+        latest_news_time is not None and
+        latest_new_item_time is not None and
+        latest_news_time == latest_new_item_time
+    )
+
+    header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
+    header_background = "#dcfce7" if has_fresh_news_cycle else "#e0f2fe"
+    header_color = "#166534" if has_fresh_news_cycle else "#075985"
+    st.markdown(
+        f"""
+        <div style="margin-bottom: 12px;">
+            <span style="
+                display:inline-block;
+                padding:6px 10px;
+                border-radius:999px;
+                font-size:12px;
+                font-weight:800;
+                background:{header_background};
+                color:{header_color};
+                border:1px solid rgba(15,23,42,0.08);
+            ">{header_badge}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for index, news_item in enumerate(news_items[:2]):
+        title = str(news_item.get("title", "")).strip() or "제목 없음"
+        link = str(news_item.get("link", "")).strip()
+        badge_label = "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
+        badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
+        safe_title = html.escape(title)
+
+        card_html = f"""
+            <div style="margin-bottom:12px; padding:10px 12px; border-radius:14px; background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98)); border:1px solid rgba(148,163,184,0.12);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <div style="font-size:13px; font-weight:800; color:#0f172a;">{safe_title}</div>
+                    <span style="flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;">{badge_label}</span>
+                </div>
+            </div>
+        """
+
+        if link:
+            wrapped = f'<a href="{html.escape(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; color:inherit;">{card_html}</a>'
+            st.markdown(wrapped, unsafe_allow_html=True)
+        else:
+            st.markdown(card_html, unsafe_allow_html=True)
+
+    remaining = news_items[2:5]
+    if remaining:
+        with st.expander(f"더보기 ({len(remaining)}건)"):
+            for i, news_item in enumerate(remaining, start=3):
+                title = str(news_item.get("title", "")).strip() or "제목 없음"
+                link = str(news_item.get("link", "")).strip()
+                safe_title = html.escape(title)
+                badge_label = f"#{i}"
+                badge_background = "#0f172a"
+                card_html = f"""
+                    <div style="margin-bottom:12px; padding:10px 12px; border-radius:14px; background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98)); border:1px solid rgba(148,163,184,0.12);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                            <div style="font-size:13px; font-weight:800; color:#0f172a;">{safe_title}</div>
+                            <span style="flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;">{badge_label}</span>
+                        </div>
+                    </div>
+                """
+                if link:
+                    wrapped = f'<a href="{html.escape(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; color:inherit;">{card_html}</a>'
+                    st.markdown(wrapped, unsafe_allow_html=True)
+                else:
+                    st.markdown(card_html, unsafe_allow_html=True)
+
+    # 사이드바 하단: 규제 문서 업로드
+    st.markdown("#### 규제 문서 업로드 — 금감원/여신협회 문서를 업로드하면 규제 에이전트가 분석합니다.")
+    uploaded = st.file_uploader("규제 문서 업로드 (PDF/TXT/MD)", type=["pdf", "txt", "md"], accept_multiple_files=True, key="sidebar_reg_upload")
+    if uploaded:
+        if st.button("규제 문서 분석 실행", key="sidebar_reg_run"):
+            # 메인 스레드에서 파일 바이트를 읽고 상태를 'running'으로 표시
+            files_data = []
+            for f in uploaded:
+                try:
+                    raw = f.read()
+                except Exception:
+                    raw = b""
+                files_data.append((getattr(f, "name", "unknown"), raw))
+
+            now = datetime.datetime.now().isoformat()
+            statuses = st.session_state.get("agent_statuses", {})
+            statuses["regulation_agent"] = {"status": "running", "updated_at": now, "detail": "규제 문서 분석 실행 중..."}
+            st.session_state.agent_statuses = statuses
+
+            def _run_and_store(files_data, task_id):
+                try:
+                    # 1) FAISS에 파일 청킹/임베딩해서 저장
+                    before = get_vector_count()
+                    new_count = ingest_files(files_data, doc_type="regulation")
+                    added = new_count - before
+
+                    # 2) FAISS에서 업로드한 문서와 관련된 규제 문맥을 검색
+                    #    질의는 간단히 '규제'로 하되, 필요하면 파일명 기반으로 확장할 수 있습니다.
+                    query = "규제"
+                    logs_found, news_found, rules_found = search_context(query, k=6)
+                    rule_context = "\n\n".join(rules_found)
+
+                    # 3) 규제 에이전트를 호출 (검색된 규제 문맥을 전달)
+                    result = regulation_agent(rule_context, "", "업로드된 규제 문서 분석 및 요약을 작성하라")
+
+                    done_time = datetime.datetime.now().isoformat()
+                    with _background_lock:
+                        _background_results[task_id] = {"status": "completed", "updated_at": done_time, "result": result, "vector_count": new_count, "added": added}
+                except Exception as e:
+                    err_time = datetime.datetime.now().isoformat()
+                    with _background_lock:
+                        _background_results[task_id] = {"status": "failed", "updated_at": err_time, "error": str(e)}
+
+            # 고유 task id 생성
+            task_id = f"reg_{int(time.time() * 1000)}"
+            thread = threading.Thread(target=_run_and_store, args=(files_data, task_id), daemon=True)
+            thread.start()
+            st.success("규제 문서 분석을 백그라운드에서 시작했습니다. 상태를 대시보드에서 확인하세요.")
+
 
 @fragment_decorator(run_every="3s")
 def render_live_news_fragment():
@@ -951,7 +1214,8 @@ def render_live_news_fragment():
         sync_session_from_backend(status_payload)
     except Exception:
         pass
-    render_sidebar_news_cards()
+    render_sidebar_news_compact()
+    # (deprecated) original render kept for compatibility
 
 
 @fragment_decorator(run_every="3s")
@@ -1062,63 +1326,15 @@ col_left, col_main = st.columns([1, 3])
 # 🧭 LEFT PANEL
 # -------------------------------
 with col_left:
-
-    if HAS_FRAGMENT_REFRESH:
-        render_live_news_fragment()
-    else:
-        render_sidebar_news_cards()
-
-    st.divider()
-
-    # 상태 표시는 백엔드에서 가져온 최신 상태를 요약해서 보여줍니다.
-    if "results" in st.session_state:
-        st.subheader("📊 상태")
-
-        render_news_freshness_badge(
-            st.session_state.get("last_news_time"),
-            st.session_state.get("last_new_item_time"),
-        )
-
-        st.metric("📁 파일 수", st.session_state.file_count)
-        st.metric("📊 로그 수", len(st.session_state.results))
-        st.metric("📰 누적 뉴스 수", len(st.session_state.get("news", [])))
-        st.metric("🧠 벡터 수", get_vector_count())
-        st.metric("⏱️ 시간", f"{st.session_state.total_time:.1f}s")
-
-        if "last_news_time" in st.session_state:
-            st.caption(f"🕒 뉴스 수집 시각: {format_status_time(st.session_state.last_news_time)}")
-        if "last_new_item_time" in st.session_state:
-            st.caption(f"✨ 마지막 신규 기사 유입: {format_status_time(st.session_state.last_new_item_time)}")
-
-    st.divider()
-
-    # PDF 규제 문서 뷰어 (왼쪽 탭)
-    st.markdown("### 📋 금감원/여신협회 가이드라인 분석")
-    with st.expander("📄 PDF 첨부", expanded=False):
-        uploaded_pdf = st.file_uploader("PDF 파일", type=["pdf"], key="left_regulation_pdf")
-        
-        if uploaded_pdf is not None:
-            try:
-                import pdfplumber
-                with pdfplumber.open(uploaded_pdf) as pdf:
-                    st.caption(f"📖 {len(pdf.pages)}쪽 | {round(uploaded_pdf.size / 1024, 1)}KB")
-                    page_num = st.slider("페이지", 1, len(pdf.pages), 1, key="left_pdf_page")
-                    page = pdf.pages[page_num - 1]
-                    text = page.extract_text()
-                    if text:
-                        st.text_area("내용", text[:300], height=100, disabled=True)
-                    tables = page.extract_tables()
-                    if tables:
-                        for table in tables[:1]:
-                            try:
-                                df_t = pd.DataFrame(table[1:], columns=table[0])
-                                st.dataframe(df_t, width="stretch")
-                            except:
-                                pass
-            except Exception as e:
-                st.error(f"오류: {str(e)[:80]}")
+    # 왼쪽 패널: 뉴스/상태 요약 (간단 호출로 교체)
+    try:
+        if HAS_FRAGMENT_REFRESH:
+            render_live_news_fragment()
         else:
-            st.caption("PDF 선택 후 조회")
+            render_sidebar_news_compact()
+    except Exception:
+        # 예외가 발생해도 사이드바 렌더링 실패만 처리
+        st.warning("사이드바 뉴스를 불러오는 중 문제가 발생했습니다.")
 
 
 # -------------------------------
@@ -1193,6 +1409,8 @@ with col_main:
             render_live_news_prompt_fragment()
         else:
             render_agent_prompt_panel("news", "📰 뉴스 에이전트 프롬프트 입력값", "#0f766e", "linear-gradient(135deg, rgba(236,254,255,0.98), rgba(240,249,255,0.98))")
+
+        st.info("규제 문서 업로드는 왼쪽 사이드바 '실시간 뉴스 더보기' 아래로 이동했습니다.")
 
     with log_prompt_tab:
         if HAS_FRAGMENT_REFRESH:

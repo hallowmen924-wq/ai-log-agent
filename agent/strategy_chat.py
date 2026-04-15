@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 import requests
 
-from rag.vector_db import get_vector_count, save_agent_reports, search_context
+from rag.vector_db import get_vector_count, save_agent_reports, search_context, search_similar_logs
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
@@ -69,12 +69,24 @@ def trim_log_results(log_items: list[dict[str, Any]], limit: int = 5) -> str:
         product = str(item.get("product", "N/A"))
         in_fields = item.get("in_fields", {})
         out_fields = item.get("out_fields", {})
+        in_mapping = item.get("in_mapping", {}) or {}
+        out_mapping = item.get("out_mapping", {}) or {}
+
+        # 대표 입력/출력: (매핑된 필드명, 값) 형태로 표시
+        rep_in_items = []
+        for k, v in list(in_fields.items())[:5]:
+            label = in_mapping.get(k, k)
+            rep_in_items.append((label, v))
+
+        rep_out_items = []
+        for k, v in list(out_fields.items())[:5]:
+            label = out_mapping.get(k, k)
+            rep_out_items.append((label, v))
+
         snippets.append(
             f"상품: {product}\n"
-            f"입력 필드 수: {len(in_fields)}\n"
-            f"출력 필드 수: {len(out_fields)}\n"
-            f"대표 입력: {str(list(in_fields.items())[:5])}\n"
-            f"대표 출력: {str(list(out_fields.items())[:5])}"
+            f"대표 입력: {rep_in_items}\n"
+            f"대표 출력: {rep_out_items}"
         )
     return "\n\n".join(snippets)
 
@@ -131,7 +143,74 @@ def build_agent_prompt_input(agent: str, context_text: str, user_input: str, sou
 
 
 def log_agent(log_context: str, user_input: str) -> str:
-    prompt = build_log_agent_prompt(log_context, user_input)
+    # 사례 기반 검색 + LLM 추론으로 원인과 조치 도출
+    try:
+        return case_based_log_inference(user_input, extra_context=log_context, k=5)
+    except Exception:
+        # 폴백: 기존 방식
+        prompt = build_log_agent_prompt(log_context, user_input)
+        return mistral_generate(prompt)
+
+
+def case_based_log_inference(query: str, extra_context: str | None = None, k: int = 5) -> str:
+    """Search similar cases in the Vector DB and call Ollama to infer cause and remediation.
+
+    Returns a concise text with '원인' and '조치'.
+    """
+    candidates = []
+    try:
+        docs = search_similar_logs(query)
+        candidates = docs[:k]
+    except Exception:
+        candidates = []
+
+    # format candidate cases
+    case_texts = []
+    for idx, d in enumerate(candidates, start=1):
+        meta = getattr(d, "metadata", {}) or {}
+        features = meta.get("features", {})
+        prod = meta.get("product") or meta.get("product_code") or "-"
+        case_lines = [f"Case {idx}: product={prod}"]
+        if features:
+            # include key feature values
+            fa = features.get("available_amount")
+            fr = features.get("applied_rate")
+            ft = features.get("loan_term_months")
+            kg = features.get("ko_codes")
+            if fa is not None:
+                case_lines.append(f" available_amount={fa}")
+            if fr is not None:
+                case_lines.append(f" applied_rate={fr}")
+            if ft is not None:
+                case_lines.append(f" loan_term_months={ft}")
+            if kg:
+                case_lines.append(f" ko_codes={kg}")
+        # include short content
+        content = (getattr(d, "page_content", "") or "").strip().replace("\n", " ")[:400]
+        case_lines.append(f" content={content}")
+        case_texts.append(";".join(case_lines))
+
+    cases_block = "\n\n".join(case_texts) if case_texts else "(유사 사례 없음)"
+
+    prompt = f"""
+당신은 금융 로그 분석 전문가입니다.
+
+[질문]
+{query}
+
+[추가 로그 컨텍스트]
+{extra_context or '(없음)'}
+
+[유사 사례]
+{cases_block}
+
+요구사항:
+1) 원인(간결하게 3개 내외)
+2) 조치(우선순위가 높은 것부터 3개 내외, 실행 가능한 단계로 작성)
+
+각 항목을 번호매겨서 한국어로 작성하세요. 근거가 되는 유사사례 번호를 괄호로 표기하세요.
+""".strip()
+
     return mistral_generate(prompt)
 
 
@@ -142,7 +221,7 @@ def news_agent(news_context: str, user_input: str) -> str:
 
 def regulation_agent(rule_context: str, log_context: str, user_input: str) -> str:
     prompt = f"""
-당신은 금융 규제 전문가입니다.
+당신은 금융 규제 IT 전문가입니다.
 
 [사용자 질문]
 {user_input}
@@ -155,8 +234,8 @@ def regulation_agent(rule_context: str, log_context: str, user_input: str) -> st
 
 반드시 아래 형식으로 답하세요.
 1. 위반 가능 항목
-2. 리스크 수준
-3. 심사상 보완 필요 사항
+2. RCLIPS 솔루션에서 고쳐야 할 항목
+3. RCLIPS 솔루션 외 프로그램에서 고쳐야 할 항목
 4. 규제 대응 포인트 3개
 """
     return mistral_generate(prompt)
