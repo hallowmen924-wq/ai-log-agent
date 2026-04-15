@@ -1434,6 +1434,16 @@ def render_live_log_prompt_fragment():
     )
 
 
+@fragment_decorator(run_every="5s")
+def render_live_faiss_fragment():
+    try:
+        status_payload = get_backend_client().get_status()
+        sync_session_from_backend(status_payload)
+    except Exception:
+        pass
+    render_faiss_tab()
+
+
 def run_full_analysis(show_progress: bool = False, initial_load: bool = False):
     # 최초 진입 또는 수동 재실행 시 전체 분석을 백엔드에 요청합니다.
     # 실제 로그 파싱, 뉴스 수집, FAISS 생성은 모두 서버에서 처리됩니다.
@@ -1656,7 +1666,24 @@ with col_main:
         render_chart_dashboard()
 
     with faiss_tab:
-        render_faiss_tab()
+        if HAS_FRAGMENT_REFRESH:
+            render_live_faiss_fragment()
+        else:
+            render_faiss_tab()
+            auto = st.checkbox("자동 새로고침 (5초)", key="faiss_auto_refresh")
+            if auto:
+                try:
+                    time.sleep(5)
+                    params = {"_autorefresh": int(time.time())}
+                    try:
+                        st.experimental_set_query_params(**params)
+                    except Exception:
+                        try:
+                            st.experimental_rerun()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
 # ================================
 # 백엔드 상태 동기화: 10초마다 갱신
