@@ -2,7 +2,6 @@ import time
 import html
 import datetime
 import threading
-import io
 
 # 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
 _background_results: dict = {}

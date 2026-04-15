@@ -1,4 +1,4 @@
-from analyzer.log_parser import parse_logs, parse_logs_fast
+from analyzer.log_parser import parse_logs_fast
 from analyzer.log_field_parser import parse_fields
 from mapper.excel_mapper import get_excel_sheet, load_excel_mapping
 from pathlib import Path
