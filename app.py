@@ -1392,6 +1392,24 @@ def render_faiss_tab():
             except Exception as e:
                 st.error(f"검색 실패: {e}")
 
+    st.markdown("---")
+    st.subheader("FAISS 저장된 벡터 항목 보기 / 내보내기")
+    if st.button("목록 불러오기 (최대 200)"):
+        try:
+            resp = get_backend_client().get_faiss_entries(limit=200)
+            items = resp.get("items", [])
+            if items:
+                import pandas as _pd
+
+                df = _pd.DataFrame(items)
+                st.dataframe(df)
+                csv = df.to_csv(index=False).encode("utf-8")
+                st.download_button("CSV로 다운로드", csv, file_name="faiss_entries.csv", mime="text/csv")
+            else:
+                st.info("목록이 비어있습니다.")
+        except Exception as e:
+            st.error(f"목록 불러오기 실패: {e}")
+
 
 @fragment_decorator(run_every="3s")
 def render_live_news_fragment():
