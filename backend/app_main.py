@@ -171,6 +171,21 @@ def faiss_export(format: str = "json", limit: int = 200):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/faiss/entry/{doc_id}")
+def faiss_entry(doc_id: str):
+    try:
+        from rag.vector_db import get_vector_by_id
+
+        item = get_vector_by_id(doc_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="entry not found")
+        return {"status": "ok", "item": item}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.websocket("/ws/faiss")
 async def websocket_faiss_updates(websocket: WebSocket):
     await websocket.accept()

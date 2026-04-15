@@ -1405,6 +1405,24 @@ def render_faiss_tab():
                 st.dataframe(df)
                 csv = df.to_csv(index=False).encode("utf-8")
                 st.download_button("CSV로 다운로드", csv, file_name="faiss_entries.csv", mime="text/csv")
+                # ID 선택박스로 상세 조회
+                ids = [str(x.get("id")) for x in items]
+                if ids:
+                    sel = st.selectbox("상세 조회할 ID 선택", options=[""] + ids)
+                    if sel:
+                        try:
+                            resp = get_backend_client().get_faiss_entry(sel)
+                            item = resp.get("item")
+                            if item:
+                                st.subheader("메타데이터")
+                                st.json(item.get("metadata", {}))
+                                st.subheader("원문 스니펫")
+                                st.code((item.get("page_content") or "")[:2000], language="text")
+                                st.download_button("JSON으로 다운로드", value=str(item), file_name=f"faiss_{sel}.json", mime="application/json")
+                            else:
+                                st.info("상세 항목 없음")
+                        except Exception as e:
+                            st.error(f"상세 조회 실패: {e}")
             else:
                 st.info("목록이 비어있습니다.")
         except Exception as e:

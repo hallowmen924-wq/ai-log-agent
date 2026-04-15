@@ -568,3 +568,26 @@ def list_vectors(limit: int = 200) -> list[dict]:
         return items
     except Exception:
         return []
+
+
+def get_vector_by_id(doc_id: str) -> dict | None:
+    """Return full document (page_content and metadata) for a given docstore id."""
+    try:
+        if not os.path.exists("faiss_db"):
+            return None
+        local_db = FAISS.load_local(
+            "faiss_db",
+            get_embeddings(),
+            allow_dangerous_deserialization=True,
+        )
+        doc_map = getattr(local_db.docstore, "_dict", {})
+        doc = doc_map.get(doc_id)
+        if doc is None:
+            return None
+        return {
+            "id": doc_id,
+            "page_content": getattr(doc, "page_content", ""),
+            "metadata": getattr(doc, "metadata", {}) or {},
+        }
+    except Exception:
+        return None
