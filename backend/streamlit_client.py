@@ -62,6 +62,12 @@ class BackendClient:
             timeout=30,
         ).json()
 
+    def get_faiss_entries(self, limit: int = 200) -> dict[str, Any]:
+        return requests.get(f"{self.base_url}/faiss/entries", params={"limit": limit}, timeout=30).json()
+
+    def export_faiss(self, format: str = "json", limit: int = 200) -> requests.Response:
+        return requests.get(f"{self.base_url}/faiss/export", params={"format": format, "limit": limit}, timeout=60)
+
     def strategy_chat(self, question: str) -> dict[str, Any]:
         return requests.post(
             f"{self.base_url}/chat/strategy",

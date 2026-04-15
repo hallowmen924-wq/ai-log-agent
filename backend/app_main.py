@@ -37,6 +37,9 @@ from backend.services import (
     state,
 )
 from backend.worker import worker
+from fastapi import WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse, Response
+import asyncio
 
 app = FastAPI(title="AI Log Agent API", version="1.0.0")
 app.add_middleware(
@@ -135,6 +138,64 @@ def charts_one(chart_name: str) -> dict:
         "chart_name": chart_name,
         "data": payloads[chart_name],
     }
+
+
+@app.get("/faiss/entries")
+def faiss_entries(limit: int = 200) -> dict:
+    try:
+        from rag.vector_db import list_vectors
+
+        items = list_vectors(limit=limit)
+        return {"status": "ok", "count": len(items), "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/faiss/export")
+def faiss_export(format: str = "json", limit: int = 200):
+    try:
+        from rag.vector_db import list_vectors
+        import json, csv, io
+
+        items = list_vectors(limit=limit)
+        if format == "csv":
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=["id", "type", "product", "agent", "source", "name", "snippet"])
+            writer.writeheader()
+            for row in items:
+                writer.writerow(row)
+            return Response(content=output.getvalue(), media_type="text/csv")
+        else:
+            return {"status": "ok", "count": len(items), "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.websocket("/ws/faiss")
+async def websocket_faiss_updates(websocket: WebSocket):
+    await websocket.accept()
+    last_sent = 0
+    try:
+        while True:
+            # send any new vector events
+            snapshot = state.snapshot()
+            events = snapshot.get("vector_events", []) or []
+            # events are ordered newest first; send those with timestamp > last_sent
+            to_send = []
+            for ev in reversed(events):
+                ts = ev.get("timestamp") or ""
+                try:
+                    tval = int(float(ts.replace(".", ""))) if ts else 0
+                except Exception:
+                    tval = 0
+                if tval > last_sent:
+                    to_send.append(ev)
+                    last_sent = max(last_sent, tval)
+            for ev in to_send:
+                await websocket.send_json(ev)
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        return
 
 
 @app.post("/worker/start", response_model=GenericMessage)

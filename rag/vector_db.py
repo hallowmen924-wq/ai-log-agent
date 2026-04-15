@@ -538,3 +538,33 @@ def ingest_files(
         "Ingested %d chunks for %d files", len(split_docs), len(files_data)
     )
     return len(db.index_to_docstore_id)
+
+
+def list_vectors(limit: int = 200) -> list[dict]:
+    """Return metadata summary for vectors stored in FAISS (limit recent items)."""
+    try:
+        if not os.path.exists("faiss_db"):
+            return []
+        local_db = FAISS.load_local(
+            "faiss_db",
+            get_embeddings(),
+            allow_dangerous_deserialization=True,
+        )
+        doc_map = getattr(local_db.docstore, "_dict", {})
+        items = []
+        for doc_id, doc in list(doc_map.items())[:limit]:
+            meta = getattr(doc, "metadata", {}) or {}
+            items.append(
+                {
+                    "id": doc_id,
+                    "type": meta.get("type"),
+                    "product": meta.get("product"),
+                    "agent": meta.get("agent"),
+                    "source": meta.get("source"),
+                    "name": meta.get("name"),
+                    "snippet": (getattr(doc, "page_content", "") or "")[:400],
+                }
+            )
+        return items
+    except Exception:
+        return []
