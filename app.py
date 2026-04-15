@@ -1316,6 +1316,83 @@ def render_sidebar_news_compact():
             )
 
 
+def render_faiss_tab():
+    """FAISS 상태와 최근 적재 이벤트, 간단 검색 UI를 제공한다."""
+    st.header("🧠 FAISS 벡터 DB 현황")
+
+    try:
+        status = get_backend_client().get_status()
+    except Exception:
+        st.error("백엔드에 연결할 수 없습니다.")
+        return
+
+    vector_count = status.get("vector_count", 0)
+    last_ingest = status.get("last_log_ingest_time") or status.get("last_run_time")
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.metric("벡터 수", vector_count)
+        if last_ingest:
+            st.caption(f"마지막 적재: {last_ingest}")
+    with c2:
+        if st.button("새로고침 FAISS 상태"):
+            try:
+                _ = get_backend_client().get_status()
+                st.experimental_rerun()
+            except Exception:
+                st.error("새로고침 실패")
+
+    st.markdown("---")
+
+    st.subheader("최근 벡터 이벤트")
+    events = status.get("vector_events") or []
+    if not events:
+        st.info("최근 벡터 이벤트가 없습니다.")
+    else:
+        for ev in events:
+            label = f"{ev.get('timestamp')} — {ev.get('source')} ({ev.get('action')})"
+            with st.expander(label, expanded=False):
+                st.write({
+                    "before_count": ev.get("before_count"),
+                    "after_count": ev.get("after_count"),
+                    "added": ev.get("added_count"),
+                    "detail": ev.get("detail"),
+                })
+
+    st.markdown("---")
+
+    st.subheader("실시간 FAISS 검색")
+    q = st.text_input("검색어 입력 (예: 대출 한도)")
+    k = st.number_input("k", min_value=1, max_value=20, value=5)
+    if st.button("검색 실행") and q.strip():
+        with st.spinner("검색 중..."):
+            try:
+                resp = get_backend_client().search_faiss(q, int(k))
+                logs = resp.get("logs") or []
+                news = resp.get("news") or []
+                rules = resp.get("rules") or []
+
+                if logs:
+                    st.markdown("**Logs (유사 로그)**")
+                    for item in logs:
+                        st.write(item)
+
+                if news:
+                    st.markdown("**News (유사 뉴스)**")
+                    for item in news:
+                        st.write(item)
+
+                if rules:
+                    st.markdown("**Rules / 기타**")
+                    for item in rules:
+                        st.write(item)
+
+                if not (logs or news or rules):
+                    st.info("검색 결과가 없습니다.")
+            except Exception as e:
+                st.error(f"검색 실패: {e}")
+
+
 @fragment_decorator(run_every="3s")
 def render_live_news_fragment():
     try:
@@ -1502,13 +1579,14 @@ with col_main:
             except Exception:
                 pass
 
-    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, charts_tab = st.tabs(
+    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, charts_tab, faiss_tab = st.tabs(
         [
             "🤖 운영 현황",
             "💬 AI 심사 전략",
             "📰 뉴스 에이전트 입력",
             "📄 로그 에이전트 입력",
             "📊 차트",
+            "🧠 FAISS",
         ]
     )
 
@@ -1576,6 +1654,9 @@ with col_main:
 
     with charts_tab:
         render_chart_dashboard()
+
+    with faiss_tab:
+        render_faiss_tab()
 
 # ================================
 # 백엔드 상태 동기화: 10초마다 갱신
