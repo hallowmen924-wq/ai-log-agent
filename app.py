@@ -2,10 +2,6 @@ import datetime
 import html
 import threading
 import time
-
-# 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
-_background_results: dict = {}
-_background_lock = threading.Lock()
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -13,6 +9,10 @@ import streamlit as st
 from agent.strategy_chat import regulation_agent
 from backend.streamlit_client import BackendClient
 from rag.vector_db import get_vector_count, ingest_files, search_context
+
+# 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
+_background_results: dict = {}
+_background_lock = threading.Lock()
 
 # 이 파일은 최종 Streamlit 진입점입니다.
 # 핵심 역할은 "직접 분석하지 않고" FastAPI 백엔드에서 준비한 데이터를 받아
