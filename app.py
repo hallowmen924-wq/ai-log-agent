@@ -430,14 +430,7 @@ def render_strategy_response(message):
                 st.info(item)
 
 
-def get_vector_count() -> int:
-    if "vector_count" in st.session_state:
-        return int(st.session_state.get("vector_count", 0))
-    try:
-        status = get_backend_client().get_status()
-        return int(status.get("vector_count", 0))
-    except Exception:
-        return 0
+# `get_vector_count` is provided by `rag.vector_db` import; avoid redefining it here.
 
 
 def get_chart_snapshots() -> dict:

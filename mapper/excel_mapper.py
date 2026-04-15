@@ -3,7 +3,7 @@ import pandas as pd
 mapping_cache = {}
 
 
-def load_excel_mapping(path, sheet_name):
+def load_excel_df(path, sheet_name):
 
     key = f"{path}_{sheet_name}"
 
