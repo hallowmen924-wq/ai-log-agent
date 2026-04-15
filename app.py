@@ -889,7 +889,7 @@ def render_chart_dashboard():
         return
 
     st.subheader("📊 실시간 비동기 4차트 대시보드")
-    charts = get_chart_snapshots()
+    _charts = get_chart_snapshots()
 
     top_left_chart, top_right_chart = st.columns(2)
     bottom_left_chart, bottom_right_chart = st.columns(2)
