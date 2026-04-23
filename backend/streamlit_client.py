@@ -65,11 +65,21 @@ class BackendClient:
     def get_faiss_entries(self, limit: int = 200) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/faiss/entries", params={"limit": limit}, timeout=30).json()
 
+    def get_faiss_stats(self) -> dict[str, Any]:
+        return requests.get(f"{self.base_url}/faiss/stats", timeout=60).json()
+
     def export_faiss(self, format: str = "json", limit: int = 200) -> requests.Response:
         return requests.get(f"{self.base_url}/faiss/export", params={"format": format, "limit": limit}, timeout=60)
 
     def get_faiss_entry(self, doc_id: str) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/faiss/entry/{doc_id}", timeout=30).json()
+
+    def search_faiss_features(self, type: str | None = None, feature_key: str | None = None, feature_value: str | None = None, limit: int = 200) -> dict[str, Any]:
+        return requests.get(
+            f"{self.base_url}/faiss/search_features",
+            params={"type": type, "feature_key": feature_key, "feature_value": feature_value, "limit": limit},
+            timeout=30,
+        ).json()
 
     def strategy_chat(self, question: str) -> dict[str, Any]:
         return requests.post(

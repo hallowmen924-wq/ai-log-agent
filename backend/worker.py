@@ -66,12 +66,17 @@ class NewsVectorWorker:
                     )
                 with state.lock:
                     has_results = bool(state.results)
+                with state.lock:
+                    has_crawled_news = any(
+                        str(item.get("content", "")).strip() for item in state.news
+                    )
                 if news:
-                    try:
-                        run_background_news_agent_cycle(should_persist=has_new_items)
-                    except Exception:
-                        pass
-                if has_results and news:
+                    if has_crawled_news:
+                        try:
+                            run_background_news_agent_cycle(should_persist=has_new_items)
+                        except Exception:
+                            pass
+                if has_results and news and has_crawled_news:
                     try:
                         # 로그 결과는 그대로 두고, 최신 뉴스 기준으로 벡터 DB를 다시 구성합니다.
                         build_faiss_bundle(news=news, source="worker")

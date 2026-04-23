@@ -1,5 +1,6 @@
 import datetime
 import html
+import os
 import threading
 import time
 import pandas as pd
@@ -13,6 +14,8 @@ from rag.vector_db import get_vector_count, ingest_files, search_context
 # 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
 _background_results: dict = {}
 _background_lock = threading.Lock()
+_ws_snapshot_buffer: dict = {}
+_ws_snapshot_lock = threading.Lock()
 
 # 이 파일은 최종 Streamlit 진입점입니다.
 # 핵심 역할은 "직접 분석하지 않고" FastAPI 백엔드에서 준비한 데이터를 받아
@@ -33,15 +36,265 @@ def fragment_decorator(*args, **kwargs):
     return lambda func: func
 
 
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = time.time()
+# Start a background WebSocket listener to receive FAISS updates from backend
+def _start_faiss_ws():
+    if st.session_state.get("faiss_ws_started"):
+        return
+    st.session_state.faiss_ws_started = True
 
-# 10초마다 새로고침
-if (not HAS_FRAGMENT_REFRESH) and time.time() - st.session_state.last_refresh > 10:
-    st.session_state.last_refresh = time.time()
-    st.rerun()
+    def _run_ws():
+        try:
+            import json
+            try:
+                from websocket import WebSocketApp
+            except Exception:
+                return
+
+            base = st.session_state.get("backend_url", "http://127.0.0.1:18000")
+            if base.startswith("https://"):
+                ws_url = "wss://" + base[len("https://") :]
+            elif base.startswith("http://"):
+                ws_url = "ws://" + base[len("http://") :]
+            else:
+                ws_url = base
+            if not ws_url.endswith("/ws/faiss"):
+                ws_url = ws_url.rstrip("/") + "/ws/faiss"
+
+            def on_message(ws, message):
+                try:
+                    payload = json.loads(message)
+                except Exception:
+                    return
+                try:
+                    ev = payload.get("event") or payload
+                    snap = payload.get("snapshot") or {}
+                    with _ws_snapshot_lock:
+                        if snap:
+                            _ws_snapshot_buffer["snapshot"] = snap
+                        if ev:
+                            _ws_snapshot_buffer["event"] = ev
+                except Exception:
+                    pass
+
+            def on_error(ws, err):
+                return
+
+            def on_close(ws, code, reason):
+                return
+
+            def on_open(ws):
+                return
+
+            ws = WebSocketApp(ws_url, on_message=on_message, on_error=on_error, on_close=on_close, on_open=on_open)
+            ws.run_forever()
+        except Exception:
+            return
+
+    thread = threading.Thread(target=_run_ws, daemon=True)
+    thread.start()
+
+
+# start websocket listener (non-fatal if websocket-client not installed)
+try:
+    if "faiss_ws_started" not in st.session_state:
+        st.session_state.faiss_ws_started = False
+    _start_faiss_ws()
+except Exception:
+    pass
+
+
+def consume_ws_snapshot_buffer() -> bool:
+    try:
+        with _ws_snapshot_lock:
+            if not _ws_snapshot_buffer:
+                return False
+            payload = dict(_ws_snapshot_buffer)
+            _ws_snapshot_buffer.clear()
+
+        snapshot = payload.get("snapshot") or {}
+        event = payload.get("event") or {}
+        if snapshot:
+            sync_session_from_backend(snapshot)
+        elif event:
+            events = st.session_state.get("vector_events", []) or []
+            events.insert(0, event)
+            st.session_state.vector_events = events
+
+        if event:
+            st.session_state.faiss_toast = {
+                "msg": f"FAISS 업데이트: {event.get('source','?')} {event.get('added_count',0)}건 추가",
+                "ts": time.time(),
+            }
+            st.session_state.faiss_last_event_time = time.time()
+        return True
+    except Exception:
+        return False
 
 st.title("🔥 AI 대출 심사 실시간 대시보드")
+
+
+def render_initial_analysis_badge():
+    done = bool(st.session_state.get("initial_analysis_done"))
+    started = bool(st.session_state.get("initial_analysis_started"))
+    failed = bool(st.session_state.get("initial_analysis_failed"))
+
+    if done:
+        label = "초기 분석 완료"
+        background = "#dcfce7"
+        color = "#166534"
+        detail = "기본 로그, 뉴스, FAISS 상태가 준비되었습니다."
+    elif failed:
+        label = "초기 분석 지연"
+        background = "#fee2e2"
+        color = "#991b1b"
+        detail = "백그라운드 분석이 지연되고 있습니다. 화면은 계속 사용할 수 있습니다."
+    elif started:
+        label = "초기 분석 진행 중"
+        background = "#dbeafe"
+        color = "#1d4ed8"
+        detail = "화면은 먼저 표시되고, 초기 분석은 백그라운드에서 진행됩니다."
+    else:
+        label = "초기 준비 대기"
+        background = "#e2e8f0"
+        color = "#334155"
+        detail = "백엔드 연결과 워커 준비를 확인하는 중입니다."
+
+    st.markdown(
+        f"""
+        <div style="margin: 8px 0 14px 0;">
+            <span style="display:inline-block; padding:6px 10px; border-radius:999px; background:{background}; color:{color}; font-size:12px; font-weight:800; border:1px solid rgba(15,23,42,0.08);">{label}</span>
+            <span style="margin-left:10px; font-size:12px; color:#64748b;">{detail}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_faiss_toast():
+    toast = st.session_state.get("faiss_toast")
+    if not toast:
+        return
+    try:
+        age = time.time() - float(toast.get("ts", 0))
+    except Exception:
+        age = 9999
+    # only show recent toasts (5s)
+    if age > 5:
+        return
+
+    css = """
+    <style>
+    .faiss-toast {
+      position: fixed;
+      right: 20px;
+      top: 20px;
+      z-index: 9999;
+      background: linear-gradient(90deg,#06b6d4,#3b82f6);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.2);
+      font-weight:700;
+      animation: faissToastIn 0.5s ease-out;
+    }
+    @keyframes faissToastIn {
+      from { transform: translateY(-8px); opacity: 0 }
+      to { transform: translateY(0); opacity: 1 }
+    }
+    </style>
+    """
+
+    st.markdown(css + f"<div class='faiss-toast'>{html.escape(str(toast.get('msg','')))}</div>", unsafe_allow_html=True)
+
+
+# render toast (if any) early so it appears above content
+try:
+    render_faiss_toast()
+except Exception:
+    pass
+
+
+def render_faiss_product_stats():
+    st.subheader("FAISS 상품별 실시간 통계")
+    # Try backend stats first, fall back to session snapshot if unavailable
+    products = {}
+    try:
+        client = get_backend_client()
+        resp = client.get_faiss_stats()
+        if resp.get("status") == "ok":
+            products = resp.get("products", {}) or {}
+            if not products:
+                st.info("FAISS에 저장된 벡터가 없어 통계를 생성할 수 없습니다.")
+                return
+        else:
+            raise Exception("bad status")
+    except Exception:
+        # Build simple per-product counts from cached session snapshot
+        try:
+            items = st.session_state.get("full_faiss_items", []) or []
+            for it in items:
+                prod = it.get("product") or "UNKNOWN"
+                prod_stats = products.setdefault(prod, {"count": 0})
+                prod_stats["count"] = prod_stats.get("count", 0) + 1
+        except Exception:
+            items = []
+        if not products:
+            st.info("FAISS 통계 조회 실패(백엔드 연결 필요)")
+            return
+
+    # 카드형으로 표시 (fallback may only have counts)
+    # compute highlight if recent event
+    highlight = False
+    try:
+        last_ev = st.session_state.get("faiss_last_event_time")
+        if last_ev and (time.time() - float(last_ev)) < 5:
+            highlight = True
+    except Exception:
+        highlight = False
+
+    cols = st.columns(max(1, len(products)))
+    idx = 0
+    for prod, s in products.items():
+        col = cols[idx % len(cols)]
+        idx += 1
+        prod_name = prod
+        if prod == "C6":
+            prod_name = "신용대출"
+        elif prod == "C9":
+            prod_name = "카드론"
+        elif prod == "C11":
+            prod_name = "개인사업자대출"
+        elif prod == "C12":
+            prod_name = "대환대출"
+
+        count = s.get("count", 0)
+        avg_rate = s.get("avg_applied_rate")
+        avg_limit = s.get("avg_available_amount")
+        approval_rate = s.get("approval_rate")
+        avg_kcb = s.get("avg_kcb_grade")
+        avg_score = s.get("avg_credit_score")
+
+        # card highlight style when recent update
+        card_style = ""
+        if highlight:
+            card_style = "border: 2px solid rgba(59,130,246,0.35); box-shadow: 0 6px 22px rgba(59,130,246,0.06); padding:10px; border-radius:8px;"
+            col.markdown(f"<div style=\"{card_style}\">", unsafe_allow_html=True)
+
+        col.markdown(f"#### {prod_name} ({prod})")
+        col.metric("벡터 수", count)
+        col.markdown(f"- 평균 금리: **{(round(avg_rate,2) if avg_rate is not None else '-') }**")
+        col.markdown(f"- 평균 한도: **{(int(avg_limit) if avg_limit is not None else '-') }원**")
+        col.markdown(f"- 승인율(추정): **{(str(round(approval_rate*100,1))+'%' if approval_rate is not None else '-') }**")
+        col.markdown(f"- 평균 KCB등급(숫자 또는 매핑): **{(round(avg_kcb,2) if avg_kcb is not None else '-') }**")
+        col.markdown(f"- 평균 신용점수: **{(round(avg_score,1) if avg_score is not None else '-') }**")
+        top_reasons = s.get("top_reject_reasons") or []
+        if top_reasons:
+            col.markdown("- 주요 탈락 사유(상위):")
+            for r, c in top_reasons[:3]:
+                col.markdown(f"  - {r} ({c}건)")
+
+        if highlight:
+            col.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_loading_styles():
@@ -199,15 +452,36 @@ def render_loading_skeleton(target):
 
 def get_backend_client() -> BackendClient:
     # 왼쪽 패널에서 주소를 바꾸면 같은 함수가 새 백엔드 주소를 사용합니다.
-    base_url = st.session_state.get("backend_url", "http://127.0.0.1:18000")
+    base_url = st.session_state.get(
+        "backend_url",
+        os.environ.get("BACKEND_URL", "http://127.0.0.1:18000"),
+    )
     return BackendClient(base_url)
 
 
 def get_backend_health() -> dict:
-    try:
-        return get_backend_client().health()
-    except Exception as error:
-        return {"status": "down", "detail": str(error)}
+    # Try configured URL first, then fallback to common dev port 8000.
+    configured = st.session_state.get(
+        "backend_url", os.environ.get("BACKEND_URL", None)
+    )
+    candidates = []
+    if configured:
+        candidates.append(configured)
+    candidates.extend(["http://127.0.0.1:18000", "http://127.0.0.1:8000"])
+    tried = []
+    for base in candidates:
+        if base in tried:
+            continue
+        tried.append(base)
+        try:
+            client = BackendClient(base)
+            h = client.health()
+            # if health OK, persist to session and return
+            st.session_state.backend_url = base
+            return h
+        except Exception:
+            continue
+    return {"status": "down", "detail": "백엔드에 연결할 수 없습니다. 포트 18000 또는 8000에서 서버가 실행 중인지 확인하세요."}
 
 
 def sync_session_from_backend(payload: dict):
@@ -242,6 +516,27 @@ def sync_session_from_backend(payload: dict):
     st.session_state.agent_statuses = payload.get("agent_statuses", {})
     st.session_state.agent_activity_log = payload.get("agent_activity_log", [])
     st.session_state.vector_events = payload.get("vector_events", [])
+    incoming_faiss_items = payload.get("full_faiss_items")
+    if incoming_faiss_items:
+        st.session_state.full_faiss_items = incoming_faiss_items
+    elif payload.get("vector_count", 0):
+        st.session_state.full_faiss_items = st.session_state.get(
+            "full_faiss_items", []
+        )
+    else:
+        st.session_state.full_faiss_items = []
+    st.session_state.news_crawl_running = payload.get("news_crawl_running", False)
+    st.session_state.news_crawl_target_count = payload.get("news_crawl_target_count", 0)
+    st.session_state.news_crawl_success_count = payload.get("news_crawl_success_count", 0)
+    st.session_state.news_crawl_failure_count = payload.get("news_crawl_failure_count", 0)
+    st.session_state.last_news_crawl_time = payload.get("last_news_crawl_time")
+    st.session_state.last_news_crawl_error = payload.get("last_news_crawl_error")
+    has_bootstrap_data = bool(
+        payload.get("results") or payload.get("news") or payload.get("vector_count")
+    )
+    if has_bootstrap_data:
+        st.session_state.initial_analysis_done = True
+        st.session_state.initial_analysis_failed = False
 
 
 def format_status_time(value) -> str:
@@ -262,6 +557,21 @@ def parse_status_time(value):
         except ValueError:
             return None
     return None
+
+
+def summarize_log_case_text(context_text: str) -> str:
+    text = str(context_text or "").strip()
+    if not text:
+        return ""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    picked: list[str] = []
+    for line in lines:
+        if line.startswith("[") or "case_id=" in line or line.startswith("입력필드=") or line.startswith("출력필드="):
+            picked.append(line)
+    if not picked:
+        picked = lines[:3]
+    return "\n".join(picked[:4])
 
 
 def render_news_freshness_badge(last_news_time, last_new_item_time):
@@ -441,6 +751,234 @@ def get_chart_snapshots() -> dict:
         return {}
 
 
+def get_live_faiss_items(limit: int = 1000) -> list[dict]:
+    items = st.session_state.get("full_faiss_items", []) or []
+    if items:
+        return items[:limit]
+
+    try:
+        entries_resp = get_backend_client().get_faiss_entries(limit=limit)
+        items = entries_resp.get("items", []) if isinstance(entries_resp, dict) else []
+        if items:
+            st.session_state.full_faiss_items = items
+            return items
+    except Exception:
+        pass
+
+    try:
+        from rag.vector_db import list_vectors
+
+        items = list_vectors(limit=limit)
+        if items:
+            st.session_state.full_faiss_items = items
+        return items
+    except Exception:
+        return []
+
+
+def render_vector_db_panel():
+    st.subheader("🧠 Vector DB 실시간 적재 현황")
+
+    vector_events = st.session_state.get("vector_events", []) or []
+    latest_vector_event = vector_events[0] if vector_events else {}
+    items = get_live_faiss_items(limit=1000)
+    recent_items = list(reversed(items[-10:])) if items else []
+
+    vector_metric_cols = st.columns(4)
+    vector_metric_cols[0].metric(
+        "현재 벡터 수", st.session_state.get("vector_count", 0)
+    )
+    vector_metric_cols[1].metric(
+        "마지막 증감", latest_vector_event.get("added_count", 0)
+    )
+    vector_metric_cols[2].metric(
+        "최근 적재 소스", latest_vector_event.get("source", "-")
+    )
+    vector_metric_cols[3].metric(
+        "실시간 표시 항목", len(items)
+    )
+
+    st.markdown("#### 실시간 적재값 미리보기")
+    if not recent_items:
+        st.info("실시간으로 표시할 Vector DB 항목이 아직 없습니다.")
+    else:
+        preview_df = pd.DataFrame(
+            [
+                {
+                    "id": it.get("id"),
+                    "type": it.get("type"),
+                    "product": it.get("product"),
+                    "source": it.get("source"),
+                    "name": it.get("name"),
+                    "snippet": (it.get("snippet") or "")[:180],
+                }
+                for it in recent_items
+            ]
+        )
+        st.dataframe(
+            preview_df,
+            height=280,
+            width="stretch",
+            hide_index=True,
+        )
+
+        selected_entry_id = st.selectbox(
+            "상세 확인할 벡터 항목",
+            options=[""] + [str(it.get("id") or "") for it in recent_items],
+            key="vector_live_entry_select",
+        )
+        if selected_entry_id:
+            selected_item = next(
+                (it for it in recent_items if str(it.get("id")) == selected_entry_id),
+                None,
+            )
+            if selected_item is not None:
+                detail_col, meta_col = st.columns([1.2, 1])
+                with detail_col:
+                    st.markdown("##### 선택 항목 원문 미리보기")
+                    st.code(selected_item.get("snippet", "")[:1200], language="text")
+                with meta_col:
+                    st.markdown("##### 선택 항목 메타데이터")
+                    st.json(
+                        {
+                            "id": selected_item.get("id"),
+                            "type": selected_item.get("type"),
+                            "product": selected_item.get("product"),
+                            "agent": selected_item.get("agent"),
+                            "source": selected_item.get("source"),
+                            "name": selected_item.get("name"),
+                            "features": selected_item.get("features") or {},
+                            "in_fields": selected_item.get("in_fields") or {},
+                            "out_fields": selected_item.get("out_fields") or {},
+                            "reject_reason_codes": selected_item.get("reject_reason_codes") or [],
+                            "reject_reason_details": selected_item.get("reject_reason_details") or [],
+                        }
+                    )
+
+    event_col, vector_col = st.columns([1.2, 1])
+    with event_col:
+        st.markdown("#### 실행 타임라인")
+        activity_log = st.session_state.get("agent_activity_log", [])
+        if not activity_log:
+            st.info("아직 기록된 에이전트 실행 이력이 없습니다.")
+        for event in activity_log[:10]:
+            st.markdown(
+                f"""
+                <div style=\"
+                    border-left: 4px solid #38bdf8;
+                    padding: 10px 12px;
+                    margin-bottom: 10px;
+                    background: rgba(248,250,252,0.95);
+                    border-radius: 0 12px 12px 0;
+                \">
+                    <div style=\"font-size:12px; font-weight:700; color:#0f172a;\">{event.get('source', '-')} · {event.get('status', '-')}</div>
+                    <div style=\"font-size:12px; color:#64748b; margin:4px 0 6px 0;\">{format_status_time(event.get('timestamp'))}</div>
+                    <div style=\"font-size:13px; color:#334155; line-height:1.55;\">{event.get('detail', '')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    with vector_col:
+        st.markdown("#### 적재 이벤트")
+        if not vector_events:
+            st.info("아직 기록된 벡터 적재 이벤트가 없습니다.")
+        else:
+            chart_rows = []
+            for event in reversed(vector_events[:20]):
+                timestamp = parse_status_time(event.get("timestamp"))
+                chart_rows.append(
+                    {
+                        "time": (
+                            timestamp
+                            if timestamp is not None
+                            else event.get("timestamp")
+                        ),
+                        "after_count": event.get("after_count", 0),
+                        "added_count": event.get("added_count", 0),
+                        "source": event.get("source", "-"),
+                    }
+                )
+
+            df_vector = pd.DataFrame(chart_rows)
+            if not df_vector.empty:
+                fig_vector = px.line(
+                    df_vector,
+                    x="time",
+                    y="after_count",
+                    markers=True,
+                    color="source",
+                )
+                fig_vector.update_layout(
+                    height=260,
+                    margin=dict(l=16, r=16, t=20, b=16),
+                    legend_title_text="소스",
+                    xaxis_title="시간",
+                    yaxis_title="누적 벡터 수",
+                )
+                st.plotly_chart(
+                    fig_vector, width="stretch", key="vector_event_timeline"
+                )
+
+                fig_delta = px.bar(
+                    df_vector,
+                    x="time",
+                    y="added_count",
+                    color="source",
+                )
+                fig_delta.update_layout(
+                    height=180,
+                    margin=dict(l=16, r=16, t=16, b=16),
+                    showlegend=False,
+                    xaxis_title="시간",
+                    yaxis_title="추가량",
+                )
+                st.plotly_chart(fig_delta, width="stretch", key="vector_event_delta")
+
+            st.markdown("##### 최근 적재 내역")
+            for event in vector_events[:5]:
+                st.markdown(
+                    f"""
+                    <div style="
+                        padding: 12px 14px;
+                        margin-bottom: 10px;
+                        border-radius: 14px;
+                        background: linear-gradient(180deg, rgba(239,246,255,0.96), rgba(224,242,254,0.92));
+                        border: 1px solid rgba(56, 189, 248, 0.2);
+                    ">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <div style="font-size:12px; font-weight:800; color:#0f172a;">{event.get('source', '-')} · {event.get('action', '-')}</div>
+                            <div style="font-size:11px; color:#0369a1; font-weight:700;">{event.get('before_count', 0)} → {event.get('after_count', 0)}</div>
+                        </div>
+                        <div style="font-size:12px; color:#0f766e; font-weight:700; margin-bottom:6px;">증감: {event.get('added_count', 0)}</div>
+                        <div style="font-size:13px; color:#334155; line-height:1.55; margin-bottom:6px;">{event.get('detail', '')}</div>
+                        <div style="font-size:11px; color:#64748b;">{format_status_time(event.get('timestamp'))}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    st.markdown("#### FAISS 전체 항목")
+    if not items:
+        st.info("FAISS에 저장된 항목이 없습니다.")
+    else:
+        st.caption("WebSocket으로 갱신된 세션 스냅샷을 우선 사용하고, 초기 로드 시에는 백엔드에서 목록을 보강합니다.")
+        full_df = pd.DataFrame(
+            [
+                {
+                    "id": it.get("id"),
+                    "type": it.get("type"),
+                    "product": it.get("product"),
+                    "source": it.get("source"),
+                    "name": it.get("name"),
+                    "snippet": (it.get("snippet") or "")[:200],
+                }
+                for it in items
+            ]
+        )
+        st.dataframe(full_df, height=360, width="stretch", hide_index=True)
+
+
 def render_runtime_dashboard():
     st.subheader("🤖 에이전트 실시간 작업 현황")
 
@@ -572,6 +1110,28 @@ def render_runtime_dashboard():
             """,
             unsafe_allow_html=True,
         )
+
+    crawl_running = bool(st.session_state.get("news_crawl_running", False))
+    crawl_target_count = int(st.session_state.get("news_crawl_target_count", 0) or 0)
+    crawl_success_count = int(st.session_state.get("news_crawl_success_count", 0) or 0)
+    crawl_failure_count = int(st.session_state.get("news_crawl_failure_count", 0) or 0)
+    last_news_crawl_error = st.session_state.get("last_news_crawl_error")
+    if crawl_running or crawl_failure_count > 0:
+        crawl_background = "rgba(219,234,254,0.95)" if crawl_running else "rgba(254,226,226,0.95)"
+        crawl_border = "rgba(59,130,246,0.28)" if crawl_running else "rgba(239,68,68,0.24)"
+        crawl_color = "#1d4ed8" if crawl_running else "#991b1b"
+        crawl_label = "뉴스 본문 크롤링 진행 중" if crawl_running else "뉴스 본문 크롤링 실패 건 존재"
+        st.markdown(
+            f"""
+            <div style="display:inline-flex; align-items:center; gap:12px; margin: 0 0 14px 0; padding: 10px 14px; border-radius: 999px; background:{crawl_background}; border:1px solid {crawl_border};">
+                <span style="font-size:13px; font-weight:800; color:{crawl_color};">{crawl_label}</span>
+                <span style="font-size:12px; color:#334155;">대상 {crawl_target_count} · 성공 {crawl_success_count} · 실패 {crawl_failure_count}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if (not crawl_running) and last_news_crawl_error:
+            st.caption(f"최근 뉴스 크롤링 오류: {last_news_crawl_error}")
 
     if (
         last_log_ingest_time is not None
@@ -715,120 +1275,7 @@ def render_runtime_dashboard():
                 unsafe_allow_html=True,
             )
 
-    st.markdown("#### 🧠 벡터 DB 적재 현황")
-    vector_events = st.session_state.get("vector_events", [])
-    latest_vector_event = vector_events[0] if vector_events else {}
-    vector_metric_cols = st.columns(3)
-    vector_metric_cols[0].metric("현재 벡터 수", get_vector_count())
-    vector_metric_cols[1].metric(
-        "마지막 증감", latest_vector_event.get("added_count", 0)
-    )
-    vector_metric_cols[2].metric(
-        "최근 적재 소스", latest_vector_event.get("source", "-")
-    )
-
-    event_col, vector_col = st.columns([1.2, 1])
-    with event_col:
-        st.markdown("#### 실행 타임라인")
-        activity_log = st.session_state.get("agent_activity_log", [])
-        if not activity_log:
-            st.info("아직 기록된 에이전트 실행 이력이 없습니다.")
-        for event in activity_log[:10]:
-            st.markdown(
-                f"""
-                <div style=\"
-                    border-left: 4px solid #38bdf8;
-                    padding: 10px 12px;
-                    margin-bottom: 10px;
-                    background: rgba(248,250,252,0.95);
-                    border-radius: 0 12px 12px 0;
-                \">
-                    <div style=\"font-size:12px; font-weight:700; color:#0f172a;\">{event.get('source', '-')} · {event.get('status', '-')}</div>
-                    <div style=\"font-size:12px; color:#64748b; margin:4px 0 6px 0;\">{format_status_time(event.get('timestamp'))}</div>
-                    <div style=\"font-size:13px; color:#334155; line-height:1.55;\">{event.get('detail', '')}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    with vector_col:
-        st.markdown("#### 적재 이벤트")
-        if not vector_events:
-            st.info("아직 기록된 벡터 적재 이벤트가 없습니다.")
-        else:
-            chart_rows = []
-            for event in reversed(vector_events[:20]):
-                timestamp = parse_status_time(event.get("timestamp"))
-                chart_rows.append(
-                    {
-                        "time": (
-                            timestamp
-                            if timestamp is not None
-                            else event.get("timestamp")
-                        ),
-                        "after_count": event.get("after_count", 0),
-                        "added_count": event.get("added_count", 0),
-                        "source": event.get("source", "-"),
-                    }
-                )
-
-            df_vector = pd.DataFrame(chart_rows)
-            if not df_vector.empty:
-                fig_vector = px.line(
-                    df_vector,
-                    x="time",
-                    y="after_count",
-                    markers=True,
-                    color="source",
-                )
-                fig_vector.update_layout(
-                    height=260,
-                    margin=dict(l=16, r=16, t=20, b=16),
-                    legend_title_text="소스",
-                    xaxis_title="시간",
-                    yaxis_title="누적 벡터 수",
-                )
-                st.plotly_chart(
-                    fig_vector, width="stretch", key="vector_event_timeline"
-                )
-
-                fig_delta = px.bar(
-                    df_vector,
-                    x="time",
-                    y="added_count",
-                    color="source",
-                )
-                fig_delta.update_layout(
-                    height=180,
-                    margin=dict(l=16, r=16, t=16, b=16),
-                    showlegend=False,
-                    xaxis_title="시간",
-                    yaxis_title="추가량",
-                )
-                st.plotly_chart(fig_delta, width="stretch", key="vector_event_delta")
-
-            st.markdown("##### 최근 적재 내역")
-            for event in vector_events[:5]:
-                st.markdown(
-                    f"""
-                    <div style="
-                        padding: 12px 14px;
-                        margin-bottom: 10px;
-                        border-radius: 14px;
-                        background: linear-gradient(180deg, rgba(239,246,255,0.96), rgba(224,242,254,0.92));
-                        border: 1px solid rgba(56, 189, 248, 0.2);
-                    ">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                            <div style="font-size:12px; font-weight:800; color:#0f172a;">{event.get('source', '-')} · {event.get('action', '-')}</div>
-                            <div style="font-size:11px; color:#0369a1; font-weight:700;">{event.get('before_count', 0)} → {event.get('after_count', 0)}</div>
-                        </div>
-                        <div style="font-size:12px; color:#0f766e; font-weight:700; margin-bottom:6px;">증감: {event.get('added_count', 0)}</div>
-                        <div style="font-size:13px; color:#334155; line-height:1.55; margin-bottom:6px;">{event.get('detail', '')}</div>
-                        <div style="font-size:11px; color:#64748b;">{format_status_time(event.get('timestamp'))}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+    st.info("벡터 DB 적재 현황, 실행 타임라인, 적재 이벤트, 최근 적재 내역은 오른쪽의 Vector DB 탭으로 분리했습니다.")
 
 
 def render_agent_prompt_panel(
@@ -838,10 +1285,6 @@ def render_agent_prompt_panel(
     updated_at = st.session_state.get(f"last_{agent_key}_prompt_input_time")
 
     st.subheader(title)
-    if not prompt_input:
-        st.info("아직 표시할 프롬프트 입력값이 없습니다.")
-        return
-
     source = prompt_input.get("source", "-")
     user_input = prompt_input.get("user_input", "-")
     context_text = prompt_input.get("context", "관련 데이터가 없습니다.")
@@ -851,6 +1294,98 @@ def render_agent_prompt_panel(
     metric_cols[0].metric("최근 갱신", format_status_time(updated_at))
     metric_cols[1].metric("실행 소스", source)
     metric_cols[2].metric("컨텍스트 길이", len(context_text))
+
+    if agent_key == "news":
+        news_items = st.session_state.get("news", []) or []
+        crawled_items = [
+            item for item in news_items if str(item.get("content", "")).strip()
+        ]
+        latest_crawled = crawled_items[0] if crawled_items else None
+        crawl_running = bool(st.session_state.get("news_crawl_running", False))
+        crawl_target_count = int(st.session_state.get("news_crawl_target_count", 0) or 0)
+        crawl_success_count = int(st.session_state.get("news_crawl_success_count", 0) or 0)
+        crawl_failure_count = int(st.session_state.get("news_crawl_failure_count", 0) or 0)
+        crawl_updated_at = st.session_state.get("last_news_crawl_time")
+        crawl_error = st.session_state.get("last_news_crawl_error")
+
+        if crawl_running:
+            badge_label = "본문 크롤링 진행 중"
+            badge_background = "#dbeafe"
+            badge_color = "#1d4ed8"
+        elif crawl_failure_count > 0 and latest_crawled is None:
+            badge_label = "본문 크롤링 실패"
+            badge_background = "#fee2e2"
+            badge_color = "#991b1b"
+        elif latest_crawled:
+            badge_label = "본문 크롤링 완료"
+            badge_background = "#dcfce7"
+            badge_color = "#166534"
+        else:
+            badge_label = "본문 크롤링 대기"
+            badge_background = "#fef3c7"
+            badge_color = "#92400e"
+
+        st.markdown(
+            f"""
+            <div style="margin: 8px 0 12px 0;">
+                <span style="display:inline-block; padding:6px 10px; border-radius:999px; font-size:12px; font-weight:800; background:{badge_background}; color:{badge_color}; border:1px solid rgba(15,23,42,0.08);">{badge_label}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        crawl_cols = st.columns(4)
+        crawl_cols[0].metric("대상 기사", crawl_target_count)
+        crawl_cols[1].metric("성공", crawl_success_count)
+        crawl_cols[2].metric("실패", crawl_failure_count)
+        crawl_cols[3].metric("최근 갱신", format_status_time(crawl_updated_at))
+
+        if crawl_running:
+            st.info("뉴스 본문을 크롤링 중입니다. 완료되면 뉴스 에이전트 프롬프트가 자동으로 갱신됩니다.")
+        elif crawl_failure_count > 0 and latest_crawled is None:
+            st.warning(
+                f"본문 크롤링에 실패해 뉴스 에이전트가 아직 브리핑을 만들지 못했습니다. 최근 오류: {crawl_error or '-'}"
+            )
+
+        if latest_crawled is not None:
+            latest_title = str(latest_crawled.get("title", "")).strip() or "제목 없음"
+            latest_content = str(latest_crawled.get("content", "")).strip()
+            latest_link = str(latest_crawled.get("link", "")).strip()
+            preview = latest_content[:320] + ("..." if len(latest_content) > 320 else "")
+            link_html = (
+                f'<a href="{html.escape(latest_link)}" target="_blank" rel="noopener noreferrer" style="font-size:12px; font-weight:700; color:{accent_color}; text-decoration:none;">원문 열기</a>'
+                if latest_link
+                else ""
+            )
+            st.markdown(
+                f"""
+                <div style="margin: 6px 0 16px 0; padding: 16px 18px; border-radius: 18px; background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,250,252,0.98)); border: 1px solid rgba(148,163,184,0.18); box-shadow: 0 10px 24px rgba(15,23,42,0.05);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+                        <div style="font-size:14px; font-weight:800; color:#0f172a;">최신 크롤링 뉴스 1건</div>
+                        {link_html}
+                    </div>
+                    <div style="font-size:13px; font-weight:800; color:#0f172a; margin-bottom:8px;">{html.escape(latest_title)}</div>
+                    <div style="font-size:13px; line-height:1.65; color:#334155; white-space:pre-wrap;">{html.escape(preview)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    if agent_key == "log" and context_text and context_text != "관련 데이터가 없습니다.":
+        preview = summarize_log_case_text(context_text)
+        st.markdown(
+            f"""
+            <div style="margin: 6px 0 16px 0; padding: 16px 18px; border-radius: 18px; background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,250,252,0.98)); border: 1px solid rgba(148,163,184,0.18); box-shadow: 0 10px 24px rgba(15,23,42,0.05);">
+                <div style="font-size:14px; font-weight:800; color:#0f172a; margin-bottom:10px;">현재 로그 에이전트 대표 케이스 1건</div>
+                <div style="font-size:13px; line-height:1.65; color:#334155; white-space:pre-wrap;">{html.escape(preview)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if not prompt_input:
+        st.info("아직 표시할 프롬프트 입력값이 없습니다.")
+        return
 
     st.markdown(
         f"""
@@ -1031,11 +1566,7 @@ def render_chart_dashboard():
 
 @fragment_decorator(run_every="3s")
 def render_live_operations_fragment():
-    try:
-        status_payload = get_backend_client().get_status()
-        sync_session_from_backend(status_payload)
-    except Exception:
-        pass
+    consume_ws_snapshot_buffer()
     render_runtime_dashboard()
 
 
@@ -1272,7 +1803,7 @@ def render_sidebar_news_compact():
             def _run_and_store(files_data, task_id):
                 try:
                     # 1) FAISS에 파일 청킹/임베딩해서 저장
-                    before = get_vector_count()
+                    before = int(st.session_state.get("vector_count", 0) or 0)
                     new_count = ingest_files(files_data, doc_type="regulation")
                     added = new_count - before
 
@@ -1358,6 +1889,35 @@ def render_faiss_tab():
                     "added": ev.get("added_count"),
                     "detail": ev.get("detail"),
                 })
+                # 이벤트로 추가된 실제 벡터 항목을 상세히 보여주는 기능
+                try:
+                    before = int(ev.get("before_count") or 0)
+                    after = int(ev.get("after_count") or 0)
+                except Exception:
+                    before = 0
+                    after = 0
+
+                if after > before:
+                    if st.button(f"이벤트에서 추가된 벡터 보기 ({after-before}건)", key=f"show_ev_{ev.get('timestamp')}_{before}_{after}"):
+                        with st.spinner("FAISS 항목 불러오는 중..."):
+                            try:
+                                resp = get_backend_client().get_faiss_entries(limit=after)
+                                items = resp.get("items", [])
+                                added = items[before:after]
+                                if not added:
+                                    st.info("추가된 벡터 항목을 찾을 수 없습니다.")
+                                else:
+                                    for it in added:
+                                        st.markdown(f"**ID:** {it.get('id')} — **type:** {it.get('type')} — **product:** {it.get('product')}")
+                                        st.code(it.get("snippet", "")[:800], language="text")
+                                    # CSV 다운로드
+                                    import pandas as _pd
+
+                                    df_added = _pd.DataFrame(added)
+                                    csv_added = df_added.to_csv(index=False).encode("utf-8")
+                                    st.download_button("이벤트 추가 벡터 CSV로 다운로드", csv_added, file_name=f"faiss_event_{before}_{after}.csv", mime="text/csv")
+                            except Exception as e:
+                                st.error(f"항목 불러오기 실패: {e}")
 
     st.markdown("---")
 
@@ -1403,6 +1963,53 @@ def render_faiss_tab():
 
                 df = _pd.DataFrame(items)
                 st.dataframe(df)
+                # 초보자용: FAISS에 저장된 데이터 구조 요약
+                st.markdown("#### 데이터 구조 요약 (초보자용)")
+                try:
+                    # 수집된 항목들을 순회하며 메타 필드 통계 수집
+                    field_stats: dict = {}
+                    sample_item = None
+                    for it in items:
+                        if sample_item is None:
+                            sample_item = it
+                        # 메타데이터가 dict로 있는 경우 우선 처리
+                        meta = it.get("metadata") or it.get("meta") or {}
+                        if isinstance(meta, dict):
+                            for k, v in meta.items():
+                                entry = field_stats.setdefault(k, {"count": 0, "types": {}, "samples": []})
+                                entry["count"] += 1
+                                t = type(v).__name__
+                                entry["types"][t] = entry["types"].get(t, 0) + 1
+                                if len(entry["samples"]) < 3:
+                                    entry["samples"].append(v)
+                        # 최상위 필드들도 취합 (id, page_content 길이 등)
+                        for topk in ("id", "title", "page_content", "content"):
+                            if topk in it:
+                                entry = field_stats.setdefault(topk, {"count": 0, "types": {}, "samples": []})
+                                entry["count"] += 1
+                                v = it.get(topk)
+                                t = type(v).__name__
+                                entry["types"][t] = entry["types"].get(t, 0) + 1
+                                if len(entry["samples"]) < 3:
+                                    if topk == "page_content":
+                                        entry["samples"].append((v or "")[:200])
+                                    else:
+                                        entry["samples"].append(v)
+
+                    total = len(items)
+                    st.markdown(f"- 총 항목: **{total}개**")
+                    st.markdown("- 주요 메타 필드(출현 비율, 대표 타입, 예시값):")
+                    for fname, info in sorted(field_stats.items(), key=lambda x: -x[1]["count"]):
+                        pct = int(100 * info["count"] / total)
+                        types_desc = ", ".join([f"{k}({v})" for k, v in info["types"].items()])
+                        samples = ", ".join([str(s) for s in info["samples"]])
+                        st.markdown(f"- **{fname}**: {info['count']}건 ({pct}%) · 타입: {types_desc} · 예시: `{samples}`")
+
+                    if sample_item:
+                        with st.expander("대표 항목 예시 (확장해서 보기)"):
+                            st.json(sample_item)
+                except Exception as e:
+                    st.warning(f"구조 요약 생성 중 오류: {e}")
                 csv = df.to_csv(index=False).encode("utf-8")
                 st.download_button("CSV로 다운로드", csv, file_name="faiss_entries.csv", mime="text/csv")
                 # ID 선택박스로 상세 조회
@@ -1431,22 +2038,14 @@ def render_faiss_tab():
 
 @fragment_decorator(run_every="3s")
 def render_live_news_fragment():
-    try:
-        status_payload = get_backend_client().get_status()
-        sync_session_from_backend(status_payload)
-    except Exception:
-        pass
+    consume_ws_snapshot_buffer()
     render_sidebar_news_compact()
     # (deprecated) original render kept for compatibility
 
 
 @fragment_decorator(run_every="3s")
 def render_live_news_prompt_fragment():
-    try:
-        status_payload = get_backend_client().get_status()
-        sync_session_from_backend(status_payload)
-    except Exception:
-        pass
+    consume_ws_snapshot_buffer()
     render_agent_prompt_panel(
         "news",
         "📰 뉴스 에이전트 프롬프트 입력값",
@@ -1457,11 +2056,7 @@ def render_live_news_prompt_fragment():
 
 @fragment_decorator(run_every="3s")
 def render_live_log_prompt_fragment():
-    try:
-        status_payload = get_backend_client().get_status()
-        sync_session_from_backend(status_payload)
-    except Exception:
-        pass
+    consume_ws_snapshot_buffer()
     render_agent_prompt_panel(
         "log",
         "📄 로그 에이전트 프롬프트 입력값",
@@ -1470,13 +2065,15 @@ def render_live_log_prompt_fragment():
     )
 
 
+@fragment_decorator(run_every="3s")
+def render_live_vector_db_fragment():
+    consume_ws_snapshot_buffer()
+    render_vector_db_panel()
+
+
 @fragment_decorator(run_every="5s")
 def render_live_faiss_fragment():
-    try:
-        status_payload = get_backend_client().get_status()
-        sync_session_from_backend(status_payload)
-    except Exception:
-        pass
+    consume_ws_snapshot_buffer()
     render_faiss_tab()
 
 
@@ -1563,23 +2160,75 @@ def run_full_analysis(show_progress: bool = False, initial_load: bool = False):
 
 
 if "initial_analysis_done" not in st.session_state:
-    # 앱을 처음 열었을 때 한 번만 초기 데이터 준비를 수행합니다.
+    st.session_state.initial_analysis_done = False
+
+if "initial_analysis_started" not in st.session_state:
+    st.session_state.initial_analysis_started = False
+
+if "initial_analysis_failed" not in st.session_state:
+    st.session_state.initial_analysis_failed = False
+
+if not st.session_state.initial_analysis_done:
     startup_header = st.empty()
-    startup_header.subheader("⏳ 초기 데이터 로딩")
+    startup_header.subheader("⏳ 초기 데이터 준비")
     startup_status = st.empty()
-    startup_status.info("백엔드 워커를 시작하고 초기 분석을 준비하고 있습니다...")
+    startup_status.info("화면은 먼저 표시하고, 초기 분석은 백그라운드에서 진행합니다.")
+
     try:
         get_backend_client().start_worker(interval_seconds=10)
-        startup_status.info(
-            "백엔드 워커 시작 완료. 로그/뉴스/FAISS 초기 분석을 진행합니다..."
-        )
     except Exception:
-        startup_status.warning(
-            "백엔드 워커 시작에 실패했습니다. 초기 분석만 시도합니다."
-        )
-    run_full_analysis(show_progress=True, initial_load=True)
-    startup_header.empty()
-    startup_status.empty()
+        pass
+
+    try:
+        status_payload = get_backend_client().get_status()
+        sync_session_from_backend(status_payload)
+        if status_payload.get("results") or status_payload.get("news") or status_payload.get("vector_count"):
+            st.session_state.initial_analysis_done = True
+            startup_header.empty()
+            startup_status.empty()
+    except Exception:
+        pass
+
+    if (not st.session_state.initial_analysis_done) and (not st.session_state.initial_analysis_started):
+        st.session_state.initial_analysis_started = True
+
+        def _bootstrap_initial_analysis(task_id: str):
+            try:
+                payload = get_backend_client().run_full_analysis(log_dir="data/logs")
+                with _background_lock:
+                    _background_results[task_id] = {
+                        "status": "completed",
+                        "result": payload,
+                        "updated_at": datetime.datetime.now().isoformat(),
+                    }
+            except Exception as error:
+                with _background_lock:
+                    _background_results[task_id] = {
+                        "status": "failed",
+                        "error": str(error),
+                        "updated_at": datetime.datetime.now().isoformat(),
+                    }
+
+        threading.Thread(
+            target=_bootstrap_initial_analysis,
+            args=("initial_analysis",),
+            daemon=True,
+        ).start()
+
+    with _background_lock:
+        initial_task = _background_results.get("initial_analysis")
+    if initial_task:
+        if initial_task.get("status") == "completed":
+            sync_session_from_backend(initial_task.get("result") or {})
+            st.session_state.initial_analysis_done = True
+            st.session_state.initial_analysis_failed = False
+            startup_header.empty()
+            startup_status.empty()
+            with _background_lock:
+                _background_results.pop("initial_analysis", None)
+        elif initial_task.get("status") == "failed":
+            st.session_state.initial_analysis_failed = True
+            startup_status.warning("초기 분석이 지연되고 있습니다. 화면은 계속 사용할 수 있습니다.")
 
 
 # -------------------------------
@@ -1625,14 +2274,13 @@ with col_main:
             except Exception:
                 pass
 
-    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, charts_tab, faiss_tab = st.tabs(
+    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, vector_db_tab = st.tabs(
         [
             "🤖 운영 현황",
             "💬 AI 심사 전략",
             "📰 뉴스 에이전트 입력",
             "📄 로그 에이전트 입력",
-            "📊 차트",
-            "🧠 FAISS",
+            "🧠 Vector DB",
         ]
     )
 
@@ -1698,28 +2346,13 @@ with col_main:
                 "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))",
             )
 
-    with charts_tab:
-        render_chart_dashboard()
-
-    with faiss_tab:
+    with vector_db_tab:
         if HAS_FRAGMENT_REFRESH:
-            render_live_faiss_fragment()
+            render_live_vector_db_fragment()
         else:
-            render_faiss_tab()
-            auto = st.checkbox("자동 새로고침 (5초)", key="faiss_auto_refresh")
-            if auto:
-                try:
-                    time.sleep(5)
-                    params = {"_autorefresh": int(time.time())}
-                    try:
-                        st.experimental_set_query_params(**params)
-                    except Exception:
-                        try:
-                            st.experimental_rerun()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+            render_vector_db_panel()
+
+    # charts and dedicated FAISS tab removed per UI simplification — FAISS stats shown in header
 
 # ================================
 # 백엔드 상태 동기화: 10초마다 갱신

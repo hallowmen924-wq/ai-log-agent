@@ -21,8 +21,10 @@ def calculate_risk(
     product: Optional[str] = None,
 ) -> Dict[str, Any]:
 
-    in_mapping = in_mapping or {}
-    out_mapping = out_mapping or {}
+    # If mappings are not provided, assume the in_fields/out_fields keys are already
+    # human-readable labels and build trivial mappings so downstream logic works.
+    in_mapping = in_mapping or {k: k for k in (in_fields or {}).keys()}
+    out_mapping = out_mapping or {k: k for k in (out_fields or {}).keys()}
 
     result = {
         "score": 0,

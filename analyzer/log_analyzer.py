@@ -4,6 +4,11 @@ from pathlib import Path
 from analyzer.log_field_parser import parse_fields
 from analyzer.log_parser import parse_logs_fast
 from mapper.excel_mapper import get_excel_sheet, load_excel_mapping
+from mapper.reject_code_mapper import (
+    extract_reject_reason_codes,
+    load_reject_code_mapping,
+    map_reject_reason_codes,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXCEL_PATH = str((PROJECT_ROOT / "data" / "R-CLIPS code def.xlsx").resolve())
@@ -19,6 +24,7 @@ def analyze_logs(raw_logs):
 
     # 🔥 1번만 로드
     sheet_cache = {}
+    reject_code_mapping = load_reject_code_mapping(PROJECT_ROOT / "data")
 
     for product in ["C9", "C6", "C11", "C12"]:
 
@@ -28,7 +34,7 @@ def analyze_logs(raw_logs):
         sheet_cache[(product, "in")] = load_excel_mapping(EXCEL_PATH, in_sheet)
         sheet_cache[(product, "out")] = load_excel_mapping(EXCEL_PATH, out_sheet)
 
-    print("🔥 엑셀 전체 사전 로딩 완료")
+    print("[log_analyzer] excel mapping preload completed")
 
     # 🔥 로그 처리
     for log in parsed_logs:
@@ -48,6 +54,7 @@ def analyze_logs(raw_logs):
         # 🔥 캐시에서 꺼냄
         in_mapping = sheet_cache[(log["product"], "in")]
         out_mapping = sheet_cache[(log["product"], "out")]
+        reject_reason_codes = extract_reject_reason_codes(log["out_data"])
 
         results.append(
             {
@@ -56,6 +63,11 @@ def analyze_logs(raw_logs):
                 "out_fields": out_fields,
                 "in_mapping": in_mapping,
                 "out_mapping": out_mapping,
+                "reject_reason_codes": reject_reason_codes,
+                "reject_reason_details": map_reject_reason_codes(
+                    reject_reason_codes,
+                    reject_code_mapping,
+                ),
             }
         )
 

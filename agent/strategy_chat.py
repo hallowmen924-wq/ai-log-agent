@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 import requests
 
+from mapper.reject_code_mapper import format_reject_reason_details
 from rag.vector_db import (
     get_vector_count,
     save_agent_reports,
@@ -54,66 +55,321 @@ def trim_context(items: list[str], limit: int = 3) -> str:
     return "\n\n".join(items[:limit])
 
 
-def trim_news_items(news_items: list[dict[str, Any]], limit: int = 5) -> str:
+def map_field_items(
+    fields: dict[str, Any], mapping: dict[str, str], limit: int = 3
+) -> list[str]:
+    if not fields:
+        return []
+    items = []
+    for key, value in list(fields.items())[:limit]:
+        label = str(mapping.get(key, key))
+        items.append(f"{label}={value}")
+    return items
+
+
+def map_all_field_items(fields: dict[str, Any], mapping: dict[str, str]) -> list[str]:
+    if not fields:
+        return []
+    items = []
+    for key, value in fields.items():
+        label = str(mapping.get(key, key))
+        items.append(f"{label}={value}")
+    return items
+
+
+INPUT_PRIORITY_GROUPS = [
+    ["나이", "연령", "age"],
+    ["등급", "신용등급", "grade", "rating"],
+    ["대출잔액", "잔액", "여신잔액", "loan balance", "balance"],
+    ["외국인", "국적", "foreign", "foreigner"],
+    ["신용카드잔액", "카드잔액", "카드론잔액", "card balance"],
+    ["연체고객", "연체", "delinquent", "overdue"],
+]
+
+
+OUTPUT_PRIORITY_GROUPS = [
+    ["한도", "대출가능금액", "가능금액", "limit", "available amount"],
+    ["금리", "이율", "rate", "interest"],
+    ["승인", "거절", "승인여부", "approval", "decision"],
+    ["최종대출가능금액", "최종한도", "최종 가능 금액", "final available amount"],
+    ["추정소득", "소득추정", "estimated income", "income"],
+]
+
+
+def pick_ordered_field_items(
+    fields: dict[str, Any],
+    mapping: dict[str, str],
+    priority_groups: list[list[str]],
+    limit: int,
+) -> list[str]:
+    if not fields:
+        return []
+
+    entries: list[tuple[str, str, str]] = []
+    for key, value in fields.items():
+        label = str(mapping.get(key, key))
+        entries.append((str(key), label, f"{label}={value}"))
+
+    picked: list[str] = []
+    used_texts: set[str] = set()
+
+    for group in priority_groups:
+        group_lower = [token.lower() for token in group]
+        for key, label, rendered in entries:
+            haystacks = [key.lower(), label.lower()]
+            if rendered in used_texts:
+                continue
+            if any(token in hay for token in group_lower for hay in haystacks):
+                picked.append(rendered)
+                used_texts.add(rendered)
+                break
+        if len(picked) >= limit:
+            return picked[:limit]
+
+    for _, _, rendered in entries:
+        if rendered in used_texts:
+            continue
+        picked.append(rendered)
+        if len(picked) >= limit:
+            break
+    return picked[:limit]
+
+
+def pick_priority_field_items(
+    fields: dict[str, Any], mapping: dict[str, str], limit: int = 3
+) -> list[str]:
+    if not fields:
+        return []
+    priority_keywords = [
+        "한도",
+        "대출",
+        "금리",
+        "이율",
+        "승인",
+        "거절",
+        "신용",
+        "점수",
+        "등급",
+        "소득",
+        "dsr",
+    ]
+    scored: list[tuple[int, str]] = []
+    for key, value in fields.items():
+        label = str(mapping.get(key, key))
+        score = 0
+        lower_label = label.lower()
+        for idx, keyword in enumerate(priority_keywords, start=1):
+            if keyword.lower() in lower_label:
+                score = max(score, len(priority_keywords) - idx + 1)
+        scored.append((score, f"{label}={value}"))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    picked = [item for _, item in scored[:limit] if item]
+    if picked:
+        return picked
+    return map_field_items(fields, mapping, limit=limit)
+
+
+def pick_representative_input_items(
+    fields: dict[str, Any], mapping: dict[str, str], limit: int = 6
+) -> list[str]:
+    return pick_ordered_field_items(
+        fields,
+        mapping,
+        priority_groups=INPUT_PRIORITY_GROUPS,
+        limit=limit,
+    )
+
+
+def pick_representative_output_items(
+    fields: dict[str, Any], mapping: dict[str, str], limit: int = 5
+) -> list[str]:
+    return pick_ordered_field_items(
+        fields,
+        mapping,
+        priority_groups=OUTPUT_PRIORITY_GROUPS,
+        limit=limit,
+    )
+
+
+def trim_news_items(news_items: list[dict[str, Any]], limit: int = 1) -> str:
     if not news_items:
         return "관련 데이터가 없습니다."
 
+    crawled_items = [
+        item for item in news_items if str(item.get("content", "")).strip()
+    ]
+    selected_items = crawled_items[:limit]
+
+    if not selected_items:
+        return "관련 데이터가 없습니다. 아직 본문 크롤링이 완료되지 않았습니다."
+
     snippets = []
-    for item in news_items[:limit]:
+    for item in selected_items:
         title = str(item.get("title", "")).strip()
-        summary = str(item.get("summary", "")).strip()
-        snippets.append(f"제목: {title}\n요약: {summary}")
+        content = str(item.get("content", "")).strip()
+        snippets.append(f"제목: {title}\n본문: {content}")
     return "\n\n".join(snippets)
 
 
-def trim_log_results(log_items: list[dict[str, Any]], limit: int = 5) -> str:
+def trim_log_results(log_items: list[dict[str, Any]], limit: int = 1) -> str:
     if not log_items:
         return "관련 데이터가 없습니다."
 
     snippets = []
     for item in log_items[:limit]:
         product = str(item.get("product", "N/A"))
-        in_fields = item.get("in_fields", {})
-        out_fields = item.get("out_fields", {})
+        in_fields = item.get("in_fields", {}) or {}
+        out_fields = item.get("out_fields", {}) or {}
         in_mapping = item.get("in_mapping", {}) or {}
         out_mapping = item.get("out_mapping", {}) or {}
+        reject_reason_details = item.get("reject_reason_details", []) or []
 
-        # 대표 입력/출력: (매핑된 필드명, 값) 형태로 표시
-        rep_in_items = []
-        for k, v in list(in_fields.items())[:5]:
-            label = in_mapping.get(k, k)
-            rep_in_items.append((label, v))
-
-        rep_out_items = []
-        for k, v in list(out_fields.items())[:5]:
-            label = out_mapping.get(k, k)
-            rep_out_items.append((label, v))
+        rep_in_items = map_all_field_items(in_fields, in_mapping)
+        rep_out_items = map_all_field_items(out_fields, out_mapping)
+        reject_items = format_reject_reason_details(reject_reason_details, limit=5)
 
         snippets.append(
             f"상품: {product}\n"
-            f"대표 입력: {rep_in_items}\n"
-            f"대표 출력: {rep_out_items}"
+            f"대표 입력: {', '.join(rep_in_items) or '-'}\n"
+            f"대표 출력: {', '.join(rep_out_items) or '-'}\n"
+            f"거절 사유: {', '.join(reject_items) or '-'}"
         )
     return "\n\n".join(snippets)
+
+
+PRODUCT_MAP = {
+    "C6": "신용대출",
+    "C9": "카드론",
+    "C11": "개인사업자대출",
+    "C12": "대환대출",
+}
+
+
+def group_logs_by_product(log_items: list[dict[str, Any]] | list[str], limit_per_product: int = 1) -> str:
+    """상품 코드별로 로그를 묶어 프롬프트에 들어갈 텍스트를 생성합니다.
+
+    각 상품 섹션은 대표 케이스를 최대 `limit_per_product`개까지 보여주고,
+    가능하면 한도/금리/승인 관련 필드를 요약해서 표시합니다.
+    """
+    if not log_items:
+        return "관련 데이터가 없습니다."
+
+    if not isinstance(log_items[0], dict):
+        return trim_context([str(item) for item in log_items], limit=1)
+
+    by_prod: dict[str, list[dict[str, Any]]] = {}
+    for it in log_items:
+        prod = str(it.get("product") or it.get("product_code") or "UNKNOWN")
+        by_prod.setdefault(prod, []).append(it)
+
+    sections = []
+    for prod, items in by_prod.items():
+        prod_name = PRODUCT_MAP.get(prod, prod)
+        header = f"[상품 코드: {prod}] {prod_name} — {len(items)}건"
+        parts = [header]
+        for i, item in enumerate(items[:limit_per_product], start=1):
+            in_fields = item.get("in_fields", {}) or {}
+            out_fields = item.get("out_fields", {}) or {}
+            in_mapping = item.get("in_mapping", {}) or {}
+            out_mapping = item.get("out_mapping", {}) or {}
+            reject_reason_details = item.get("reject_reason_details", []) or []
+
+            # 한도, 금리, 승인 여부 추출 시도 — 매핑된(사람 읽기) 키와 영어 키 모두 검사
+            limit_val = (
+                in_fields.get("limit")
+                or in_fields.get("amount")
+                or in_fields.get("한도")
+                or in_fields.get("대출금액")
+                or out_fields.get("limit")
+                or out_fields.get("amount")
+                or out_fields.get("한도")
+                or "-"
+            )
+            rate_val = (
+                in_fields.get("rate")
+                or in_fields.get("interest")
+                or in_fields.get("금리")
+                or in_fields.get("이율")
+                or out_fields.get("rate")
+                or out_fields.get("interest")
+                or out_fields.get("금리")
+                or "-"
+            )
+            approve_val = (
+                item.get("decision")
+                or item.get("approval")
+                or in_fields.get("approval")
+                or in_fields.get("승인")
+                or out_fields.get("approval")
+                or out_fields.get("승인")
+                or "-"
+            )
+
+            mapped_in_snippet = ", ".join(map_all_field_items(in_fields, in_mapping))
+            mapped_out_snippet = ", ".join(map_all_field_items(out_fields, out_mapping))
+            reject_reason_snippet = ", ".join(
+                format_reject_reason_details(reject_reason_details, limit=5)
+            )
+            short = (
+                f"  {i}. case_id={item.get('case_id','-')} limit={limit_val} rate={rate_val} approval={approve_val}\n"
+                f"     입력필드={mapped_in_snippet or '-'}\n"
+                f"     출력필드={mapped_out_snippet or '-'}\n"
+                f"     거절사유={reject_reason_snippet or '-'}"
+            )
+            parts.append(short)
+        sections.append("\n".join(parts))
+
+    return "\n\n".join(sections)
+
+
+def build_log_context_from_similar_cases(query: str, k: int = 1) -> str:
+    try:
+        docs = search_similar_logs(query)
+    except Exception:
+        docs = []
+
+    if not docs:
+        return "관련 데이터가 없습니다."
+
+    structured_items: list[dict[str, Any]] = []
+    for doc in docs[:k]:
+        meta = getattr(doc, "metadata", {}) or {}
+        structured_items.append(
+            {
+                "product": meta.get("product") or meta.get("product_code") or "UNKNOWN",
+                "in_fields": meta.get("in_fields") or {},
+                "out_fields": meta.get("out_fields") or {},
+                "reject_reason_details": meta.get("reject_reason_details") or [],
+                # FAISS metadata is already stored with mapped Korean labels.
+                "in_mapping": {},
+                "out_mapping": {},
+                "case_id": (meta.get("features") or {}).get("case_id", "-"),
+            }
+        )
+    return group_logs_by_product(structured_items, limit_per_product=1)
 
 
 def build_log_agent_prompt(log_context: str, user_input: str) -> str:
     return f"""
 당신은 금융 심사 로그 분석가입니다.
 
-[사용자 질문]
-{user_input}
+[참고] 상품 코드 의미: C6=신용대출, C9=카드론, C11=개인사업자대출, C12=대환대출
 
-[로그]
+[요청]
+사용자 질문: {user_input}
+
+[로그(상품별로 묶여있음)]
 {log_context}
 
-반드시 아래 형식으로 답하세요.
-1. 이상 거래 여부
-2. 위험 패턴
-3. 승인 가능성
-4. 핵심 근거 3개
+답변 시 반드시 아래 항목에 집중하세요: '한도(대출 가능 금액)', '금리(적용 금리)', '승인 여부(승인/거절/조건부)', '거절 사유 코드와 설명'
 
-간결하지만 실무적으로 작성하세요.
+출력 형식(한국어):
+1) 요약 판단 (승인/조건부 승인/거절)
+2) 핵심 근거 (한도/금리/승인 여부 관련 근거를 중심으로 최대 3개)
+3) 위험 패턴 및 우려 사항
+4) 즉각 권장 조치(우선순위별로 3개 이내)
+
+간결하고 실무적으로 작성하세요.
 """.strip()
 
 
@@ -330,8 +586,9 @@ def strategy_chat(
         f"문맥 검색 완료. 로그 {len(logs[:3])}건, 뉴스 {len(news[:3])}건, 규제 {len(rules[:3])}건 확보",
     )
 
-    logs_text = trim_context(logs)
-    news_text = trim_context(news)
+    # 상품별로 같은 상품군끼리 묶어서 프롬프트에 넣습니다 (한도/금리/승인 여부 중심 요약).
+    logs_text = build_log_context_from_similar_cases(user_input, k=1)
+    news_text = trim_context(news, limit=1)
     rules_text = trim_context(rules)
     prompt_inputs = {
         "log_agent": build_agent_prompt_input(
@@ -512,41 +769,49 @@ def run_periodic_news_agent(
     }
 
     if should_persist and analysis.strip():
-        emit_agent_event(
-            event_callback,
-            "vector_store",
-            "running",
-            "뉴스 에이전트 결과를 벡터 DB에 저장 중입니다.",
-        )
-        before_count = get_vector_count()
-        after_count = save_agent_reports(
-            [
-                {
-                    "agent": "news",
-                    "title": "periodic news briefing",
-                    "content": analysis,
-                }
-            ]
-        )
-        vector_update = {
-            "before_count": before_count,
-            "after_count": after_count,
-            "added_count": after_count - before_count,
-        }
-        emit_vector_event(
-            vector_callback,
-            "news_agent",
-            "append",
-            before_count,
-            after_count,
-            "주기 실행 뉴스 에이전트 브리핑 1건을 벡터 DB에 저장했습니다.",
-        )
-        emit_agent_event(
-            event_callback,
-            "vector_store",
-            "completed",
-            f"뉴스 브리핑 저장 완료. 총 {after_count}건",
-        )
+        try:
+            emit_agent_event(
+                event_callback,
+                "vector_store",
+                "running",
+                "뉴스 에이전트 결과를 벡터 DB에 저장 중입니다.",
+            )
+            before_count = get_vector_count()
+            after_count = save_agent_reports(
+                [
+                    {
+                        "agent": "news",
+                        "title": "periodic news briefing",
+                        "content": analysis,
+                    }
+                ]
+            )
+            vector_update = {
+                "before_count": before_count,
+                "after_count": after_count,
+                "added_count": after_count - before_count,
+            }
+            emit_vector_event(
+                vector_callback,
+                "news_agent",
+                "append",
+                before_count,
+                after_count,
+                "주기 실행 뉴스 에이전트 브리핑 1건을 벡터 DB에 저장했습니다.",
+            )
+            emit_agent_event(
+                event_callback,
+                "vector_store",
+                "completed",
+                f"뉴스 브리핑 저장 완료. 총 {after_count}건",
+            )
+        except Exception as error:
+            emit_agent_event(
+                event_callback,
+                "vector_store",
+                "failed",
+                f"뉴스 브리핑 저장 실패: {error}",
+            )
 
     return {
         "analysis": analysis,
@@ -587,41 +852,49 @@ def run_periodic_log_agent(
     }
 
     if should_persist and analysis.strip():
-        emit_agent_event(
-            event_callback,
-            "vector_store",
-            "running",
-            "로그 에이전트 결과를 벡터 DB에 저장 중입니다.",
-        )
-        before_count = get_vector_count()
-        after_count = save_agent_reports(
-            [
-                {
-                    "agent": "log",
-                    "title": "periodic log briefing",
-                    "content": analysis,
-                }
-            ]
-        )
-        vector_update = {
-            "before_count": before_count,
-            "after_count": after_count,
-            "added_count": after_count - before_count,
-        }
-        emit_vector_event(
-            vector_callback,
-            "log_agent",
-            "append",
-            before_count,
-            after_count,
-            "주기 실행 로그 에이전트 브리핑 1건을 벡터 DB에 저장했습니다.",
-        )
-        emit_agent_event(
-            event_callback,
-            "vector_store",
-            "completed",
-            f"로그 브리핑 저장 완료. 총 {after_count}건",
-        )
+        try:
+            emit_agent_event(
+                event_callback,
+                "vector_store",
+                "running",
+                "로그 에이전트 결과를 벡터 DB에 저장 중입니다.",
+            )
+            before_count = get_vector_count()
+            after_count = save_agent_reports(
+                [
+                    {
+                        "agent": "log",
+                        "title": "periodic log briefing",
+                        "content": analysis,
+                    }
+                ]
+            )
+            vector_update = {
+                "before_count": before_count,
+                "after_count": after_count,
+                "added_count": after_count - before_count,
+            }
+            emit_vector_event(
+                vector_callback,
+                "log_agent",
+                "append",
+                before_count,
+                after_count,
+                "주기 실행 로그 에이전트 브리핑 1건을 벡터 DB에 저장했습니다.",
+            )
+            emit_agent_event(
+                event_callback,
+                "vector_store",
+                "completed",
+                f"로그 브리핑 저장 완료. 총 {after_count}건",
+            )
+        except Exception as error:
+            emit_agent_event(
+                event_callback,
+                "vector_store",
+                "failed",
+                f"로그 브리핑 저장 실패: {error}",
+            )
 
     return {
         "analysis": analysis,

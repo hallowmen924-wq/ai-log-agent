@@ -16,5 +16,11 @@ pdfplumber
 requests
 fastapi
 uvicorn
+websockets>=15.0
+websocket-client>=1.8.0
 streamlit-echarts
 plotly
+beautifulsoup4
+readability-lxml
+trafilatura
+newspaper3k

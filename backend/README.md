@@ -18,8 +18,11 @@
 ```powershell
 cd backend
 pip install -r requirements.txt
+pip install websocket-client
 uvicorn app_main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+WebSocket 경고가 보이면 `websockets`가 빠진 경우가 대부분입니다. 현재 `requirements.txt`에 포함되어 있으므로 다시 설치하면 됩니다.
 
 ## Streamlit 연동
 `backend/streamlit_client.py`의 `BackendClient`를 import해서 바로 호출하면 됩니다.

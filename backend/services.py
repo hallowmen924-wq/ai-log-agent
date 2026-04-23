@@ -51,12 +51,31 @@ class BackendState:
         self.vector_events: list[dict[str, Any]] = []
         self.chart_payloads: dict[str, Any] = {}
         self.last_chart_time: datetime.datetime | None = None
+        self.full_faiss_items: list[dict[str, Any]] = []
+        self.news_crawl_running = False
+        self.news_crawl_target_count = 0
+        self.news_crawl_success_count = 0
+        self.news_crawl_failure_count = 0
+        self.last_news_crawl_time: datetime.datetime | None = None
+        self.last_news_crawl_error: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
         try:
             vector_count = get_vector_count()
         except Exception:
             vector_count = 0
+        cached_faiss_items: list[dict[str, Any]] = []
+        with self.lock:
+            cached_faiss_items = safe_serialize(self.full_faiss_items)
+        if vector_count > 0 and not cached_faiss_items:
+            try:
+                from rag.vector_db import list_vectors
+
+                cached_faiss_items = safe_serialize(list_vectors(limit=1000))
+                with self.lock:
+                    self.full_faiss_items = cached_faiss_items
+            except Exception:
+                cached_faiss_items = []
         with self.lock:
             return {
                 "running": self.running,
@@ -123,6 +142,17 @@ class BackendState:
                     self.last_chart_time.isoformat() if self.last_chart_time else None
                 ),
                 "chart_payloads": self.chart_payloads,
+                "full_faiss_items": cached_faiss_items,
+                "news_crawl_running": self.news_crawl_running,
+                "news_crawl_target_count": self.news_crawl_target_count,
+                "news_crawl_success_count": self.news_crawl_success_count,
+                "news_crawl_failure_count": self.news_crawl_failure_count,
+                "last_news_crawl_time": (
+                    self.last_news_crawl_time.isoformat()
+                    if self.last_news_crawl_time
+                    else None
+                ),
+                "last_news_crawl_error": self.last_news_crawl_error,
             }
 
 
@@ -172,6 +202,20 @@ def record_vector_event(
     }
     with state.lock:
         state.vector_events = _push_front(state.vector_events, event)
+    # update a full FAISS snapshot for UI consumers
+    try:
+        from rag.vector_db import list_vectors
+
+        try:
+            items = list_vectors(limit=1000)
+        except Exception:
+            items = []
+        with state.lock:
+            state.full_faiss_items = items
+            state.last_faiss_time = timestamp
+    except Exception:
+        # non-fatal: just skip snapshot update
+        pass
 
 
 def reset_strategy_runtime(question: str) -> None:
@@ -303,6 +347,12 @@ def enrich_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "out_fields": safe_serialize(out_fields),
                     "in_mapping": safe_serialize(in_mapping),
                     "out_mapping": safe_serialize(out_mapping),
+                    "reject_reason_codes": safe_serialize(
+                        row.get("reject_reason_codes", [])
+                    ),
+                    "reject_reason_details": safe_serialize(
+                        row.get("reject_reason_details", [])
+                    ),
                     "risk": safe_serialize(risk),
                 }
             )
@@ -413,6 +463,119 @@ def collect_news_bundle(
         f"뉴스 {len(effective_news)}건 유지, 신규 기사 {new_unique_count}건 반영",
     )
     build_chart_payloads()
+
+    # If there are new items, fetch article contents in background and then build FAISS
+    if new_unique_count > 0:
+        def _bg_fetch_and_index(news_snapshot: list[dict[str, Any]]):
+            crawl_targets = [item for item in news_snapshot if not item.get("content")]
+            record_activity_event(
+                "news_agent",
+                "pending",
+                f"뉴스 본문 크롤링 완료를 기다리는 중입니다. 대상 {len(crawl_targets)}건",
+                update_status=True,
+            )
+            with state.lock:
+                state.news_crawl_running = True
+                state.news_crawl_target_count = len(crawl_targets)
+                state.news_crawl_success_count = 0
+                state.news_crawl_failure_count = 0
+                state.last_news_crawl_time = datetime.datetime.now()
+                state.last_news_crawl_error = None
+            record_activity_event(
+                "news_crawler",
+                "running",
+                f"뉴스 본문을 백그라운드로 수집하고 FAISS에 적재합니다. 대상 {len(crawl_targets)}건",
+                update_status=True,
+            )
+            try:
+                from agent.news_agent import fetch_article_text
+
+                for i, item in enumerate(news_snapshot):
+                    # if content already present, skip
+                    if item.get("content"):
+                        continue
+                    try:
+                        txt = fetch_article_text(item.get("link", ""))
+                        if txt:
+                            # update global state.news matching by link
+                            with state.lock:
+                                for s in state.news:
+                                    if s.get("link") == item.get("link") and not s.get("content"):
+                                        s["content"] = txt
+                                        state.news_crawl_success_count += 1
+                                        state.last_news_crawl_time = datetime.datetime.now()
+                                        break
+                        else:
+                            with state.lock:
+                                state.news_crawl_failure_count += 1
+                                state.last_news_crawl_time = datetime.datetime.now()
+                                state.last_news_crawl_error = "empty_content"
+                    except Exception:
+                        with state.lock:
+                            state.news_crawl_failure_count += 1
+                            state.last_news_crawl_time = datetime.datetime.now()
+                            state.last_news_crawl_error = "fetch_failed"
+                    # small sleep to be polite
+                    time.sleep(0.15)
+
+                # refresh the news agent prompt/briefing only after crawled content exists
+                try:
+                    with state.lock:
+                        has_crawled_news = any(
+                            str(news_item.get("content", "")).strip()
+                            for news_item in state.news
+                        )
+                    if has_crawled_news:
+                        run_background_news_agent_cycle(should_persist=True)
+                    else:
+                        record_activity_event(
+                            "news_agent",
+                            "failed",
+                            "크롤링된 뉴스 본문이 없어 뉴스 브리핑을 생성하지 못했습니다.",
+                            update_status=True,
+                        )
+                except Exception as e:
+                    with state.lock:
+                        state.last_news_crawl_error = f"news_agent_failed: {e}"
+                    record_activity_event(
+                        "news_agent",
+                        "failed",
+                        f"뉴스 브리핑 생성 실패: {e}",
+                        update_status=True,
+                    )
+
+                # after fetching all contents, rebuild FAISS using current state.news
+                try:
+                    count = build_faiss_bundle(logs=None, news=None, source="news_crawler")
+                    record_activity_event(
+                        "news_crawler",
+                        "completed",
+                        f"뉴스 크롤링 및 FAISS 적재 완료. 총 벡터 {count}건",
+                        update_status=True,
+                    )
+                except Exception as e:
+                    record_activity_event(
+                        "news_crawler",
+                        "failed",
+                        f"크롤링 후 FAISS 적재 실패: {e}",
+                        update_status=True,
+                    )
+                build_chart_payloads()
+                with state.lock:
+                    state.news_crawl_running = False
+                    state.last_news_crawl_time = datetime.datetime.now()
+            except Exception as e:
+                with state.lock:
+                    state.news_crawl_running = False
+                    state.last_news_crawl_time = datetime.datetime.now()
+                    state.last_news_crawl_error = str(e)
+                record_activity_event("news_crawler", "failed", f"백그라운드 크롤러 실패: {e}", update_status=True)
+
+        # snapshot to pass into thread
+        news_snapshot = list(effective_news)
+        t = threading.Thread(target=_bg_fetch_and_index, args=(news_snapshot,), daemon=True)
+        t.start()
+
     return effective_news, issues
 
 
@@ -442,8 +605,17 @@ def build_faiss_bundle(
     source: str = "faiss_builder",
 ) -> int:
     with state.lock:
-        effective_logs = logs if logs is not None else state.results
-        effective_news = news if news is not None else state.news
+        effective_logs = list(logs) if logs is not None else list(state.results)
+        effective_news = list(news) if news is not None else list(state.news)
+
+    if logs is None and not effective_logs:
+        raw_text, file_count = load_all_logs()
+        if raw_text.strip():
+            effective_logs = analyze_logs(raw_text)
+            with state.lock:
+                state.results = effective_logs
+                state.file_count = file_count
+
     try:
         before_count = get_vector_count()
     except Exception:
@@ -549,6 +721,18 @@ def ask_strategy(question: str) -> dict[str, Any]:
 def run_background_news_agent_cycle(should_persist: bool = True) -> dict[str, Any]:
     with state.lock:
         effective_news = list(state.news)
+        last_news_crawl_error = state.last_news_crawl_error
+    if not any(str(item.get("content", "")).strip() for item in effective_news):
+        detail = "크롤링된 뉴스 본문이 없어 뉴스 브리핑을 생성하지 못했습니다."
+        if last_news_crawl_error:
+            detail = f"뉴스 브리핑 대기 중: 본문 확보 실패 ({last_news_crawl_error})"
+        record_activity_event("news_agent", "failed", detail, update_status=True)
+        return {
+            "analysis": state.latest_news_briefing,
+            "prompt_input": state.latest_news_prompt_input,
+            "skipped": True,
+            "reason": "no_crawled_news_content",
+        }
 
     def on_agent_event(agent: str, status: str, detail: str) -> None:
         record_activity_event(agent, status, detail, update_status=True)

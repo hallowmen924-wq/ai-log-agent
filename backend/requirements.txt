@@ -1,5 +1,6 @@
 fastapi>=0.101.0
 uvicorn==0.22.0
+websockets>=15.0
 pandas
 numpy
 python-multipart
@@ -15,3 +16,7 @@ langchain-text-splitters
 sentence-transformers
 feedparser
 openpyxl
+beautifulsoup4
+readability-lxml
+trafilatura
+newspaper3k

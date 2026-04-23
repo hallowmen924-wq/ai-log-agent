@@ -79,11 +79,22 @@ def apply_mapping(fields, mapping):
     return ", ".join(result)
 
 
+def map_fields(fields: dict, mapping: dict) -> dict:
+    """Return a new dict where keys are replaced by mapping.get(key, key)."""
+    if not fields:
+        return {}
+    try:
+        return {mapping.get(k, k): v for k, v in fields.items()}
+    except Exception:
+        # fallback: return original
+        return dict(fields)
+
+
 def build_vector_db(logs, news):
     global db
 
     start = time.time()
-    print("🚀 벡터 생성 시작")
+    print("벡터 생성 시작")
 
     documents = []
     documents.extend(load_existing_agent_report_docs())
@@ -280,21 +291,25 @@ def build_vector_db(logs, news):
         except Exception:
             logger.info("---- RAG INGEST: original log ---- %s", str(log))
 
-        print(f"📄 로그 처리 중... {i+1}/{len(logs)}")
+        print(f"로그 처리 중... {i+1}/{len(logs)}")
 
         # 🔥 매핑 적용
-        in_text = apply_mapping(
-            log.get("in_fields", {}),
-            log.get("in_mapping", {}),
-        )
+        in_fields = log.get("in_fields", {}) or {}
+        out_fields = log.get("out_fields", {}) or {}
+        in_mapping = log.get("in_mapping", {}) or {}
+        out_mapping = log.get("out_mapping", {}) or {}
+        reject_reason_details = log.get("reject_reason_details", []) or []
 
-        out_text = apply_mapping(
-            log.get("out_fields", {}),
-            log.get("out_mapping", {}),
+        in_text = apply_mapping(in_fields, in_mapping)
+        out_text = apply_mapping(out_fields, out_mapping)
+        reject_reason_text = ", ".join(
+            item.get("description") or item.get("code") or ""
+            for item in reject_reason_details
+            if item.get("description") or item.get("code")
         )
 
         full_text = f"""
-        [상품] {log.get("product")} [IN] {in_text} [OUT] {out_text}
+        [상품] {log.get("product")} [IN] {in_text} [OUT] {out_text} [거절사유] {reject_reason_text or '-'}
         """
 
         print(f"변환된 로그:\n{full_text[:300]}")
@@ -302,16 +317,21 @@ def build_vector_db(logs, news):
         # feature 추출
         features = _extract_features(log)
 
+        # map keys to human-readable labels for storage to FAISS
+        mapped_in = map_fields(in_fields, in_mapping)
+        mapped_out = map_fields(out_fields, out_mapping)
+
         documents.append(
             Document(
                 page_content=full_text[:2000],
                 metadata={
                     "type": "log",
                     "product": log.get("product"),
-                    "in_fields": log.get("in_fields", {}),
-                    "out_fields": log.get("out_fields", {}),
-                    "in_mapping": log.get("in_mapping", {}),
-                    "out_mapping": log.get("out_mapping", {}),
+                    # store mapped fields only (no raw mapping stored)
+                    "in_fields": mapped_in,
+                    "out_fields": mapped_out,
+                    "reject_reason_codes": log.get("reject_reason_codes") or [],
+                    "reject_reason_details": reject_reason_details,
                     "features": features,
                 },
             )
@@ -328,7 +348,7 @@ def build_vector_db(logs, news):
         except Exception:
             ingest_logger.info("---- RAG INGEST: original news ---- %s", str(n))
 
-        print(f"📰 뉴스 처리 중... {i+1}/{len(news)}")
+        print(f"뉴스 처리 중... {i+1}/{len(news)}")
 
         title = n.get("title", "")
         content = (n.get("content") or n.get("summary") or "")[:1000]
@@ -337,7 +357,7 @@ def build_vector_db(logs, news):
 
         documents.append(Document(page_content=text, metadata={"type": "news"}))
 
-    print(f"✅ document 개수: {len(documents)}")
+    print(f"document 개수: {len(documents)}")
 
     # chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
@@ -348,15 +368,28 @@ def build_vector_db(logs, news):
         for chunk in chunks:
             split_docs.append(Document(page_content=chunk, metadata=doc.metadata))
 
-    print(f"🔥 총 chunk 수: {len(split_docs)}")
+    print(f"총 chunk 수: {len(split_docs)}")
 
-    print("🧠 embedding 시작")
+    if not split_docs:
+        ingest_logger.warning(
+            "FAISS rebuild skipped because no chunks were produced from logs/news"
+        )
+        print("No chunks produced; skipping FAISS rebuild")
+        return get_vector_count()
+
+    print("embedding 시작")
 
     db = FAISS.from_documents(split_docs, get_embeddings())
 
     db.save_local("faiss_db")
+    count_after = len(getattr(db, "index_to_docstore_id", []) or [])
+    try:
+        ingest_logger.info("FAISS saved: %d vectors", count_after)
+    except Exception:
+        ingest_logger.info("FAISS saved: unknown vector count")
 
-    print(f"⏱️ 완료: {time.time() - start:.2f}초")
+    print(f"완료: {time.time() - start:.2f}초")
+    return count_after
 
 
 def load_db():
@@ -364,13 +397,18 @@ def load_db():
 
     if db is None:
         if os.path.exists("faiss_db"):
-            print("📦 FAISS 로드")
+            print("FAISS 로드")
 
             db = FAISS.load_local(
                 "faiss_db",
                 get_embeddings(),
                 allow_dangerous_deserialization=True,  # 🔥 핵심
             )
+
+
+def _get_loaded_db():
+    load_db()
+    return db
 
 
 def search_context(query, k=5):
@@ -384,13 +422,13 @@ def search_context(query, k=5):
         if d.metadata["type"] == "log":
             # 메타데이터에 원본 필드/매핑이 있으면 사람이 읽기 좋은 형태로 재구성합니다.
             meta = d.metadata
+            # stored fields are already mapped to human-readable keys
             in_fields = meta.get("in_fields") or {}
             out_fields = meta.get("out_fields") or {}
-            in_mapping = meta.get("in_mapping") or {}
-            out_mapping = meta.get("out_mapping") or {}
 
-            in_text = apply_mapping(in_fields, in_mapping)
-            out_text = apply_mapping(out_fields, out_mapping)
+            # create readable snippets from mapped dicts
+            in_text = apply_mapping(in_fields, {})
+            out_text = apply_mapping(out_fields, {})
 
             formatted = f"[상품] {meta.get('product')} [IN] {in_text} [OUT] {out_text}"
             logs.append(formatted)
@@ -409,15 +447,10 @@ def search_similar_logs(query):
 
 
 def get_vector_count():
-
-    if not os.path.exists("faiss_db"):
+    local_db = _get_loaded_db()
+    if local_db is None:
         return 0
-
-    db = FAISS.load_local(
-        "faiss_db", get_embeddings(), allow_dangerous_deserialization=True
-    )
-
-    return len(db.index_to_docstore_id)
+    return len(getattr(local_db, "index_to_docstore_id", []) or [])
 
 
 def save_agent_reports(reports):
@@ -461,6 +494,11 @@ def save_agent_reports(reports):
         db.add_documents(documents)
 
     db.save_local("faiss_db")
+    try:
+        count_after = len(getattr(db, "index_to_docstore_id", []) or [])
+        ingest_logger.info("FAISS saved (agent_report): %d vectors", count_after)
+    except Exception:
+        ingest_logger.info("FAISS saved (agent_report): unknown vector count")
     return len(db.index_to_docstore_id)
 
 
@@ -533,6 +571,11 @@ def ingest_files(
         db.add_documents(split_docs)
 
     db.save_local("faiss_db")
+    try:
+        count_after = len(getattr(db, "index_to_docstore_id", []) or [])
+        ingest_logger.info("FAISS saved (file_ingest): %d vectors", count_after)
+    except Exception:
+        ingest_logger.info("FAISS saved (file_ingest): unknown vector count")
 
     ingest_logger.info(
         "Ingested %d chunks for %d files", len(split_docs), len(files_data)
@@ -543,28 +586,88 @@ def ingest_files(
 def list_vectors(limit: int = 200) -> list[dict]:
     """Return metadata summary for vectors stored in FAISS (limit recent items)."""
     try:
-        if not os.path.exists("faiss_db"):
+        local_db = _get_loaded_db()
+        if local_db is None:
             return []
-        local_db = FAISS.load_local(
-            "faiss_db",
-            get_embeddings(),
-            allow_dangerous_deserialization=True,
-        )
-        doc_map = getattr(local_db.docstore, "_dict", {})
+
+        # FAISS stores a mapping `index_to_docstore_id` which lists doc ids in index order.
+        # Use that mapping for a robust iteration; fall back to docstore._dict if needed.
         items = []
-        for doc_id, doc in list(doc_map.items())[:limit]:
-            meta = getattr(doc, "metadata", {}) or {}
-            items.append(
-                {
-                    "id": doc_id,
-                    "type": meta.get("type"),
-                    "product": meta.get("product"),
-                    "agent": meta.get("agent"),
-                    "source": meta.get("source"),
-                    "name": meta.get("name"),
-                    "snippet": (getattr(doc, "page_content", "") or "")[:400],
-                }
-            )
+        ids = []
+        try:
+            raw_ids = getattr(local_db, "index_to_docstore_id", []) or []
+            if isinstance(raw_ids, dict):
+                ids = [doc_id for _, doc_id in sorted(raw_ids.items())]
+            else:
+                ids = list(raw_ids)
+        except Exception:
+            ids = []
+
+        # if ids empty, try to read docstore internal dict keys
+        if not ids:
+            doc_map = getattr(local_db.docstore, "_dict", {}) or {}
+            ids = list(doc_map.keys())
+
+        # Return the most recent ids within the limit.
+        if limit and limit > 0:
+            ids = ids[-limit:]
+
+        for doc_id in ids:
+            try:
+                doc = None
+                # try docstore lookup
+                doc_map = getattr(local_db.docstore, "_dict", None)
+                if doc_map is not None:
+                    doc = doc_map.get(doc_id)
+                    # fallback: docstore keys may be different types (int vs str),
+                    # try string-matching to locate the document when direct lookup fails.
+                    if doc is None:
+                        try:
+                            for k, v in doc_map.items():
+                                if str(k) == str(doc_id):
+                                    doc = v
+                                    break
+                        except Exception:
+                            pass
+                # fallback: attempt attribute access
+                if doc is None:
+                    doc = getattr(local_db, "docstore", {}).get(doc_id) if hasattr(local_db, "docstore") else None
+
+                # another fallback: try string-key matching on docstore attribute dict
+                if doc is None:
+                    try:
+                        doc_attr_map = getattr(local_db.docstore, "_dict", None) or {}
+                        for k, v in getattr(local_db.docstore, "_dict", {}).items():
+                            if str(k) == str(doc_id):
+                                doc = v
+                                break
+                    except Exception:
+                        pass
+
+                if doc is None:
+                    # can't resolve this id; skip
+                    continue
+
+                meta = getattr(doc, "metadata", {}) or {}
+                items.append(
+                    {
+                        "id": str(doc_id),
+                        "type": meta.get("type"),
+                        "product": meta.get("product"),
+                        "agent": meta.get("agent"),
+                        "source": meta.get("source"),
+                        "name": meta.get("name"),
+                        "features": meta.get("features") or {},
+                        "in_fields": meta.get("in_fields") or {},
+                        "out_fields": meta.get("out_fields") or {},
+                        "reject_reason_codes": meta.get("reject_reason_codes") or [],
+                        "reject_reason_details": meta.get("reject_reason_details") or [],
+                        "snippet": (getattr(doc, "page_content", "") or "")[:400],
+                    }
+                )
+            except Exception:
+                continue
+
         return items
     except Exception:
         return []
@@ -573,19 +676,32 @@ def list_vectors(limit: int = 200) -> list[dict]:
 def get_vector_by_id(doc_id: str) -> dict | None:
     """Return full document (page_content and metadata) for a given docstore id."""
     try:
-        if not os.path.exists("faiss_db"):
+        local_db = _get_loaded_db()
+        if local_db is None:
             return None
-        local_db = FAISS.load_local(
-            "faiss_db",
-            get_embeddings(),
-            allow_dangerous_deserialization=True,
-        )
-        doc_map = getattr(local_db.docstore, "_dict", {})
-        doc = doc_map.get(doc_id)
+
+        # prefer direct docstore lookup via index_to_docstore_id or internal dict
+        try:
+            doc_map = getattr(local_db.docstore, "_dict", {}) or {}
+            doc = doc_map.get(doc_id)
+        except Exception:
+            doc = None
+
+        # fallback: if doc is still None, try converting id types (int vs str)
+        if doc is None:
+            try:
+                for k, v in getattr(local_db.docstore, "_dict", {}).items():
+                    if str(k) == str(doc_id):
+                        doc = v
+                        break
+            except Exception:
+                doc = None
+
         if doc is None:
             return None
+
         return {
-            "id": doc_id,
+            "id": str(doc_id),
             "page_content": getattr(doc, "page_content", ""),
             "metadata": getattr(doc, "metadata", {}) or {},
         }
