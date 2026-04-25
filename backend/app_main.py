@@ -54,6 +54,31 @@ _faiss_stats_cache: dict[str, object] = {
 }
 
 
+def build_ws_snapshot(snapshot: dict) -> dict:
+    return {
+        "vector_count": snapshot.get("vector_count"),
+        "vector_events": snapshot.get("vector_events", []),
+        "agent_activity_log": snapshot.get("agent_activity_log", []),
+        "agent_statuses": snapshot.get("agent_statuses", {}),
+        "latest_news_prompt_input": snapshot.get("latest_news_prompt_input", {}),
+        "last_news_prompt_input_time": snapshot.get("last_news_prompt_input_time"),
+        "latest_log_prompt_input": snapshot.get("latest_log_prompt_input", {}),
+        "last_log_prompt_input_time": snapshot.get("last_log_prompt_input_time"),
+        "latest_news_briefing": snapshot.get("latest_news_briefing"),
+        "last_news_briefing_time": snapshot.get("last_news_briefing_time"),
+        "latest_log_briefing": snapshot.get("latest_log_briefing"),
+        "last_log_briefing_time": snapshot.get("last_log_briefing_time"),
+        "last_news_time": snapshot.get("last_news_time"),
+        "last_new_item_time": snapshot.get("last_new_item_time"),
+        "news_crawl_running": snapshot.get("news_crawl_running"),
+        "news_crawl_target_count": snapshot.get("news_crawl_target_count"),
+        "news_crawl_success_count": snapshot.get("news_crawl_success_count"),
+        "news_crawl_failure_count": snapshot.get("news_crawl_failure_count"),
+        "last_news_crawl_time": snapshot.get("last_news_crawl_time"),
+        "last_news_crawl_error": snapshot.get("last_news_crawl_error"),
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     # 화면에서 가장 먼저 확인하는 상태 API입니다.
@@ -436,30 +461,7 @@ async def websocket_faiss_updates(websocket: WebSocket):
                     payload = {
                         "type": "vector_event",
                         "event": ev,
-                        "snapshot": {
-                            "vector_count": snapshot.get("vector_count"),
-                            "vector_events": snapshot.get("vector_events", []),
-                            "full_faiss_items": snapshot.get("full_faiss_items", []),
-                            "agent_activity_log": snapshot.get("agent_activity_log", []),
-                            "agent_statuses": snapshot.get("agent_statuses", {}),
-                            "latest_news_prompt_input": snapshot.get("latest_news_prompt_input", {}),
-                            "last_news_prompt_input_time": snapshot.get("last_news_prompt_input_time"),
-                            "latest_log_prompt_input": snapshot.get("latest_log_prompt_input", {}),
-                            "last_log_prompt_input_time": snapshot.get("last_log_prompt_input_time"),
-                            "latest_news_briefing": snapshot.get("latest_news_briefing"),
-                            "last_news_briefing_time": snapshot.get("last_news_briefing_time"),
-                            "latest_log_briefing": snapshot.get("latest_log_briefing"),
-                            "last_log_briefing_time": snapshot.get("last_log_briefing_time"),
-                            "news": snapshot.get("news", []),
-                            "last_news_time": snapshot.get("last_news_time"),
-                            "last_new_item_time": snapshot.get("last_new_item_time"),
-                            "news_crawl_running": snapshot.get("news_crawl_running"),
-                            "news_crawl_target_count": snapshot.get("news_crawl_target_count"),
-                            "news_crawl_success_count": snapshot.get("news_crawl_success_count"),
-                            "news_crawl_failure_count": snapshot.get("news_crawl_failure_count"),
-                            "last_news_crawl_time": snapshot.get("last_news_crawl_time"),
-                            "last_news_crawl_error": snapshot.get("last_news_crawl_error"),
-                        },
+                        "snapshot": build_ws_snapshot(snapshot),
                     }
                 except Exception:
                     payload = {"type": "vector_event", "event": ev}
@@ -470,30 +472,7 @@ async def websocket_faiss_updates(websocket: WebSocket):
                 await websocket.send_json(
                     {
                         "type": "state_update",
-                        "snapshot": {
-                            "vector_count": snapshot.get("vector_count"),
-                            "vector_events": snapshot.get("vector_events", []),
-                            "full_faiss_items": snapshot.get("full_faiss_items", []),
-                            "agent_activity_log": snapshot.get("agent_activity_log", []),
-                            "agent_statuses": snapshot.get("agent_statuses", {}),
-                            "latest_news_prompt_input": snapshot.get("latest_news_prompt_input", {}),
-                            "last_news_prompt_input_time": snapshot.get("last_news_prompt_input_time"),
-                            "latest_log_prompt_input": snapshot.get("latest_log_prompt_input", {}),
-                            "last_log_prompt_input_time": snapshot.get("last_log_prompt_input_time"),
-                            "latest_news_briefing": snapshot.get("latest_news_briefing"),
-                            "last_news_briefing_time": snapshot.get("last_news_briefing_time"),
-                            "latest_log_briefing": snapshot.get("latest_log_briefing"),
-                            "last_log_briefing_time": snapshot.get("last_log_briefing_time"),
-                            "news": snapshot.get("news", []),
-                            "last_news_time": snapshot.get("last_news_time"),
-                            "last_new_item_time": snapshot.get("last_new_item_time"),
-                            "news_crawl_running": snapshot.get("news_crawl_running"),
-                            "news_crawl_target_count": snapshot.get("news_crawl_target_count"),
-                            "news_crawl_success_count": snapshot.get("news_crawl_success_count"),
-                            "news_crawl_failure_count": snapshot.get("news_crawl_failure_count"),
-                            "last_news_crawl_time": snapshot.get("last_news_crawl_time"),
-                            "last_news_crawl_error": snapshot.get("last_news_crawl_error"),
-                        },
+                        "snapshot": build_ws_snapshot(snapshot),
                     }
                 )
             await asyncio.sleep(1)

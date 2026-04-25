@@ -222,12 +222,12 @@ def collect_news_from_naver_search(query: str = "카드론 대출", limit: int =
     items: list[dict[str, str]] = []
     seen: set[str] = set()
 
-    for anchor in soup.find_all("a", href=True):
+    def append_item(anchor) -> None:
         href = str(anchor.get("href", "")).strip()
         if not href or href in seen:
-            continue
+            return
         if "channelPromotion" in href or href.startswith("javascript:"):
-            continue
+            return
 
         is_candidate = (
             "n.news.naver.com" in href
@@ -236,23 +236,54 @@ def collect_news_from_naver_search(query: str = "카드론 대출", limit: int =
             or "v.daum.net/v/" in href
         )
         if not is_candidate:
-            continue
+            return
 
         title = (anchor.get("title") or anchor.get_text(" ", strip=True) or "").strip()
         title = _clean_text(title)
-        if not title or len(title) < 4:
-            continue
+        if not title or len(title) < 8:
+            return
+        if title in {"네이버뉴스", "네이버 뉴스", "뉴스", "기사원문", "기사 원문"}:
+            return
+
+        summary = ""
+        container = anchor.find_parent(["div", "li", "article"])
+        if container is not None:
+            for selector in (
+                ".news_dsc",
+                ".dsc_wrap",
+                ".api_txt_lines.dsc_txt_wrap",
+                ".news_contents .dsc_txt_wrap",
+                ".news_area .api_txt_lines",
+            ):
+                node = container.select_one(selector)
+                if node is None:
+                    continue
+                candidate = _clean_text(node.get_text(" ", strip=True))
+                if candidate and candidate != title:
+                    summary = candidate
+                    break
 
         seen.add(href)
         items.append(
             {
                 "title": title,
-                "summary": "",
+                "summary": summary,
                 "link": href,
                 "published": "",
                 "content": "",
             }
         )
+
+    headline_anchors = soup.select("a.news_tit")
+    if headline_anchors:
+        for anchor in headline_anchors:
+            append_item(anchor)
+            if len(items) >= limit:
+                break
+        return items
+
+    for anchor in soup.find_all("a", href=True):
+        append_item(anchor)
         if len(items) >= limit:
             break
 

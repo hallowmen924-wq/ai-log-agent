@@ -67,14 +67,128 @@ def load_existing_agent_report_docs():
 
 db = None
 
+_NULL_LIKE_VALUES = {"", "NULL", "NONE", "NAN", "N/A", "NA"}
+
+
+def normalize_zero_like_text(text: str) -> str:
+    compact = text.replace(",", "")
+    if re.fullmatch(r"[+-]?0+(?:\.0+)?", compact):
+        return "0"
+    return text
+
+
+def normalize_numeric_text(text: str) -> str:
+    compact = text.replace(",", "")
+    if not re.fullmatch(r"[+-]?\d+(?:\.\d+)?", compact):
+        return text
+
+    sign = ""
+    if compact.startswith(("+", "-")):
+        sign = compact[0]
+        compact = compact[1:]
+
+    if "." in compact:
+        integer_part, fractional_part = compact.split(".", 1)
+        integer_part = integer_part.lstrip("0") or "0"
+        return f"{sign}{integer_part}.{fractional_part}"
+
+    return f"{sign}{compact.lstrip('0') or '0'}"
+
+
+def clean_faiss_text(value):
+    if value is None:
+        return ""
+    text = str(value).replace("\xa0", " ")
+    text = re.sub(r"\b1\.\s*0\b", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip()
+    text = normalize_zero_like_text(text)
+    return normalize_numeric_text(text)
+
+
+def is_ignorable_faiss_value(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (int, float)):
+        return float(value) == 0.0
+
+    text = clean_faiss_text(value)
+    if not text:
+        return True
+    if text.upper() in _NULL_LIKE_VALUES:
+        return True
+
+    numeric_candidate = text.replace(",", "")
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?", numeric_candidate):
+        try:
+            return float(numeric_candidate) == 0.0
+        except Exception:
+            return False
+
+    return False
+
+
+def sanitize_faiss_fields(fields: dict, drop_keys: set[str] | None = None) -> dict:
+    if not fields:
+        return {}
+
+    cleaned = {}
+    for key, value in fields.items():
+        if drop_keys and key in drop_keys:
+            continue
+        if is_ignorable_faiss_value(value):
+            continue
+
+        cleaned_key = clean_faiss_text(key)
+        cleaned_value = clean_faiss_text(value)
+        if not cleaned_key or is_ignorable_faiss_value(cleaned_value):
+            continue
+        cleaned[cleaned_key] = cleaned_value
+
+    return cleaned
+
+
+def sanitize_faiss_mapping(mapping: dict) -> dict:
+    if not mapping:
+        return {}
+
+    cleaned = {}
+    for key, value in mapping.items():
+        cleaned_key = clean_faiss_text(key)
+        cleaned_value = clean_faiss_text(value)
+        if not cleaned_key:
+            continue
+        cleaned[cleaned_key] = cleaned_value or cleaned_key
+
+    return cleaned
+
+
+def find_globally_ignorable_field_keys(logs, field_name: str) -> set[str]:
+    key_states: dict[str, bool] = {}
+
+    for log in logs:
+        fields = (log or {}).get(field_name, {}) or {}
+        for key, value in fields.items():
+            current = key_states.setdefault(key, True)
+            key_states[key] = current and is_ignorable_faiss_value(value)
+
+    return {key for key, always_ignorable in key_states.items() if always_ignorable}
+
 
 def apply_mapping(fields, mapping):
     result = []
 
     for k, v in fields.items():
-        meaning = mapping.get(k, k)  # 매핑 없으면 코드 그대로
+        if is_ignorable_faiss_value(v):
+            continue
 
-        result.append(f"{meaning}: {v}")
+        key_text = clean_faiss_text(k)
+        value_text = clean_faiss_text(v)
+        meaning = clean_faiss_text(mapping.get(k, key_text) or key_text)
+        if not key_text or not meaning or is_ignorable_faiss_value(value_text):
+            continue
+
+        result.append(f"{meaning}: {value_text}")
 
     return ", ".join(result)
 
@@ -84,10 +198,31 @@ def map_fields(fields: dict, mapping: dict) -> dict:
     if not fields:
         return {}
     try:
-        return {mapping.get(k, k): v for k, v in fields.items()}
+        mapped = {}
+        for k, v in fields.items():
+            if is_ignorable_faiss_value(v):
+                continue
+            key_text = clean_faiss_text(k)
+            value_text = clean_faiss_text(v)
+            mapped_key = clean_faiss_text(mapping.get(k, key_text) or key_text)
+            if not mapped_key or is_ignorable_faiss_value(value_text):
+                continue
+            mapped[mapped_key] = value_text
+        return mapped
     except Exception:
         # fallback: return original
-        return dict(fields)
+        return sanitize_faiss_fields(fields)
+
+
+def should_skip_faiss_log(log_item: dict) -> bool:
+    product_code = str(log_item.get("product") or log_item.get("product_code") or "").strip().upper()
+    if not product_code:
+        return False
+    if re.fullmatch(r"S\d{4}", product_code):
+        return True
+    if product_code.startswith("W"):
+        return True
+    return False
 
 
 def build_vector_db(logs, news):
@@ -98,6 +233,8 @@ def build_vector_db(logs, news):
 
     documents = []
     documents.extend(load_existing_agent_report_docs())
+    globally_ignorable_in_keys = find_globally_ignorable_field_keys(logs, "in_fields")
+    globally_ignorable_out_keys = find_globally_ignorable_field_keys(logs, "out_fields")
 
     # helper: 숫자/퍼센트 파싱
     def _parse_number(text: str):
@@ -291,31 +428,50 @@ def build_vector_db(logs, news):
         except Exception:
             logger.info("---- RAG INGEST: original log ---- %s", str(log))
 
+        if should_skip_faiss_log(log):
+            logger.info(
+                "Skipping FAISS ingest for product code: %s",
+                log.get("product") or log.get("product_code") or "",
+            )
+            continue
+
         print(f"로그 처리 중... {i+1}/{len(logs)}")
 
         # 🔥 매핑 적용
-        in_fields = log.get("in_fields", {}) or {}
-        out_fields = log.get("out_fields", {}) or {}
-        in_mapping = log.get("in_mapping", {}) or {}
-        out_mapping = log.get("out_mapping", {}) or {}
+        in_fields = sanitize_faiss_fields(
+            log.get("in_fields", {}) or {},
+            drop_keys=globally_ignorable_in_keys,
+        )
+        out_fields = sanitize_faiss_fields(
+            log.get("out_fields", {}) or {},
+            drop_keys=globally_ignorable_out_keys,
+        )
+        in_mapping = sanitize_faiss_mapping(log.get("in_mapping", {}) or {})
+        out_mapping = sanitize_faiss_mapping(log.get("out_mapping", {}) or {})
         reject_reason_details = log.get("reject_reason_details", []) or []
+
+        sanitized_log = dict(log)
+        sanitized_log["in_fields"] = in_fields
+        sanitized_log["out_fields"] = out_fields
+        sanitized_log["in_mapping"] = in_mapping
+        sanitized_log["out_mapping"] = out_mapping
 
         in_text = apply_mapping(in_fields, in_mapping)
         out_text = apply_mapping(out_fields, out_mapping)
         reject_reason_text = ", ".join(
-            item.get("description") or item.get("code") or ""
+            clean_faiss_text(item.get("description") or item.get("code") or "")
             for item in reject_reason_details
-            if item.get("description") or item.get("code")
+            if clean_faiss_text(item.get("description") or item.get("code") or "")
         )
 
-        full_text = f"""
-        [상품] {log.get("product")} [IN] {in_text} [OUT] {out_text} [거절사유] {reject_reason_text or '-'}
-        """
+        full_text = clean_faiss_text(
+            f"[상품] {clean_faiss_text(log.get('product'))} [IN] {in_text} [OUT] {out_text} [거절사유] {reject_reason_text or '-'}"
+        )
 
         print(f"변환된 로그:\n{full_text[:300]}")
 
         # feature 추출
-        features = _extract_features(log)
+        features = _extract_features(sanitized_log)
 
         # map keys to human-readable labels for storage to FAISS
         mapped_in = map_fields(in_fields, in_mapping)
@@ -353,7 +509,7 @@ def build_vector_db(logs, news):
         title = n.get("title", "")
         content = (n.get("content") or n.get("summary") or "")[:1000]
 
-        text = f"제목: {title}\n내용: {content}"
+        text = clean_faiss_text(f"제목: {title} 내용: {content}")
 
         documents.append(Document(page_content=text, metadata={"type": "news"}))
 
