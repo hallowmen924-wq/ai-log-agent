@@ -1,5 +1,6 @@
 import datetime
 import html
+import json
 import os
 import threading
 import time
@@ -10,7 +11,14 @@ import streamlit as st
 
 from agent.strategy_chat import regulation_agent
 from backend.streamlit_client import BackendClient
-from rag.vector_db import get_vector_count, ingest_files, search_context
+from rag.vector_db import (
+    FAISS_STORE_CUSTOMER,
+    FAISS_STORE_LOGS,
+    FAISS_STORE_NEWS,
+    get_vector_count,
+    ingest_files,
+    search_context,
+)
 
 # 백그라운드 작업 결과 저장소 (스레드 -> 메인 폴링으로 전달)
 _background_results: dict = {}
@@ -1363,6 +1371,287 @@ def render_dashboard_theme():
             border-radius: 999px !important;
         }
 
+        [class*="st-key-main_dashboard_section"] {
+            margin: 2px 0 16px 0;
+            padding: 10px 10px 12px;
+            border-radius: 24px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+                linear-gradient(180deg, rgba(8,26,39,0.78), rgba(10,34,50,0.66));
+            border: 1px solid rgba(151, 196, 225, 0.14);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 12px 28px rgba(0,0,0,0.16);
+        }
+
+        [class*="st-key-main_dashboard_section"] [role="radiogroup"] {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            align-items: stretch;
+            gap: 8px;
+            width: 100%;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            align-items: stretch;
+            gap: 8px;
+            width: 100%;
+            background: transparent !important;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"] {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+            min-height: 64px;
+            min-width: 0;
+            width: 100%;
+            padding: 24px 52px 10px 16px;
+            border-radius: 18px 18px 14px 14px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01)),
+                linear-gradient(180deg, rgba(14,35,49,0.78), rgba(8,24,37,0.92));
+            border: 1px solid rgba(151, 196, 225, 0.10) !important;
+            color: #d9ecfb !important;
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            transition: transform 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease, background 0.24s ease;
+            box-shadow: inset 0 -1px 0 rgba(255,255,255,0.03) !important;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]::before {
+            content: '';
+            position: absolute;
+            left: 14px;
+            top: 13px;
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: rgba(156, 196, 223, 0.72);
+            box-shadow: 0 0 0 0 rgba(156, 196, 223, 0.26);
+            animation: dashboardSectionPulse 2.4s ease-in-out infinite;
+            z-index: 2;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]::after {
+            position: absolute;
+            top: 9px;
+            right: 10px;
+            max-width: calc(100% - 34px);
+            padding: 3px 7px;
+            border-radius: 999px;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.07em;
+            line-height: 1;
+            color: #d9ecfb;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 2;
+            transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1)::after {
+            content: 'LIVE';
+            color: #c9fdf5;
+            background: rgba(97,244,222,0.12);
+            border-color: rgba(97,244,222,0.18);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2)::after {
+            content: '3 AI';
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(3)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(3)::after {
+            content: 'FEED';
+            color: #d7fff9;
+            background: rgba(14,165,233,0.12);
+            border-color: rgba(14,165,233,0.18);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(4)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(4)::after {
+            content: 'TRACE';
+            color: #ffe8c2;
+            background: rgba(255,191,105,0.12);
+            border-color: rgba(255,191,105,0.18);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(5)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(5)::after {
+            content: 'FAISS';
+            color: #dbeafe;
+            background: rgba(129,140,248,0.12);
+            border-color: rgba(129,140,248,0.18);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:hover,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:hover {
+            background:
+                linear-gradient(180deg, rgba(97,244,222,0.12), rgba(34,211,238,0.04)),
+                linear-gradient(180deg, rgba(14,35,49,0.82), rgba(8,24,37,0.95));
+            border-color: rgba(97,244,222,0.26) !important;
+            color: #f7fbff !important;
+            transform: translateY(-3px);
+            box-shadow: 0 10px 24px rgba(0,0,0,0.16), inset 0 -2px 0 rgba(97,244,222,0.22) !important;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:hover::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:hover::after {
+            transform: translateY(-2px) scale(1.02);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"],
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked) {
+            background:
+                linear-gradient(120deg, rgba(255,255,255,0.10), rgba(255,255,255,0.00) 42%),
+                linear-gradient(135deg, rgba(13,45,62,0.98), rgba(18,68,84,0.94)) !important;
+            border-color: rgba(97,244,222,0.34) !important;
+            color: #f7fbff !important;
+            box-shadow:
+                0 14px 28px rgba(0,0,0,0.20),
+                inset 0 0 0 1px rgba(255,255,255,0.04),
+                inset 0 -3px 0 rgba(97,244,222,0.72) !important;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"]::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked)::before {
+            background: #61f4de;
+            box-shadow: 0 0 0 0 rgba(97,244,222,0.34);
+            animation-duration: 1.4s;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"] span,
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"] div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked) span,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked) div {
+            position: relative;
+            z-index: 1;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"]::selection,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked)::selection {
+            background: transparent;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"]::marker,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked)::marker {
+            content: '';
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"]::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked)::after {
+            box-shadow: 0 0 18px rgba(97,244,222,0.16);
+            transform: translateY(-1px);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)[aria-pressed="true"],
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked) {
+            border-color: rgba(97,244,222,0.42) !important;
+            box-shadow:
+                0 14px 28px rgba(0,0,0,0.22),
+                0 0 26px rgba(97,244,222,0.16),
+                inset 0 0 0 1px rgba(255,255,255,0.05) !important;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)[aria-pressed="true"]::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked)::before {
+            animation: dashboardOpsPulse 1.05s ease-in-out infinite;
+            box-shadow: 0 0 0 0 rgba(97,244,222,0.42);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)[aria-pressed="true"]::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked)::after {
+            box-shadow: 0 0 22px rgba(97,244,222,0.24);
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"] {
+            background-image:
+                linear-gradient(115deg, transparent 0%, transparent 38%, rgba(255,255,255,0.10) 50%, transparent 62%, transparent 100%),
+                linear-gradient(135deg, rgba(13,45,62,0.98), rgba(18,68,84,0.94)) !important;
+            background-size: 220% 100%, 100% 100% !important;
+            animation: dashboardSectionSweep 3.6s linear infinite;
+        }
+
+        @keyframes dashboardSectionPulse {
+            0% { box-shadow: 0 0 0 0 rgba(156,196,223,0.28); transform: scale(1); }
+            65% { box-shadow: 0 0 0 9px rgba(156,196,223,0.0); transform: scale(1.08); }
+            100% { box-shadow: 0 0 0 0 rgba(156,196,223,0.0); transform: scale(1); }
+        }
+
+        @keyframes dashboardSectionSweep {
+            0% { background-position: 130% 0, 0 0; }
+            100% { background-position: -90% 0, 0 0; }
+        }
+
+        @keyframes dashboardOpsPulse {
+            0% { box-shadow: 0 0 0 0 rgba(97,244,222,0.42); transform: scale(1); }
+            60% { box-shadow: 0 0 0 12px rgba(97,244,222,0.0); transform: scale(1.12); }
+            100% { box-shadow: 0 0 0 0 rgba(97,244,222,0.0); transform: scale(1); }
+        }
+
+        @keyframes dashboardSectionTitleFloat {
+            0% { transform: translateY(0); opacity: 0.94; }
+            50% { transform: translateY(-2px); opacity: 1; }
+            100% { transform: translateY(0); opacity: 0.94; }
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button p,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"] p,
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"] div {
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            font-size: 13px !important;
+            font-weight: 800 !important;
+            color: inherit !important;
+            line-height: 1.1 !important;
+            text-align: left !important;
+            white-space: normal !important;
+            word-break: keep-all !important;
+            text-wrap: balance;
+            transform-origin: left center;
+            transition: transform 0.24s ease, text-shadow 0.24s ease, opacity 0.24s ease;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button > div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"] > div {
+            padding-top: 4px;
+        }
+
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"] input {
+            display: none;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"] p,
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"] div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked) p,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked) div {
+            text-shadow: 0 0 18px rgba(151, 244, 222, 0.16);
+            animation: dashboardSectionTitleFloat 2.8s ease-in-out infinite;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)[aria-pressed="true"] p,
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)[aria-pressed="true"] div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked) p,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked) div {
+            animation-duration: 1.8s;
+        }
+
         .section-shell {
             border-radius: 26px;
             padding: 22px;
@@ -1604,6 +1893,19 @@ def render_dashboard_theme():
             background: linear-gradient(180deg, rgba(8,26,39,0.92), rgba(10,34,50,0.88));
             border: 1px solid rgba(97, 244, 222, 0.14);
             box-shadow: 0 18px 38px rgba(0, 0, 0, 0.22);
+            transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+        }
+
+        .upload-shell:hover {
+            border-color: rgba(97, 244, 222, 0.28);
+            box-shadow: 0 22px 42px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(97, 244, 222, 0.08);
+            transform: translateY(-1px);
+        }
+
+        .regulation-intake-anchor {
+            width: 0;
+            height: 0;
+            overflow: hidden;
         }
 
         .upload-shell-head {
@@ -2096,24 +2398,29 @@ def render_dashboard_theme():
         }
 
         [class*="st-key-sidebar_reg_upload"] {
-            margin-top: -2px;
+            margin-top: 8px;
             margin-bottom: 12px;
-            padding: 0 16px 16px 16px;
+            padding: 12px 16px 16px 16px;
             background: linear-gradient(180deg, rgba(8,26,39,0.92), rgba(10,34,50,0.88));
             border-left: 1px solid rgba(97,244,222,0.14);
             border-right: 1px solid rgba(97,244,222,0.14);
             border-bottom: 1px solid rgba(97,244,222,0.14);
             border-radius: 0 0 20px 20px;
             box-shadow: 0 18px 38px rgba(0,0,0,0.22);
+            position: relative;
+            overflow: visible;
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] {
             margin-bottom: 0;
-            padding: 12px;
+            padding: 18px 12px 12px 12px;
             border-radius: 18px;
             border: 1px dashed rgba(97,244,222,0.28);
             background: linear-gradient(180deg, rgba(9,28,43,0.80), rgba(6,23,35,0.96));
             transition: border-color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
+            position: relative;
+            overflow: visible;
+            z-index: 1;
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] section {
@@ -2124,25 +2431,61 @@ def render_dashboard_theme():
             border-radius: 14px;
             background: radial-gradient(circle at top, rgba(97,244,222,0.08), transparent 58%);
             transition: background 0.22s ease;
+            padding-top: 14px;
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] button {
+            position: absolute;
+            top: -18px;
+            left: 50%;
+            z-index: 3;
             border-radius: 999px;
             min-height: 40px;
-            padding: 0 16px;
+            padding: 0 18px;
             background: linear-gradient(135deg, rgba(97,244,222,0.16), rgba(255,191,105,0.16));
             border: 1px solid rgba(97,244,222,0.24);
             color: #f7fbff;
             font-weight: 800;
             box-shadow: 0 10px 22px rgba(0,0,0,0.18);
             opacity: 0;
-            transform: translateY(10px);
+            transform: translate(-50%, 8px);
             transition: opacity 0.22s ease, transform 0.22s ease, border-color 0.22s ease, background 0.22s ease;
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] button:hover {
             border-color: rgba(97,244,222,0.34);
             background: linear-gradient(135deg, rgba(97,244,222,0.22), rgba(255,191,105,0.22));
+        }
+
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):hover .upload-shell,
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):has([class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within) .upload-shell {
+            border-color: rgba(97, 244, 222, 0.28);
+            box-shadow: 0 22px 42px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(97, 244, 222, 0.08);
+            transform: translateY(-1px);
+        }
+
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):hover [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"],
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):has([class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within) [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] {
+            border-color: rgba(97,244,222,0.38);
+            background: linear-gradient(180deg, rgba(10,33,49,0.86), rgba(7,26,39,0.98));
+            box-shadow: 0 16px 32px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(97,244,222,0.06);
+        }
+
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):hover [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] section,
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):has([class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within) [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] section {
+            background: radial-gradient(circle at top, rgba(97,244,222,0.14), transparent 58%);
+        }
+
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):hover [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] button,
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):has([class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within) [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"] button {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):hover [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]::after,
+        div[data-testid="stVerticalBlock"]:has(.regulation-intake-anchor):has([class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within) [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]::after {
+            opacity: 0;
+            transform: translate(-50%, -4px);
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:hover,
@@ -2160,14 +2503,14 @@ def render_dashboard_theme():
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:hover button,
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within button {
             opacity: 1;
-            transform: translateY(0);
+            transform: translate(-50%, 0);
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]::after {
             content: 'Hover to reveal upload';
             position: absolute;
-            top: 14px;
-            right: 14px;
+            top: -18px;
+            left: 50%;
             padding: 6px 10px;
             border-radius: 999px;
             background: rgba(255,255,255,0.06);
@@ -2177,13 +2520,15 @@ def render_dashboard_theme():
             font-weight: 800;
             letter-spacing: 0.04em;
             pointer-events: none;
+            z-index: 2;
+            transform: translateX(-50%);
             transition: opacity 0.22s ease, transform 0.22s ease;
         }
 
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:hover::after,
         [class*="st-key-sidebar_reg_upload"] [data-testid="stFileUploader"]:focus-within::after {
             opacity: 0;
-            transform: translateY(-4px);
+            transform: translate(-50%, -4px);
         }
 
         [class*="st-key-sidebar_reg_upload"] small {
@@ -2700,6 +3045,10 @@ def sync_session_from_backend(payload: dict):
     st.session_state.agent_statuses = payload.get("agent_statuses", st.session_state.get("agent_statuses", {}))
     st.session_state.agent_activity_log = payload.get("agent_activity_log", st.session_state.get("agent_activity_log", []))
     st.session_state.vector_events = payload.get("vector_events", st.session_state.get("vector_events", []))
+    st.session_state.last_faiss_time = payload.get("last_faiss_time", st.session_state.get("last_faiss_time"))
+    st.session_state.backend_diagnostics = payload.get(
+        "backend_diagnostics", st.session_state.get("backend_diagnostics", {})
+    )
     incoming_faiss_items = payload.get("full_faiss_items")
     if incoming_faiss_items:
         st.session_state.full_faiss_items = incoming_faiss_items
@@ -2838,6 +3187,240 @@ def build_overview_metrics() -> dict:
     }
 
 
+def _css_content_escape(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _compact_badge_metric(value: int) -> str:
+    number = int(value or 0)
+    if number >= 1000:
+        compact = f"{number / 1000:.1f}".rstrip("0").rstrip(".")
+        return f"{compact}K"
+    return str(number)
+
+
+def render_main_section_status_styles() -> None:
+    metrics = build_overview_metrics()
+    round_results = st.session_state.get("reviewer_debate_round", []) or []
+    main_sections = [
+        "🤖 운영 현황",
+        "💬 AI 심사 전략",
+        "📰 뉴스 에이전트 입력",
+        "📄 로그 에이전트 입력",
+        "🧠 Vector DB",
+    ]
+    selected_section = st.session_state.get("main_dashboard_section") or main_sections[0]
+    active_index = main_sections.index(selected_section) if selected_section in main_sections else 0
+
+    operations_badge = (
+        f"{_compact_badge_metric(metrics['running_agents'])} RUN"
+        if metrics["running_agents"] > 0
+        else f"{_compact_badge_metric(metrics['activity_events'])} EVT"
+    )
+    strategy_badge = f"{_compact_badge_metric(len(round_results))} MEMO" if round_results else "3 AI"
+    news_badge = f"{_compact_badge_metric(metrics['news_count'])} NEWS"
+    log_badge = f"{_compact_badge_metric(metrics['results_count'])} LOG"
+    vector_badge = f"{_compact_badge_metric(metrics['vector_count'])} VEC"
+
+    operations_dot = "#61f4de" if metrics["running_agents"] > 0 else "#8fb9d6"
+    strategy_dot = "#f9a8d4" if round_results else "#c4b5fd"
+    news_dot = "#61f4de" if metrics["news_count"] > 0 else "#8fb9d6"
+    log_dot = "#ffbf69" if metrics["results_count"] > 0 else "#8fb9d6"
+    vector_dot = "#a5b4fc" if metrics["vector_count"] > 0 else "#8fb9d6"
+
+    active_backgrounds = [
+        "linear-gradient(120deg, rgba(151,244,222,0.16), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(13,45,62,0.98), rgba(18,68,84,0.94))",
+        "linear-gradient(120deg, rgba(249,168,212,0.18), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(59,24,67,0.98), rgba(111,45,87,0.94))",
+        "linear-gradient(120deg, rgba(96,165,250,0.18), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(20,44,76,0.98), rgba(18,72,118,0.94))",
+        "linear-gradient(120deg, rgba(255,191,105,0.18), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(71,40,20,0.98), rgba(132,77,27,0.94))",
+        "linear-gradient(120deg, rgba(165,180,252,0.20), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(34,33,79,0.98), rgba(60,61,133,0.94))",
+    ]
+    active_accents = ["#61f4de", "#f9a8d4", "#60a5fa", "#ffbf69", "#a5b4fc"]
+    active_glows = [
+        "rgba(97,244,222,0.28)",
+        "rgba(249,168,212,0.30)",
+        "rgba(96,165,250,0.30)",
+        "rgba(255,191,105,0.30)",
+        "rgba(165,180,252,0.32)",
+    ]
+
+    indicator_left = f"calc(10px + ({active_index} * ((100% - 20px - 32px) / 5 + 8px)))"
+    active_background = active_backgrounds[active_index]
+    active_accent = active_accents[active_index]
+    active_glow = active_glows[active_index]
+
+    st.markdown(
+        f"""
+        <style>
+        :root {{
+            --main-section-accent: {active_accent};
+            --main-section-glow: {active_glow};
+        }}
+
+        [class*="st-key-main_dashboard_section"] {{
+            position: relative;
+        }}
+
+        [class*="st-key-main_dashboard_section"]::after {{
+            content: '';
+            position: absolute;
+            left: {indicator_left};
+            bottom: 9px;
+            width: calc((100% - 20px - 32px) / 5);
+            height: 4px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, {active_accent}, rgba(255,255,255,0.92));
+            box-shadow: 0 0 18px {active_glow};
+            transition: left 0.34s ease, background 0.24s ease, box-shadow 0.24s ease;
+            pointer-events: none;
+            z-index: 3;
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1)::after {{
+            content: '{_css_content_escape(operations_badge)}';
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2)::after {{
+            content: '{_css_content_escape(strategy_badge)}';
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(3)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(3)::after {{
+            content: '{_css_content_escape(news_badge)}';
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(4)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(4)::after {{
+            content: '{_css_content_escape(log_badge)}';
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(5)::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(5)::after {{
+            content: '{_css_content_escape(vector_badge)}';
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(1)::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1)::before {{
+            background: {operations_dot};
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2)::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2)::before {{
+            background: {strategy_dot};
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(3)::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(3)::before {{
+            background: {news_dot};
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(4)::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(4)::before {{
+            background: {log_dot};
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(5)::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(5)::before {{
+            background: {vector_dot};
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"],
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked) {{
+            background: {active_background} !important;
+            border-color: {active_accent} !important;
+            box-shadow:
+                0 14px 28px rgba(0,0,0,0.20),
+                0 0 28px {active_glow},
+                inset 0 0 0 1px rgba(255,255,255,0.04),
+                inset 0 -3px 0 {active_accent} !important;
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"]::before,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked)::before {{
+            background: {active_accent};
+            box-shadow: 0 0 0 0 {active_glow};
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button[aria-pressed="true"]::after,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:has(input:checked)::after {{
+            border-color: {active_accent};
+            box-shadow: 0 0 18px {active_glow};
+        }}
+
+        .section-shell,
+        .section-shell-tight {{
+            position: relative;
+            overflow: hidden;
+            border-color: color-mix(in srgb, var(--main-section-accent) 34%, rgba(151, 196, 225, 0.18)) !important;
+            box-shadow:
+                0 18px 44px rgba(0, 0, 0, 0.16),
+                0 0 0 1px rgba(255,255,255,0.02),
+                0 0 28px var(--main-section-glow) !important;
+            background:
+                radial-gradient(circle at top right, color-mix(in srgb, var(--main-section-accent) 15%, transparent) 0%, transparent 42%),
+                var(--panel-bg-soft) !important;
+            animation: sectionPanelReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+            will-change: transform, opacity;
+        }}
+
+        .section-shell::before,
+        .section-shell-tight::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 18px;
+            right: 18px;
+            height: 3px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, transparent, var(--main-section-accent), rgba(255,255,255,0.88), var(--main-section-accent), transparent);
+            box-shadow: 0 0 20px var(--main-section-glow);
+            opacity: 0.92;
+            pointer-events: none;
+        }}
+
+        .section-shell-tight {{
+            animation-duration: 0.5s;
+        }}
+
+        @keyframes sectionPanelReveal {{
+            0% {{
+                opacity: 0;
+                transform: translateY(12px) scale(0.988);
+                filter: saturate(0.88);
+            }}
+            60% {{
+                opacity: 1;
+                transform: translateY(-2px) scale(1);
+                filter: saturate(1);
+            }}
+            100% {{
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: saturate(1);
+            }}
+        }}
+
+        .section-kicker {{
+            color: var(--main-section-accent) !important;
+            text-shadow: 0 0 16px var(--main-section-glow);
+        }}
+
+        .section-title {{
+            text-shadow: 0 0 22px color-mix(in srgb, var(--main-section-accent) 18%, transparent);
+        }}
+
+        .section-detail {{
+            border-left: 2px solid color-mix(in srgb, var(--main-section-accent) 46%, transparent);
+            padding-left: 12px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_dashboard_metric_card(title: str, value: str, detail: str, pill: str, tone: str):
     st.markdown(
         f"""
@@ -2898,33 +3481,27 @@ def render_dashboard_workflow(metrics: dict):
     for index, name, status_code, detail in workflow_items:
         label, _, css_class = get_agent_status_palette(status_code)
         cards.append(
-            f"""
-            <div class="workflow-card">
-                <div class="workflow-index">{index}</div>
-                <div class="workflow-name">{html.escape(name)}</div>
-                <div class="workflow-state {css_class}">{html.escape(label)}</div>
-                <div class="workflow-text">{html.escape(detail)}</div>
-            </div>
-            """
+            f"""<div class="workflow-card">
+<div class="workflow-index">{index}</div>
+<div class="workflow-name">{html.escape(name)}</div>
+<div class="workflow-state {css_class}">{html.escape(label)}</div>
+<div class="workflow-text">{html.escape(detail)}</div>
+</div>"""
         )
 
     st.markdown(
-        """
-        <div class="section-shell">
-            <div class="section-header">
-                <div>
-                    <div class="section-kicker">Process View</div>
-                    <div class="section-title">심사 플로우 보드</div>
-                </div>
-                <div class="section-detail">신규 유입부터 전략 응답과 벡터 저장까지의 단계를 상태 배지와 함께 한 줄 플로우로 보여줍니다.</div>
-            </div>
-            <div class="workflow-grid">
-        """
+        """<div class="section-shell">
+<div class="section-header">
+<div>
+<div class="section-kicker">Process View</div>
+<div class="section-title">심사 플로우 보드</div>
+</div>
+<div class="section-detail">신규 유입부터 전략 응답과 벡터 저장까지의 단계를 상태 배지와 함께 한 줄 플로우로 보여줍니다.</div>
+</div>
+<div class="workflow-grid">"""
         + "".join(cards)
-        + """
-            </div>
-        </div>
-        """,
+        + """</div>
+</div>""",
         unsafe_allow_html=True,
     )
 
@@ -3227,41 +3804,33 @@ def render_live_insight_sections():
         cards = []
         for event in (activity_log[:3] or []):
             cards.append(
-                f"""
-                <div class="event-card">
-                    <div class="event-head">
-                        <div class="event-source">{html.escape(str(event.get('source', '-')))} · {html.escape(str(event.get('status', '-')))}</div>
-                        <div class="event-time">{html.escape(format_status_time(event.get('timestamp')))}</div>
-                    </div>
-                    <div class="event-body">{html.escape(str(event.get('detail', ''))[:170])}</div>
-                </div>
-                """
+                f"""<div class="event-card">
+<div class="event-head">
+<div class="event-source">{html.escape(str(event.get('source', '-')))} · {html.escape(str(event.get('status', '-')))}</div>
+<div class="event-time">{html.escape(format_status_time(event.get('timestamp')))}</div>
+</div>
+<div class="event-body">{html.escape(str(event.get('detail', ''))[:170])}</div>
+</div>"""
             )
         if not cards:
             for event in (vector_events[:3] or []):
                 cards.append(
-                    f"""
-                    <div class="event-card">
-                        <div class="event-head">
-                            <div class="event-source">{html.escape(str(event.get('source', '-')))} · {html.escape(str(event.get('action', '-')))}</div>
-                            <div class="event-time">{html.escape(format_status_time(event.get('timestamp')))}</div>
-                        </div>
-                        <div class="event-body">누적 {event.get('after_count', 0)} · 추가 {event.get('added_count', 0)} · {html.escape(str(event.get('detail', ''))[:120])}</div>
-                    </div>
-                    """
+                    f"""<div class="event-card">
+<div class="event-head">
+<div class="event-source">{html.escape(str(event.get('source', '-')))} · {html.escape(str(event.get('action', '-')))}</div>
+<div class="event-time">{html.escape(format_status_time(event.get('timestamp')))}</div>
+</div>
+<div class="event-body">누적 {event.get('after_count', 0)} · 추가 {event.get('added_count', 0)} · {html.escape(str(event.get('detail', ''))[:120])}</div>
+</div>"""
                 )
         st.markdown(
-            """
-            <div class="insight-card">
-                <div class="insight-label">Recent Timeline</div>
-                <div class="insight-title">최근 운영 이벤트</div>
-                <div class="event-stack">
-            """
+            """<div class="insight-card">
+<div class="insight-label">Recent Timeline</div>
+<div class="insight-title">최근 운영 이벤트</div>
+<div class="event-stack">"""
             + "".join(cards or ["<div class='event-card'><div class='event-body'>표시할 이벤트가 없습니다.</div></div>"])
-            + """
-                </div>
-            </div>
-            """,
+            + """</div>
+</div>""",
             unsafe_allow_html=True,
         )
 
@@ -3532,12 +4101,47 @@ def get_reviewer_personas() -> list[dict[str, str]]:
     ]
 
 
+REVIEWER_PROMPT_STORE_PATH = os.path.join("data", "reviewer_prompts.json")
+
+
+def load_reviewer_prompt_store() -> dict[str, str]:
+    personas = get_reviewer_personas()
+    defaults = {persona["id"]: persona["default_prompt"] for persona in personas}
+    try:
+        if not os.path.exists(REVIEWER_PROMPT_STORE_PATH):
+            return defaults
+        with open(REVIEWER_PROMPT_STORE_PATH, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        stored_prompts = payload if isinstance(payload, dict) else {}
+    except Exception:
+        return defaults
+
+    merged = dict(defaults)
+    for persona in personas:
+        reviewer_id = persona["id"]
+        saved_prompt = stored_prompts.get(reviewer_id)
+        if isinstance(saved_prompt, str) and saved_prompt.strip():
+            merged[reviewer_id] = saved_prompt.strip()
+    return merged
+
+
+def save_reviewer_prompt_store(prompts: dict[str, str]) -> None:
+    personas = get_reviewer_personas()
+    valid_ids = {persona["id"] for persona in personas}
+    payload = {
+        reviewer_id: str(prompt).strip()
+        for reviewer_id, prompt in (prompts or {}).items()
+        if reviewer_id in valid_ids and str(prompt).strip()
+    }
+    os.makedirs(os.path.dirname(REVIEWER_PROMPT_STORE_PATH), exist_ok=True)
+    with open(REVIEWER_PROMPT_STORE_PATH, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+
 def ensure_strategy_debate_state() -> None:
     personas = get_reviewer_personas()
     if "reviewer_prompts" not in st.session_state:
-        st.session_state.reviewer_prompts = {
-            persona["id"]: persona["default_prompt"] for persona in personas
-        }
+        st.session_state.reviewer_prompts = load_reviewer_prompt_store()
     if "selected_reviewer_id" not in st.session_state:
         st.session_state.selected_reviewer_id = personas[0]["id"]
     if "reviewer_debate_round" not in st.session_state:
@@ -3626,21 +4230,20 @@ def _render_reviewer_prompt_dialog_body(persona: dict[str, str]) -> None:
     with action_col_a:
         if st.button("저장", key=f"save_reviewer_prompt_{reviewer_id}", use_container_width=True, type="primary"):
             st.session_state.reviewer_prompts[reviewer_id] = st.session_state.get(editor_key, persona["default_prompt"])
+            save_reviewer_prompt_store(st.session_state.reviewer_prompts)
             st.session_state.strategy_debate_status = f"{persona['name']} 프롬프트를 수정했습니다."
             st.session_state.reviewer_prompt_saved_feedback = {
                 **(st.session_state.get("reviewer_prompt_saved_feedback", {}) or {}),
                 reviewer_id: datetime.datetime.now().isoformat(),
             }
-            st.rerun()
     with action_col_b:
         if st.button("기본값 복원", key=f"reset_reviewer_prompt_{reviewer_id}", use_container_width=True):
             st.session_state.reviewer_prompts[reviewer_id] = persona["default_prompt"]
+            save_reviewer_prompt_store(st.session_state.reviewer_prompts)
             st.session_state[editor_key] = persona["default_prompt"]
-            st.rerun()
     with action_col_c:
         if st.button("닫기", key=f"close_reviewer_prompt_{reviewer_id}", use_container_width=True):
             close_reviewer_prompt_dialog()
-            st.rerun()
 
 
 if hasattr(st, "dialog"):
@@ -3758,7 +4361,6 @@ def render_role_based_strategy_tab():
                 type="primary" if is_active else "secondary",
             ):
                 open_reviewer_prompt_dialog(persona["id"])
-                st.rerun()
 
     if st.session_state.get("reviewer_prompt_dialog_open"):
         render_reviewer_prompt_dialog(selected_persona)
@@ -3802,8 +4404,8 @@ def render_role_based_strategy_tab():
         with action_col_b:
             if st.button("선택 프롬프트 기본값 복원", use_container_width=True):
                 st.session_state.reviewer_prompts[selected_id] = selected_persona["default_prompt"]
+                save_reviewer_prompt_store(st.session_state.reviewer_prompts)
                 st.session_state[f"reviewer_prompt_editor_dialog_{selected_id}"] = selected_persona["default_prompt"]
-                st.rerun()
 
     if run_clicked and strategy_question.strip():
         round_results: list[dict] = []
@@ -3914,29 +4516,51 @@ def get_chart_snapshots() -> dict:
         return {}
 
 
-def get_live_faiss_items(limit: int = 1000) -> list[dict]:
-    items = st.session_state.get("full_faiss_items", []) or []
-    if items:
-        return items[:limit]
+def get_faiss_store_options() -> list[tuple[str, str | None]]:
+    return [
+        ("전체 DB", None),
+        ("심사 로그 DB", FAISS_STORE_LOGS),
+        ("뉴스/규제 DB", FAISS_STORE_NEWS),
+        ("고객 패턴 DB", FAISS_STORE_CUSTOMER),
+    ]
+
+
+def get_live_faiss_items(
+    limit: int = 1000, store_name: str | None = None
+) -> tuple[list[dict], int]:
+    cache_key = f"full_faiss_items::{store_name or 'all'}"
+    if store_name is None:
+        items = st.session_state.get("full_faiss_items", []) or []
+        if items:
+            return items[:limit], int(st.session_state.get("vector_count", len(items)) or 0)
+
+    cached_items = st.session_state.get(cache_key, []) or []
+    if cached_items:
+        return cached_items[:limit], get_vector_count(store_name)
 
     try:
-        entries_resp = get_backend_client().get_faiss_entries(limit=limit)
+        entries_resp = get_backend_client().get_faiss_entries(limit=limit, store_name=store_name)
         items = entries_resp.get("items", []) if isinstance(entries_resp, dict) else []
+        total_count = int((entries_resp or {}).get("total_count", len(items)) or 0)
         if items:
-            st.session_state.full_faiss_items = items
-            return items
+            st.session_state[cache_key] = items
+            if store_name is None:
+                st.session_state.full_faiss_items = items
+            return items, total_count
     except Exception:
         pass
 
     try:
         from rag.vector_db import list_vectors
 
-        items = list_vectors(limit=limit)
+        items = list_vectors(limit=limit, store_name=store_name)
         if items:
-            st.session_state.full_faiss_items = items
-        return items
+            st.session_state[cache_key] = items
+            if store_name is None:
+                st.session_state.full_faiss_items = items
+        return items, get_vector_count(store_name)
     except Exception:
-        return []
+        return [], 0
 
 
 def render_vector_db_panel():
@@ -3944,12 +4568,19 @@ def render_vector_db_panel():
 
     vector_events = st.session_state.get("vector_events", []) or []
     latest_vector_event = vector_events[0] if vector_events else {}
-    items = get_live_faiss_items(limit=1000)
+    store_options = get_faiss_store_options()
+    selected_store_label = st.selectbox(
+        "조회할 DB",
+        options=[label for label, _ in store_options],
+        key="vector_db_panel_store_filter",
+    )
+    selected_store = dict(store_options).get(selected_store_label)
+    items, total_count = get_live_faiss_items(limit=1000, store_name=selected_store)
     recent_items = list(reversed(items[-10:])) if items else []
 
     vector_metric_cols = st.columns(4)
     vector_metric_cols[0].metric(
-        "현재 벡터 수", st.session_state.get("vector_count", 0)
+        f"{selected_store_label} 벡터 수", total_count
     )
     vector_metric_cols[1].metric(
         "마지막 증감", latest_vector_event.get("added_count", 0)
@@ -3969,6 +4600,7 @@ def render_vector_db_panel():
             [
                 {
                     "id": it.get("id"),
+                    "store": it.get("store"),
                     "type": it.get("type"),
                     "product": it.get("product"),
                     "source": it.get("source"),
@@ -4005,6 +4637,7 @@ def render_vector_db_panel():
                     st.json(
                         {
                             "id": selected_item.get("id"),
+                            "store": selected_item.get("store"),
                             "type": selected_item.get("type"),
                             "product": selected_item.get("product"),
                             "agent": selected_item.get("agent"),
@@ -4130,6 +4763,7 @@ def render_vector_db_panel():
             [
                 {
                     "id": it.get("id"),
+                    "store": it.get("store"),
                     "type": it.get("type"),
                     "product": it.get("product"),
                     "source": it.get("source"),
@@ -4215,6 +4849,103 @@ def render_runtime_dashboard():
         st.caption(
             f"최근 질문: {latest_question} | 마지막 실행: {format_status_time(last_strategy_time)}"
         )
+
+    diagnostics = st.session_state.get("backend_diagnostics", {}) or {}
+    if diagnostics:
+        st.markdown("#### 백엔드 진단")
+        diag_cols = st.columns(4)
+        worker_label = (
+            f"ON / {diagnostics.get('worker_interval_seconds', '-')}s"
+            if diagnostics.get("worker_running")
+            else "OFF"
+        )
+        diag_cols[0].metric("Worker 루프", worker_label)
+        diag_cols[1].metric(
+            "최근 60초 활동",
+            int(diagnostics.get("activity_events_last_60s", 0) or 0),
+        )
+        diag_cols[2].metric(
+            "최근 60초 벡터 이벤트",
+            int(diagnostics.get("vector_events_last_60s", 0) or 0),
+        )
+        diag_cols[3].metric(
+            "뉴스 크롤링 백로그",
+            int(diagnostics.get("news_crawl_backlog", 0) or 0),
+        )
+
+        hotspot_text = diagnostics.get("hotspots") or []
+        if hotspot_text:
+            st.warning("의심 구간: " + " | ".join(str(item) for item in hotspot_text))
+
+        summary_col_a, summary_col_b = st.columns([1.1, 1])
+        with summary_col_a:
+            st.markdown(
+                f"""
+                <div style="padding:14px 16px; border-radius:16px; background:rgba(248,250,252,0.96); border:1px solid rgba(148,163,184,0.18); margin-bottom:12px;">
+                    <div style="font-size:12px; font-weight:800; color:#0f172a; margin-bottom:8px;">최근 작업 시각</div>
+                    <div style="font-size:13px; color:#334155; line-height:1.7;">
+                        마지막 활동: {html.escape(format_status_time(diagnostics.get('last_activity_time')))}<br>
+                        마지막 활동 소스: {html.escape(str(diagnostics.get('last_activity_source') or '-'))}<br>
+                        마지막 FAISS 반영: {html.escape(format_status_time(diagnostics.get('last_faiss_time')))}<br>
+                        마지막 벡터 이벤트: {html.escape(format_status_time(diagnostics.get('last_vector_event_time')))} · {html.escape(str(diagnostics.get('last_vector_event_source') or '-'))}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with summary_col_b:
+            top_activity_sources = diagnostics.get("top_activity_sources") or []
+            top_vector_sources = diagnostics.get("top_vector_sources") or []
+            st.markdown("##### 최근 빈도 상위 소스")
+            if top_activity_sources:
+                activity_df = pd.DataFrame(
+                    [{"source": source, "count": count} for source, count in top_activity_sources]
+                )
+                st.dataframe(activity_df, width="stretch", hide_index=True)
+            else:
+                st.info("활동 로그가 아직 없습니다.")
+
+            if top_vector_sources:
+                vector_df = pd.DataFrame(
+                    [{"source": source, "count": count} for source, count in top_vector_sources]
+                )
+                st.dataframe(vector_df, width="stretch", hide_index=True)
+
+        worker_runtime = diagnostics.get("worker_runtime") or {}
+        if worker_runtime:
+            st.markdown("##### Worker 단계별 소요시간")
+            cadence_cols = st.columns(4)
+            cadence_cols[0].metric("기본 루프", f"{int(worker_runtime.get('base_interval_seconds', 0) or 0)}s")
+            cadence_cols[1].metric("로그 cadence", f"{int(worker_runtime.get('log_cycle_seconds', 0) or 0)}s")
+            cadence_cols[2].metric("뉴스 cadence", f"{int(worker_runtime.get('news_cycle_seconds', 0) or 0)}s")
+            cadence_cols[3].metric("FAISS cadence", f"{int(worker_runtime.get('faiss_cycle_seconds', 0) or 0)}s")
+
+            phase_df = pd.DataFrame(
+                [
+                    {
+                        "phase": "log_cycle",
+                        "ran": bool(worker_runtime.get("log_cycle_ran")),
+                        "elapsed_ms": int(worker_runtime.get("log_cycle_elapsed_ms", 0) or 0),
+                    },
+                    {
+                        "phase": "news_cycle",
+                        "ran": bool(worker_runtime.get("news_cycle_ran")),
+                        "elapsed_ms": int(worker_runtime.get("news_cycle_elapsed_ms", 0) or 0),
+                    },
+                    {
+                        "phase": "faiss_cycle",
+                        "ran": bool(worker_runtime.get("faiss_cycle_ran")),
+                        "elapsed_ms": int(worker_runtime.get("faiss_cycle_elapsed_ms", 0) or 0),
+                    },
+                ]
+            )
+            st.dataframe(phase_df, width="stretch", hide_index=True)
+            st.caption(
+                "최근 worker loop 소요 "
+                + f"{int(worker_runtime.get('last_loop_elapsed_ms', 0) or 0)}ms"
+                + " · FAISS 재빌드 이유: "
+                + str(worker_runtime.get("faiss_rebuild_reason") or "-")
+            )
 
     status_map = {
         "pending": ("대기", "#e2e8f0", "#334155"),
@@ -4855,10 +5586,6 @@ def render_sidebar_news_compact():
     news_items = st.session_state.get("news", [])
     st.subheader("📰 실시간 뉴스 ")
 
-    if not news_items:
-        st.info("표시할 뉴스가 없습니다.")
-        return
-
     latest_news_time = parse_status_time(st.session_state.get("last_news_time"))
     latest_new_item_time = parse_status_time(st.session_state.get("last_new_item_time"))
     has_fresh_news_cycle = (
@@ -4867,26 +5594,29 @@ def render_sidebar_news_compact():
         and latest_news_time == latest_new_item_time
     )
 
-    header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
-    header_background = "#dcfce7" if has_fresh_news_cycle else "#e0f2fe"
-    header_color = "#166534" if has_fresh_news_cycle else "#075985"
-    st.markdown(
-        f"""
-        <div style="margin-bottom: 12px;">
-            <span style="
-                display:inline-block;
-                padding:6px 10px;
-                border-radius:999px;
-                font-size:12px;
-                font-weight:800;
-                background:{header_background};
-                color:{header_color};
-                border:1px solid rgba(15,23,42,0.08);
-            ">{header_badge}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    if news_items:
+        header_badge = "신규 유입" if has_fresh_news_cycle else "동기화 완료"
+        header_background = "#dcfce7" if has_fresh_news_cycle else "#e0f2fe"
+        header_color = "#166534" if has_fresh_news_cycle else "#075985"
+        st.markdown(
+            f"""
+            <div style="margin-bottom: 12px;">
+                <span style="
+                    display:inline-block;
+                    padding:6px 10px;
+                    border-radius:999px;
+                    font-size:12px;
+                    font-weight:800;
+                    background:{header_background};
+                    color:{header_color};
+                    border:1px solid rgba(15,23,42,0.08);
+                ">{header_badge}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("표시할 뉴스가 없습니다.")
 
     def _strip_html_text(value: str) -> str:
         text = str(value or "")
@@ -4926,29 +5656,30 @@ def render_sidebar_news_compact():
 
         return title[:90], preview[:140]
 
-    for index, news_item in enumerate(news_items[:3]):
-        title, preview = _resolve_news_title_and_preview(news_item)
-        link = str(news_item.get("link", "")).strip()
-        badge_label = "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
-        badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
-        safe_title = html.escape(title)
-        safe_preview = html.escape(preview)
+    if news_items:
+        for index, news_item in enumerate(news_items[:3]):
+            title, preview = _resolve_news_title_and_preview(news_item)
+            link = str(news_item.get("link", "")).strip()
+            badge_label = "NEW" if has_fresh_news_cycle and index == 0 else f"#{index + 1}"
+            badge_background = "#16a34a" if badge_label == "NEW" else "#0f172a"
+            safe_title = html.escape(title)
+            safe_preview = html.escape(preview)
 
-        card_html = f"""
-            <div style="margin-bottom:12px; padding:10px 12px; border-radius:14px; background:linear-gradient(180deg, rgba(8,26,39,0.92), rgba(10,34,50,0.88)); border:1px solid rgba(151,196,225,0.14); box-shadow:0 12px 24px rgba(0,0,0,0.18);">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:6px;">
-                    <div style="font-size:13px; font-weight:800; color:#f7fbff;">{safe_title}</div>
-                    <span style="flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;">{badge_label}</span>
+            card_html = f"""
+                <div style="margin-bottom:12px; padding:10px 12px; border-radius:14px; background:linear-gradient(180deg, rgba(8,26,39,0.92), rgba(10,34,50,0.88)); border:1px solid rgba(151,196,225,0.14); box-shadow:0 12px 24px rgba(0,0,0,0.18);">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:6px;">
+                        <div style="font-size:13px; font-weight:800; color:#f7fbff;">{safe_title}</div>
+                        <span style="flex-shrink:0; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; background:{badge_background}; color:white;">{badge_label}</span>
+                    </div>
+                    <div style="font-size:12px; line-height:1.55; color:#d9ecfb;">{safe_preview}</div>
                 </div>
-                <div style="font-size:12px; line-height:1.55; color:#d9ecfb;">{safe_preview}</div>
-            </div>
-        """
+            """
 
-        if link:
-            wrapped = f'<a href="{html.escape(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; color:inherit;">{card_html}</a>'
-            st.markdown(wrapped, unsafe_allow_html=True)
-        else:
-            st.markdown(card_html, unsafe_allow_html=True)
+            if link:
+                wrapped = f'<a href="{html.escape(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; color:inherit;">{card_html}</a>'
+                st.markdown(wrapped, unsafe_allow_html=True)
+            else:
+                st.markdown(card_html, unsafe_allow_html=True)
 
     def _format_upload_size(size_bytes: int) -> str:
         size = float(size_bytes or 0)
@@ -4993,184 +5724,183 @@ def render_sidebar_news_compact():
         </div>
     """
 
-    st.markdown(
-        f"""
-        <div class="upload-shell{upload_shell_class}">
-            <div class="upload-shell-head">
-                <div class="upload-shell-copy">
-                    <div class="upload-kicker">Regulation Intake</div>
-                    <div class="upload-title">규제 문서를 실제 학습 데이터로 업로드하는 영역</div>
-                    <div class="upload-subtitle">금감원, 여신협회, 내부 규정 문서를 올리면 AI가 문서를 청킹하고 벡터 DB에 적재한 뒤 규제 분석용 근거로 바로 사용합니다.</div>
-                </div>
-                <div class="upload-doc-cluster" aria-hidden="true">
-                    <div class="upload-doc-card pdf">
-                        <div class="upload-doc-orbit"></div>
-                        <div class="upload-doc-label">PDF</div>
-                        <div class="upload-doc-lines"><span></span><span></span><span></span></div>
-                        <div class="upload-doc-progress">LIVE</div>
-                        <div class="upload-doc-check">✓</div>
-                    </div>
-                    <div class="upload-doc-card word">
-                        <div class="upload-doc-orbit"></div>
-                        <div class="upload-doc-label">DOC</div>
-                        <div class="upload-doc-lines"><span></span><span></span><span></span></div>
-                        <div class="upload-doc-progress">LIVE</div>
-                        <div class="upload-doc-check">✓</div>
-                    </div>
-                </div>
-            </div>
-            <div class="upload-chip-row">
-                <span class="upload-chip">PDF / TXT / MD</span>
-                <span class="upload-chip">다중 문서 업로드</span>
-                <span class="upload-chip">FAISS + 규제 에이전트 연동</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    uploaded = st.file_uploader(
-        "규제 문서 업로드 (PDF/TXT/MD)",
-        type=["pdf", "txt", "md"],
-        accept_multiple_files=True,
-        key="sidebar_reg_upload",
-        label_visibility="collapsed",
-    )
-
-    if uploaded:
-        total_bytes = sum(int(getattr(file, "size", 0) or 0) for file in uploaded)
-        selected_rows = "".join(
-            f'<div class="upload-selected-item">• {html.escape(getattr(file, "name", "unknown"))} <span style="color:#166534; font-weight:700;">({html.escape(_format_upload_size(getattr(file, "size", 0) or 0))})</span></div>'
-            for file in uploaded[:4]
-        )
-        if len(uploaded) > 4:
-            selected_rows += f'<div class="upload-selected-item">• 외 {len(uploaded) - 4}건 추가 선택됨</div>'
+    with st.container():
         st.markdown(
-            f"""
-            <div class="upload-selected-box">
-                <div class="upload-selected-title">업로드 대기 문서 {len(uploaded)}건 · 총 {html.escape(_format_upload_size(total_bytes))}</div>
-                {selected_rows}
-            </div>
-            """,
+            '<div class="regulation-intake-anchor"></div>',
             unsafe_allow_html=True,
         )
-
-    if regulation_status == "running":
         st.markdown(
             f"""
-            <div class="upload-learning-box">
-                <div class="upload-learning-head">
-                    <div class="upload-learning-core"></div>
-                    <div>
-                        <div class="upload-learning-title">AI가 규제 문서를 학습 중입니다</div>
-                        <div class="upload-learning-text">문서 청킹, 벡터 적재, 규제 요약 생성을 순차적으로 수행하고 있습니다.<br>최근 업데이트: {html.escape(regulation_updated_at)}</div>
+            <div class="upload-shell{upload_shell_class}">
+                <div class="upload-shell-head">
+                    <div class="upload-shell-copy">
+                        <div class="upload-kicker">Regulation Intake</div>
+                        <div class="upload-title">규제 문서를 실제 학습 데이터로 업로드하는 영역</div>
+                        <div class="upload-subtitle">금감원, 여신협회, 내부 규정 문서를 올리면 AI가 문서를 청킹하고 벡터 DB에 적재한 뒤 규제 분석용 근거로 바로 사용합니다.</div>
+                    </div>
+                    <div class="upload-doc-cluster" aria-hidden="true">
+                        <div class="upload-doc-card pdf">
+                            <div class="upload-doc-orbit"></div>
+                            <div class="upload-doc-label">PDF</div>
+                            <div class="upload-doc-lines"><span></span><span></span><span></span></div>
+                            <div class="upload-doc-progress">LIVE</div>
+                            <div class="upload-doc-check">✓</div>
+                        </div>
+                        <div class="upload-doc-card word">
+                            <div class="upload-doc-orbit"></div>
+                            <div class="upload-doc-label">DOC</div>
+                            <div class="upload-doc-lines"><span></span><span></span><span></span></div>
+                            <div class="upload-doc-progress">LIVE</div>
+                            <div class="upload-doc-check">✓</div>
+                        </div>
                     </div>
                 </div>
-                <div class="upload-learning-text">{html.escape(regulation_detail)}</div>
-                <div class="upload-learning-bar"><span></span></div>
-                {regulation_steps_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    elif regulation_status == "completed":
-        st.markdown(
-            f"""
-            <div class="upload-status-box success">
-                <div class="upload-status-pill">✓ Vectorized & Ready</div>
-                <div class="upload-status-title">규제 문서 분석 완료</div>
-                <div class="upload-status-detail">{html.escape(regulation_detail)}<br>완료 시각: {html.escape(regulation_updated_at)}</div>
-                {f'<div class="upload-status-summary">최신 요약 미리보기<br>{html.escape(regulation_summary)}</div>' if regulation_summary else ''}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    elif regulation_status == "failed":
-        st.markdown(
-            f"""
-            <div class="upload-status-box error">
-                <div class="upload-status-title">규제 문서 분석 실패</div>
-                <div class="upload-status-detail">{html.escape(regulation_detail)}<br>업데이트: {html.escape(regulation_updated_at)}</div>
+                <div class="upload-chip-row">
+                    <span class="upload-chip">PDF / TXT / MD</span>
+                    <span class="upload-chip">다중 문서 업로드</span>
+                    <span class="upload-chip">FAISS + 규제 에이전트 연동</span>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    if uploaded:
-        if st.button(
-            "AI 규제 문서 학습 시작",
-            key="sidebar_reg_run",
-            type="primary",
-            use_container_width=True,
-            disabled=(regulation_status == "running"),
-        ):
-            # 메인 스레드에서 파일 바이트를 읽고 상태를 'running'으로 표시
-            files_data = []
-            for f in uploaded:
-                try:
-                    raw = f.read()
-                except Exception:
-                    raw = b""
-                files_data.append((getattr(f, "name", "unknown"), raw))
+        uploaded = st.file_uploader(
+            "규제 문서 업로드 (PDF/TXT/MD)",
+            type=["pdf", "txt", "md"],
+            accept_multiple_files=True,
+            key="sidebar_reg_upload",
+            label_visibility="collapsed",
+        )
 
-            now = datetime.datetime.now().isoformat()
-            statuses = st.session_state.get("agent_statuses", {})
-            statuses["regulation_agent"] = {
-                "status": "running",
-                "updated_at": now,
-                "detail": "규제 문서 분석 실행 중...",
-            }
-            st.session_state.agent_statuses = statuses
-
-            def _run_and_store(files_data, task_id):
-                try:
-                    # 1) FAISS에 파일 청킹/임베딩해서 저장
-                    before = int(st.session_state.get("vector_count", 0) or 0)
-                    new_count = ingest_files(files_data, doc_type="regulation")
-                    added = new_count - before
-
-                    # 2) FAISS에서 업로드한 문서와 관련된 규제 문맥을 검색
-                    #    질의는 간단히 '규제'로 하되, 필요하면 파일명 기반으로 확장할 수 있습니다.
-                    query = "규제"
-                    logs_found, news_found, rules_found = search_context(query, k=6)
-                    rule_context = "\n\n".join(rules_found)
-
-                    # 3) 규제 에이전트를 호출 (검색된 규제 문맥을 전달)
-                    result = regulation_agent(
-                        rule_context, "", "업로드된 규제 문서 분석 및 요약을 작성하라"
-                    )
-
-                    done_time = datetime.datetime.now().isoformat()
-                    with _background_lock:
-                        _background_results[task_id] = {
-                            "status": "completed",
-                            "updated_at": done_time,
-                            "result": result,
-                            "vector_count": new_count,
-                            "added": added,
-                        }
-                except Exception as e:
-                    err_time = datetime.datetime.now().isoformat()
-                    with _background_lock:
-                        _background_results[task_id] = {
-                            "status": "failed",
-                            "updated_at": err_time,
-                            "error": str(e),
-                        }
-
-            # 고유 task id 생성
-            task_id = f"reg_{int(time.time() * 1000)}"
-            thread = threading.Thread(
-                target=_run_and_store, args=(files_data, task_id), daemon=True
+        if uploaded:
+            total_bytes = sum(int(getattr(file, "size", 0) or 0) for file in uploaded)
+            selected_rows = "".join(
+                f'<div class="upload-selected-item">• {html.escape(getattr(file, "name", "unknown"))} <span style="color:#166534; font-weight:700;">({html.escape(_format_upload_size(getattr(file, "size", 0) or 0))})</span></div>'
+                for file in uploaded[:4]
             )
-            thread.start()
-            st.success(
-                "규제 문서 분석을 백그라운드에서 시작했습니다. 상태를 대시보드에서 확인하세요."
+            if len(uploaded) > 4:
+                selected_rows += f'<div class="upload-selected-item">• 외 {len(uploaded) - 4}건 추가 선택됨</div>'
+            st.markdown(
+                f"""
+                <div class="upload-selected-box">
+                    <div class="upload-selected-title">업로드 대기 문서 {len(uploaded)}건 · 총 {html.escape(_format_upload_size(total_bytes))}</div>
+                    {selected_rows}
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-    else:
-        st.caption(
-            "문서를 이 영역에 드롭하거나 클릭해 선택한 뒤, 아래 학습 버튼으로 규제 에이전트 분석을 시작하세요."
-        )
+
+        if regulation_status == "running":
+            st.markdown(
+                f"""
+                <div class="upload-learning-box">
+                    <div class="upload-learning-head">
+                        <div class="upload-learning-core"></div>
+                        <div>
+                            <div class="upload-learning-title">AI가 규제 문서를 학습 중입니다</div>
+                            <div class="upload-learning-text">문서 청킹, 벡터 적재, 규제 요약 생성을 순차적으로 수행하고 있습니다.<br>최근 업데이트: {html.escape(regulation_updated_at)}</div>
+                        </div>
+                    </div>
+                    <div class="upload-learning-text">{html.escape(regulation_detail)}</div>
+                    <div class="upload-learning-bar"><span></span></div>
+                    {regulation_steps_html}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif regulation_status == "completed":
+            st.markdown(
+                f"""
+                <div class="upload-status-box success">
+                    <div class="upload-status-pill">✓ Vectorized & Ready</div>
+                    <div class="upload-status-title">규제 문서 분석 완료</div>
+                    <div class="upload-status-detail">{html.escape(regulation_detail)}<br>완료 시각: {html.escape(regulation_updated_at)}</div>
+                    {f'<div class="upload-status-summary">최신 요약 미리보기<br>{html.escape(regulation_summary)}</div>' if regulation_summary else ''}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif regulation_status == "failed":
+            st.markdown(
+                f"""
+                <div class="upload-status-box error">
+                    <div class="upload-status-title">규제 문서 분석 실패</div>
+                    <div class="upload-status-detail">{html.escape(regulation_detail)}<br>업데이트: {html.escape(regulation_updated_at)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        if uploaded:
+            if st.button(
+                "AI 규제 문서 학습 시작",
+                key="sidebar_reg_run",
+                type="primary",
+                use_container_width=True,
+                disabled=(regulation_status == "running"),
+            ):
+                files_data = []
+                for f in uploaded:
+                    try:
+                        raw = f.read()
+                    except Exception:
+                        raw = b""
+                    files_data.append((getattr(f, "name", "unknown"), raw))
+
+                now = datetime.datetime.now().isoformat()
+                statuses = st.session_state.get("agent_statuses", {})
+                statuses["regulation_agent"] = {
+                    "status": "running",
+                    "updated_at": now,
+                    "detail": "규제 문서 분석 실행 중...",
+                }
+                st.session_state.agent_statuses = statuses
+
+                def _run_and_store(files_data, task_id):
+                    try:
+                        before = int(st.session_state.get("vector_count", 0) or 0)
+                        new_count = ingest_files(files_data, doc_type="regulation")
+                        added = new_count - before
+
+                        query = "규제"
+                        logs_found, news_found, rules_found = search_context(query, k=6)
+                        rule_context = "\n\n".join(rules_found)
+
+                        result = regulation_agent(
+                            rule_context, "", "업로드된 규제 문서 분석 및 요약을 작성하라"
+                        )
+
+                        done_time = datetime.datetime.now().isoformat()
+                        with _background_lock:
+                            _background_results[task_id] = {
+                                "status": "completed",
+                                "updated_at": done_time,
+                                "result": result,
+                                "vector_count": new_count,
+                                "added": added,
+                            }
+                    except Exception as e:
+                        err_time = datetime.datetime.now().isoformat()
+                        with _background_lock:
+                            _background_results[task_id] = {
+                                "status": "failed",
+                                "updated_at": err_time,
+                                "error": str(e),
+                            }
+
+                task_id = f"reg_{int(time.time() * 1000)}"
+                thread = threading.Thread(
+                    target=_run_and_store, args=(files_data, task_id), daemon=True
+                )
+                thread.start()
+                st.success(
+                    "규제 문서 분석을 백그라운드에서 시작했습니다. 상태를 대시보드에서 확인하세요."
+                )
+        else:
+            st.caption(
+                "문서를 이 영역에 드롭하거나 클릭해 선택한 뒤, 아래 학습 버튼으로 규제 에이전트 분석을 시작하세요."
+            )
 
 
 def render_faiss_tab():
@@ -5185,12 +5915,23 @@ def render_faiss_tab():
 
     vector_count = status.get("vector_count", 0)
     last_ingest = status.get("last_log_ingest_time") or status.get("last_run_time")
+    store_options = get_faiss_store_options()
+    selected_store_label = st.selectbox(
+        "검색/조회할 DB",
+        options=[label for label, _ in store_options],
+        key="faiss_tab_store_filter",
+    )
+    selected_store = dict(store_options).get(selected_store_label)
+    _, selected_total_count = get_live_faiss_items(limit=1, store_name=selected_store)
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.metric("벡터 수", vector_count)
+        st.metric(
+            "벡터 수",
+            selected_total_count if selected_store is not None else vector_count,
+        )
         if last_ingest:
-            st.caption(f"마지막 적재: {last_ingest}")
+            st.caption(f"조회 DB: {selected_store_label} · 마지막 적재: {last_ingest}")
     with c2:
         if st.button("새로고침 FAISS 상태"):
             try:
@@ -5227,7 +5968,7 @@ def render_faiss_tab():
                     if st.button(f"이벤트에서 추가된 벡터 보기 ({after-before}건)", key=f"show_ev_{ev.get('timestamp')}_{before}_{after}"):
                         with st.spinner("FAISS 항목 불러오는 중..."):
                             try:
-                                resp = get_backend_client().get_faiss_entries(limit=after)
+                                resp = get_backend_client().get_faiss_entries(limit=after, store_name=selected_store)
                                 items = resp.get("items", [])
                                 added = items[before:after]
                                 if not added:
@@ -5253,10 +5994,11 @@ def render_faiss_tab():
     if st.button("검색 실행") and q.strip():
         with st.spinner("검색 중..."):
             try:
-                resp = get_backend_client().search_faiss(q, int(k))
+                resp = get_backend_client().search_faiss(q, int(k), store_name=selected_store)
                 logs = resp.get("logs") or []
                 news = resp.get("news") or []
                 rules = resp.get("rules") or []
+                customer = resp.get("customer") or []
 
                 if logs:
                     st.markdown("**Logs (유사 로그)**")
@@ -5273,7 +6015,12 @@ def render_faiss_tab():
                     for item in rules:
                         st.write(item)
 
-                if not (logs or news or rules):
+                if customer:
+                    st.markdown("**Customer / 영업 패턴**")
+                    for item in customer:
+                        st.write(item)
+
+                if not (logs or news or rules or customer):
                     st.info("검색 결과가 없습니다.")
             except Exception as e:
                 st.error(f"검색 실패: {e}")
@@ -5282,7 +6029,7 @@ def render_faiss_tab():
     st.subheader("FAISS 저장된 벡터 항목 보기 / 내보내기")
     if st.button("목록 불러오기 (최대 200)"):
         try:
-            resp = get_backend_client().get_faiss_entries(limit=200)
+            resp = get_backend_client().get_faiss_entries(limit=200, store_name=selected_store)
             items = resp.get("items", [])
             if items:
                 import pandas as _pd
@@ -5584,17 +6331,36 @@ with col_main:
             except Exception:
                 pass
 
-    operations_tab, strategy_tab, news_prompt_tab, log_prompt_tab, vector_db_tab = st.tabs(
-        [
-            "🤖 운영 현황",
-            "💬 AI 심사 전략",
-            "📰 뉴스 에이전트 입력",
-            "📄 로그 에이전트 입력",
-            "🧠 Vector DB",
-        ]
-    )
+    main_sections = [
+        "🤖 운영 현황",
+        "💬 AI 심사 전략",
+        "📰 뉴스 에이전트 입력",
+        "📄 로그 에이전트 입력",
+        "🧠 Vector DB",
+    ]
+    if "main_dashboard_section" not in st.session_state:
+        st.session_state.main_dashboard_section = main_sections[0]
+    render_main_section_status_styles()
 
-    with operations_tab:
+    if hasattr(st, "segmented_control"):
+        selected_section = st.segmented_control(
+            "메인 섹션",
+            options=main_sections,
+            selection_mode="single",
+            default=st.session_state.main_dashboard_section,
+            key="main_dashboard_section",
+            label_visibility="collapsed",
+        )
+    else:
+        selected_section = st.radio(
+            "메인 섹션",
+            options=main_sections,
+            horizontal=True,
+            key="main_dashboard_section",
+            label_visibility="collapsed",
+        )
+
+    if selected_section == "🤖 운영 현황":
         if HAS_FRAGMENT_REFRESH:
             consume_ws_snapshot_buffer()
             render_operations_showcase()
@@ -5607,10 +6373,10 @@ with col_main:
             else:
                 render_runtime_dashboard()
 
-    with strategy_tab:
+    elif selected_section == "💬 AI 심사 전략":
         render_role_based_strategy_tab()
 
-    with news_prompt_tab:
+    elif selected_section == "📰 뉴스 에이전트 입력":
         if HAS_FRAGMENT_REFRESH:
             render_live_news_prompt_fragment()
         else:
@@ -5625,7 +6391,7 @@ with col_main:
             "규제 문서 업로드는 왼쪽 사이드바 '실시간 뉴스 더보기' 아래로 이동했습니다."
         )
 
-    with log_prompt_tab:
+    elif selected_section == "📄 로그 에이전트 입력":
         if HAS_FRAGMENT_REFRESH:
             render_live_log_prompt_fragment()
         else:
@@ -5636,7 +6402,7 @@ with col_main:
                 "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))",
             )
 
-    with vector_db_tab:
+    elif selected_section == "🧠 Vector DB":
         if HAS_FRAGMENT_REFRESH:
             render_live_vector_db_fragment()
         else:

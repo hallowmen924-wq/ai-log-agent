@@ -29,6 +29,7 @@ from backend.schemas import (
 from backend.services import (
     analyze_logs_bundle,
     ask_strategy,
+    build_backend_diagnostics,
     build_faiss_bundle,
     collect_news_bundle,
     enrich_results,
@@ -56,6 +57,8 @@ _faiss_stats_cache: dict[str, object] = {
 
 def build_ws_snapshot(snapshot: dict) -> dict:
     return {
+        "news": snapshot.get("news", []),
+        "issues": snapshot.get("issues", []),
         "vector_count": snapshot.get("vector_count"),
         "vector_events": snapshot.get("vector_events", []),
         "agent_activity_log": snapshot.get("agent_activity_log", []),
@@ -76,6 +79,8 @@ def build_ws_snapshot(snapshot: dict) -> dict:
         "news_crawl_failure_count": snapshot.get("news_crawl_failure_count"),
         "last_news_crawl_time": snapshot.get("last_news_crawl_time"),
         "last_news_crawl_error": snapshot.get("last_news_crawl_error"),
+        "last_faiss_time": snapshot.get("last_faiss_time"),
+        "backend_diagnostics": snapshot.get("backend_diagnostics", {}),
     }
 
 
@@ -83,13 +88,18 @@ def build_ws_snapshot(snapshot: dict) -> dict:
 def health() -> dict:
     # 화면에서 가장 먼저 확인하는 상태 API입니다.
     # 서버가 살아있는지, 워커가 도는지, 최근 분석 상태가 어떤지 전달합니다.
-    return {"status": "ok", "worker_running": worker.running, **state.snapshot()}
+    snapshot = state.snapshot(include_faiss_items=False)
+    snapshot["backend_diagnostics"] = build_backend_diagnostics(
+        worker_running=worker.running,
+        worker_interval_seconds=worker.interval_seconds,
+    )
+    return {"status": "ok", "worker_running": worker.running, **snapshot}
 
 
 @app.post("/news/collect", response_model=NewsCollectResponse)
 def news_collect() -> NewsCollectResponse:
     news, issues = collect_news_bundle(accumulate=True)
-    snapshot = state.snapshot()
+    snapshot = state.snapshot(include_faiss_items=False)
     return NewsCollectResponse(
         news=news,
         issues=issues,
@@ -118,7 +128,7 @@ def faiss_build(payload: FaissBuildRequest) -> dict:
 @app.post("/faiss/search")
 def faiss_search(payload: SearchRequest) -> dict:
     try:
-        return search_faiss(payload.query, payload.k)
+        return search_faiss(payload.query, payload.k, payload.store_name)
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -142,15 +152,35 @@ def analysis_run(log_dir: str = "data/logs") -> FullAnalysisResponse:
 
 @app.get("/analysis/status", response_model=FullAnalysisResponse)
 def analysis_status() -> FullAnalysisResponse:
-    snapshot = state.snapshot()
+    snapshot = state.snapshot(include_faiss_items=False)
     snapshot["results"] = enrich_results(snapshot["results"])
+    snapshot["backend_diagnostics"] = build_backend_diagnostics(
+        worker_running=worker.running,
+        worker_interval_seconds=worker.interval_seconds,
+    )
     return FullAnalysisResponse(**snapshot)
+
+
+@app.get("/diagnostics/status")
+def diagnostics_status() -> dict:
+    snapshot = state.snapshot(include_faiss_items=False)
+    diagnostics = build_backend_diagnostics(
+        worker_running=worker.running,
+        worker_interval_seconds=worker.interval_seconds,
+    )
+    return {
+        "status": "ok",
+        "diagnostics": diagnostics,
+        "last_run_time": snapshot.get("last_run_time"),
+        "last_faiss_time": snapshot.get("last_faiss_time"),
+        "vector_count": snapshot.get("vector_count"),
+    }
 
 
 @app.get("/charts")
 def charts_all() -> dict:
     # 메인 대시보드의 4개 차트가 한 번에 가져가는 스냅샷 API입니다.
-    snapshot = state.snapshot()
+    snapshot = state.snapshot(include_faiss_items=False)
     return {
         "status": "ok",
         "last_chart_time": snapshot.get("last_chart_time"),
@@ -163,7 +193,7 @@ def charts_one(chart_name: str) -> dict:
     payloads = get_chart_payloads()
     if chart_name not in payloads:
         raise HTTPException(status_code=404, detail=f"unknown chart: {chart_name}")
-    snapshot = state.snapshot()
+    snapshot = state.snapshot(include_faiss_items=False)
     return {
         "status": "ok",
         "last_chart_time": snapshot.get("last_chart_time"),
@@ -173,32 +203,38 @@ def charts_one(chart_name: str) -> dict:
 
 
 @app.get("/faiss/entries")
-def faiss_entries(limit: int = 200) -> dict:
+def faiss_entries(limit: int = 200, store_name: str | None = None) -> dict:
     try:
-        from rag.vector_db import list_vectors
+        from rag.vector_db import get_vector_count, list_vectors
 
-        items = list_vectors(limit=limit)
-        return {"status": "ok", "count": len(items), "items": items}
+        items = list_vectors(limit=limit, store_name=store_name)
+        return {
+            "status": "ok",
+            "count": len(items),
+            "total_count": get_vector_count(store_name),
+            "store_name": store_name,
+            "items": items,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/faiss/export")
-def faiss_export(format: str = "json", limit: int = 200):
+def faiss_export(format: str = "json", limit: int = 200, store_name: str | None = None):
     try:
         from rag.vector_db import list_vectors
         import json, csv, io
 
-        items = list_vectors(limit=limit)
+        items = list_vectors(limit=limit, store_name=store_name)
         if format == "csv":
             output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=["id", "type", "product", "agent", "source", "name", "snippet"])
+            writer = csv.DictWriter(output, fieldnames=["id", "store", "type", "product", "agent", "source", "name", "snippet"])
             writer.writeheader()
             for row in items:
                 writer.writerow(row)
             return Response(content=output.getvalue(), media_type="text/csv")
         else:
-            return {"status": "ok", "count": len(items), "items": items}
+            return {"status": "ok", "count": len(items), "store_name": store_name, "items": items}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -247,7 +283,7 @@ def faiss_stats() -> dict:
                 "cached": True,
             }
 
-        items = list_vectors(limit=10000)
+        items = list_vectors(limit=10000, store_name=FAISS_STORE_LOGS)
         per_prod: dict[str, list[dict]] = {}
         for it in items:
             prod = it.get("product") or "UNKNOWN"
@@ -370,7 +406,7 @@ def faiss_stats() -> dict:
 
 
 @app.get("/faiss/search_features")
-def faiss_search_features(type: str | None = None, feature_key: str | None = None, feature_value: str | None = None, limit: int = 200) -> dict:
+def faiss_search_features(type: str | None = None, feature_key: str | None = None, feature_value: str | None = None, limit: int = 200, store_name: str | None = None) -> dict:
     """Search FAISS entries by metadata `type` and feature key/value.
 
     - `type`: optional metadata type filter (e.g., 'log', 'news', 'agent_report')
@@ -380,7 +416,7 @@ def faiss_search_features(type: str | None = None, feature_key: str | None = Non
     try:
         from rag.vector_db import list_vectors, get_vector_by_id
 
-        items = list_vectors(limit=10000)
+        items = list_vectors(limit=10000, store_name=store_name)
         results: list[dict] = []
         count = 0
         for it in items:
@@ -416,7 +452,7 @@ def faiss_search_features(type: str | None = None, feature_key: str | None = Non
             if count >= limit:
                 break
 
-        return {"status": "ok", "count": len(results), "items": results}
+        return {"status": "ok", "count": len(results), "store_name": store_name, "items": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -428,7 +464,11 @@ async def websocket_faiss_updates(websocket: WebSocket):
     last_signature = None
     try:
         while True:
-            snapshot = state.snapshot()
+            snapshot = state.snapshot(include_faiss_items=False)
+            snapshot["backend_diagnostics"] = build_backend_diagnostics(
+                worker_running=worker.running,
+                worker_interval_seconds=worker.interval_seconds,
+            )
             events = snapshot.get("vector_events", []) or []
             to_send = []
             for ev in reversed(events):

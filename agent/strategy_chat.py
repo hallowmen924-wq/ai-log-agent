@@ -8,23 +8,41 @@ from mapper.reject_code_mapper import format_reject_reason_details
 from rag.vector_db import (
     get_vector_count,
     save_agent_reports,
-    search_context,
+    search_news_context,
     search_similar_logs,
 )
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
-def mistral_generate(prompt: str) -> str:
+class OllamaUnavailableError(RuntimeError):
+    pass
 
-    response = requests.post(
-        OLLAMA_URL,
-        json={"model": "mistral", "prompt": prompt, "stream": False},
-        timeout=180,
+
+def _build_ollama_unavailable_message() -> str:
+    return (
+        "Ollama 서버에 연결할 수 없습니다. "
+        "Ollama가 실행 중인지 확인하고, 모델이 준비된 뒤 다시 시도하세요. "
+        f"대상 주소: {OLLAMA_URL}"
     )
-    response.raise_for_status()
 
-    return response.json()["response"]
+
+def mistral_generate(prompt: str) -> str:
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={"model": "mistral", "prompt": prompt, "stream": False},
+            timeout=180,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as error:
+        raise OllamaUnavailableError(_build_ollama_unavailable_message()) from error
+
+    answer = str(payload.get("response", "")).strip()
+    if not answer:
+        raise RuntimeError("Ollama 응답 본문이 비어 있습니다.")
+    return answer
 
 
 def emit_agent_event(
@@ -393,6 +411,27 @@ def build_news_agent_prompt(news_context: str, user_input: str) -> str:
 """.strip()
 
 
+def build_news_fallback_briefing(news_items: list[dict[str, Any]]) -> str:
+    headlines: list[str] = []
+    for item in news_items[:3]:
+        title = str(item.get("title") or item.get("summary") or "").strip()
+        if title:
+            headlines.append(title)
+
+    headline_text = ", ".join(headlines) if headlines else "수집된 주요 기사 제목 없음"
+    return (
+        "1. 현재 금융 리스크 수준\n"
+        "Ollama 연결 실패로 정밀 요약은 생략했습니다. 현재 뉴스 원문은 수집되어 있으며 운영자 확인이 필요합니다.\n\n"
+        "2. 대출 시장 영향\n"
+        f"주요 기사: {headline_text}\n"
+        "시장 변동성과 규제 이슈 가능성을 수동 검토하세요.\n\n"
+        "3. 규제 강화 가능성\n"
+        "자동 해석 불가 상태입니다. 규제 키워드 포함 기사부터 우선 검토가 필요합니다.\n\n"
+        "4. 시장 리스크 점수\n"
+        "MEDIUM"
+    )
+
+
 def build_agent_prompt_input(
     agent: str, context_text: str, user_input: str, source: str
 ) -> dict[str, str]:
@@ -578,7 +617,11 @@ def strategy_chat(
         "running",
         "RAG에서 관련 로그, 뉴스, 규제를 검색 중입니다.",
     )
-    logs, news, rules = search_context(user_input, k=6)
+    logs = [
+        (getattr(doc, "page_content", "") or "")[:500]
+        for doc in search_similar_logs(user_input, k=3)
+    ]
+    news, rules = search_news_context(user_input, k=6)
     emit_agent_event(
         event_callback,
         "orchestrator",
@@ -754,13 +797,33 @@ def run_periodic_news_agent(
     prompt_input = build_agent_prompt_input(
         "news_agent", news_context, user_input, "background_news_cycle"
     )
-    analysis = news_agent(news_context, user_input)
-    emit_agent_event(
-        event_callback,
-        "news_agent",
-        "completed",
-        "백그라운드 뉴스 브리핑을 생성했습니다.",
-    )
+    try:
+        analysis = news_agent(news_context, user_input)
+        emit_agent_event(
+            event_callback,
+            "news_agent",
+            "completed",
+            "백그라운드 뉴스 브리핑을 생성했습니다.",
+        )
+    except OllamaUnavailableError as error:
+        analysis = build_news_fallback_briefing(news_items)
+        emit_agent_event(
+            event_callback,
+            "news_agent",
+            "failed",
+            str(error),
+        )
+        return {
+            "analysis": analysis,
+            "prompt_input": prompt_input,
+            "vector_update": {
+                "before_count": 0,
+                "after_count": 0,
+                "added_count": 0,
+            },
+            "fallback": True,
+            "reason": "ollama_unavailable",
+        }
 
     vector_update = {
         "before_count": 0,

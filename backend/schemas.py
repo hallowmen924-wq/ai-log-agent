@@ -30,6 +30,7 @@ class FaissBuildRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     k: int = 5
+    store_name: str | None = None
 
 
 class StrategyChatRequest(BaseModel):
@@ -74,6 +75,8 @@ class FullAnalysisResponse(BaseModel):
     agent_statuses: dict[str, dict[str, Any]] = Field(default_factory=dict)
     agent_activity_log: list[dict[str, Any]] = Field(default_factory=list)
     vector_events: list[dict[str, Any]] = Field(default_factory=list)
+    last_faiss_time: str | None = None
+    backend_diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class GenericMessage(BaseModel):

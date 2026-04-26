@@ -16,7 +16,16 @@ from agent.strategy_chat import (
 )
 from analyzer.log_analyzer import analyze_logs
 from analyzer.risk_analyzer import calculate_risk
-from rag.vector_db import build_vector_db, get_vector_count, search_context
+from rag.vector_db import (
+    FAISS_STORE_CUSTOMER,
+    FAISS_STORE_LOGS,
+    FAISS_STORE_NEWS,
+    build_vector_db,
+    get_vector_count,
+    search_context,
+    search_customer_context,
+    search_news_context,
+)
 
 # services.py는 "실제 일"을 하는 계층입니다.
 # API 파일은 요청/응답만 담당하고, 여기서 로그 분석, 뉴스 수집, 벡터 생성, 차트 데이터 계산을 처리합니다.
@@ -51,6 +60,8 @@ class BackendState:
         self.vector_events: list[dict[str, Any]] = []
         self.chart_payloads: dict[str, Any] = {}
         self.last_chart_time: datetime.datetime | None = None
+        self.last_faiss_time: datetime.datetime | str | None = None
+        self.worker_runtime_stats: dict[str, Any] = {}
         self.full_faiss_items: list[dict[str, Any]] = []
         self.news_crawl_running = False
         self.news_crawl_target_count = 0
@@ -59,15 +70,16 @@ class BackendState:
         self.last_news_crawl_time: datetime.datetime | None = None
         self.last_news_crawl_error: str | None = None
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, include_faiss_items: bool = True) -> dict[str, Any]:
         try:
             vector_count = get_vector_count()
         except Exception:
             vector_count = 0
         cached_faiss_items: list[dict[str, Any]] = []
-        with self.lock:
-            cached_faiss_items = safe_serialize(self.full_faiss_items)
-        if vector_count > 0 and not cached_faiss_items:
+        if include_faiss_items:
+            with self.lock:
+                cached_faiss_items = safe_serialize(self.full_faiss_items)
+        if include_faiss_items and vector_count > 0 and not cached_faiss_items:
             try:
                 from rag.vector_db import list_vectors
 
@@ -141,6 +153,12 @@ class BackendState:
                 "last_chart_time": (
                     self.last_chart_time.isoformat() if self.last_chart_time else None
                 ),
+                "last_faiss_time": (
+                    self.last_faiss_time.isoformat()
+                    if isinstance(self.last_faiss_time, datetime.datetime)
+                    else self.last_faiss_time
+                ),
+                "worker_runtime_stats": safe_serialize(self.worker_runtime_stats),
                 "chart_payloads": self.chart_payloads,
                 "full_faiss_items": cached_faiss_items,
                 "news_crawl_running": self.news_crawl_running,
@@ -165,6 +183,107 @@ def _push_front(
     items: list[dict[str, Any]], item: dict[str, Any], limit: int = 30
 ) -> list[dict[str, Any]]:
     return ([item] + items)[:limit]
+
+
+def _parse_event_time(value: Any) -> datetime.datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def build_backend_diagnostics(
+    worker_running: bool | None = None,
+    worker_interval_seconds: int | None = None,
+) -> dict[str, Any]:
+    now = datetime.datetime.now()
+    with state.lock:
+        activity_log = list(state.agent_activity_log)
+        vector_events = list(state.vector_events)
+        news_crawl_running = bool(state.news_crawl_running)
+        news_crawl_target_count = int(state.news_crawl_target_count or 0)
+        news_crawl_success_count = int(state.news_crawl_success_count or 0)
+        news_crawl_failure_count = int(state.news_crawl_failure_count or 0)
+        last_news_crawl_time = state.last_news_crawl_time
+        last_faiss_time = state.last_faiss_time
+        worker_runtime_stats = dict(state.worker_runtime_stats)
+
+    activity_events_last_60s = 0
+    vector_events_last_60s = 0
+    activity_by_source: dict[str, int] = {}
+    vector_by_source: dict[str, int] = {}
+
+    for event in activity_log:
+        source = str(event.get("source") or "unknown")
+        activity_by_source[source] = activity_by_source.get(source, 0) + 1
+        ts = _parse_event_time(event.get("timestamp"))
+        if ts is not None and (now - ts).total_seconds() <= 60:
+            activity_events_last_60s += 1
+
+    for event in vector_events:
+        source = str(event.get("source") or "unknown")
+        vector_by_source[source] = vector_by_source.get(source, 0) + 1
+        ts = _parse_event_time(event.get("timestamp"))
+        if ts is not None and (now - ts).total_seconds() <= 60:
+            vector_events_last_60s += 1
+
+    latest_activity = activity_log[0] if activity_log else {}
+    latest_vector = vector_events[0] if vector_events else {}
+    crawl_backlog = max(news_crawl_target_count - news_crawl_success_count - news_crawl_failure_count, 0)
+
+    hotspots: list[str] = []
+    if worker_running:
+        hotspots.append(f"worker loop active every {worker_interval_seconds or '?'}s")
+    if activity_events_last_60s >= 6:
+        hotspots.append(f"activity events last 60s: {activity_events_last_60s}")
+    if vector_events_last_60s >= 2:
+        hotspots.append(f"vector rebuild events last 60s: {vector_events_last_60s}")
+    if news_crawl_running:
+        hotspots.append(f"news crawl backlog: {crawl_backlog}")
+
+    return {
+        "worker_running": bool(worker_running),
+        "worker_interval_seconds": worker_interval_seconds,
+        "activity_events_last_60s": activity_events_last_60s,
+        "vector_events_last_60s": vector_events_last_60s,
+        "last_activity_time": latest_activity.get("timestamp"),
+        "last_activity_source": latest_activity.get("source"),
+        "last_vector_event_time": latest_vector.get("timestamp"),
+        "last_vector_event_source": latest_vector.get("source"),
+        "last_faiss_time": (
+            last_faiss_time.isoformat()
+            if isinstance(last_faiss_time, datetime.datetime)
+            else last_faiss_time
+        ),
+        "news_crawl_running": news_crawl_running,
+        "news_crawl_target_count": news_crawl_target_count,
+        "news_crawl_success_count": news_crawl_success_count,
+        "news_crawl_failure_count": news_crawl_failure_count,
+        "news_crawl_backlog": crawl_backlog,
+        "last_news_crawl_time": (
+            last_news_crawl_time.isoformat() if last_news_crawl_time else None
+        ),
+        "top_activity_sources": sorted(
+            activity_by_source.items(), key=lambda item: item[1], reverse=True
+        )[:5],
+        "top_vector_sources": sorted(
+            vector_by_source.items(), key=lambda item: item[1], reverse=True
+        )[:5],
+        "hotspots": hotspots,
+        "worker_runtime": worker_runtime_stats,
+    }
+
+
+def update_worker_runtime_stats(stats: dict[str, Any]) -> None:
+    with state.lock:
+        state.worker_runtime_stats = safe_serialize(stats)
 
 
 def record_activity_event(
@@ -798,9 +917,20 @@ def run_background_log_agent_cycle(should_persist: bool = True) -> dict[str, Any
     return result
 
 
-def search_faiss(query: str, k: int = 5) -> dict[str, list[str]]:
+def search_faiss(query: str, k: int = 5, store_name: str | None = None) -> dict[str, list[str]]:
+    normalized_store = str(store_name or "").strip().lower() or None
+    if normalized_store == FAISS_STORE_LOGS:
+        logs, _, _ = search_context(query, k=k)
+        return {"logs": logs, "news": [], "rules": [], "customer": []}
+    if normalized_store == FAISS_STORE_NEWS:
+        news, rules = search_news_context(query, k=k)
+        return {"logs": [], "news": news, "rules": rules, "customer": []}
+    if normalized_store == FAISS_STORE_CUSTOMER:
+        customer = search_customer_context(query, k=k)
+        return {"logs": [], "news": [], "rules": [], "customer": customer}
+
     logs, news, rules = search_context(query, k=k)
-    return {"logs": logs, "news": news, "rules": rules}
+    return {"logs": logs, "news": news, "rules": rules, "customer": []}
 
 
 def get_chart_payloads() -> dict[str, Any]:

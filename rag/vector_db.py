@@ -12,12 +12,30 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from rag.faiss_customer_db import (
+    CUSTOMER_SEARCH_TYPES,
+    build_customer_documents,
+    format_customer_search_results,
+)
+from rag.faiss_logs_db import (
+    build_log_documents,
+    format_log_search_results,
+    prepare_log_records,
+)
+from rag.faiss_news_db import (
+    NEWS_LIKE_TYPES,
+    RULE_LIKE_TYPES,
+    build_news_documents,
+    split_news_search_results,
+)
 
 _embeddings = None
 import io
 import json
 import logging
 import re
+import shutil
+from typing import Any
 
 # 모듈 수준 파일 로거 설정 (RAG ingest 로그 저장)
 _LOG_DIR = os.path.join("logs")
@@ -45,27 +63,156 @@ def get_embeddings():
     return _embeddings
 
 
-def load_existing_agent_report_docs():
-    if not os.path.exists("faiss_db"):
-        return []
+FAISS_STORE_LOGS = "logs"
+FAISS_STORE_NEWS = "news"
+FAISS_STORE_CUSTOMER = "customer"
 
+FAISS_STORE_PATHS = {
+    FAISS_STORE_LOGS: "faiss_logs",
+    FAISS_STORE_NEWS: "faiss_news",
+    FAISS_STORE_CUSTOMER: "faiss_customer",
+}
+
+LEGACY_FAISS_PATH = "faiss_db"
+
+_db_registry: dict[str, FAISS | None] = {
+    FAISS_STORE_LOGS: None,
+    FAISS_STORE_NEWS: None,
+    FAISS_STORE_CUSTOMER: None,
+}
+
+
+def normalize_store_name(store_name: str | None) -> str:
+    candidate = str(store_name or FAISS_STORE_LOGS).strip().lower()
+    if candidate in FAISS_STORE_PATHS:
+        return candidate
+    raise ValueError(f"unknown FAISS store: {store_name}")
+
+
+def get_store_path(store_name: str) -> str:
+    return FAISS_STORE_PATHS[normalize_store_name(store_name)]
+
+
+def infer_store_from_metadata(metadata: dict[str, Any] | None) -> str:
+    meta = metadata or {}
+    explicit_store = str(meta.get("store") or "").strip().lower()
+    if explicit_store in FAISS_STORE_PATHS:
+        return explicit_store
+
+    doc_type = str(meta.get("type") or "").strip().lower()
+    agent_name = str(meta.get("agent") or "").strip().lower()
+
+    if doc_type == "log":
+        return FAISS_STORE_LOGS
+    if doc_type in {"news", "regulation", "rule"}:
+        return FAISS_STORE_NEWS
+    if doc_type in {"customer_pattern", "sales_strategy"}:
+        return FAISS_STORE_CUSTOMER
+    if doc_type.startswith("agent_report"):
+        if agent_name in {"log", "log_agent"}:
+            return FAISS_STORE_LOGS
+        if agent_name in {"news", "news_agent", "regulation", "regulation_agent"}:
+            return FAISS_STORE_NEWS
+        return FAISS_STORE_CUSTOMER
+    return FAISS_STORE_CUSTOMER
+
+
+def infer_store_from_doc_type(doc_type: str | None) -> str:
+    dummy_meta = {"type": str(doc_type or "").strip().lower()}
+    return infer_store_from_metadata(dummy_meta)
+
+
+def infer_store_from_report(report: dict[str, Any]) -> str:
+    return infer_store_from_metadata(
+        {
+            "type": "agent_report",
+            "agent": report.get("agent"),
+            "store": report.get("store"),
+        }
+    )
+
+
+def _load_local_db(path: str) -> FAISS | None:
+    if not os.path.exists(path):
+        return None
     try:
-        existing_db = FAISS.load_local(
-            "faiss_db",
+        return FAISS.load_local(
+            path,
             get_embeddings(),
             allow_dangerous_deserialization=True,
         )
-        doc_map = getattr(existing_db.docstore, "_dict", {})
+    except Exception:
+        return None
+
+
+def _iter_docstore_documents(local_db: FAISS | None):
+    if local_db is None:
+        return []
+    doc_map = getattr(local_db.docstore, "_dict", {}) or {}
+    return list(doc_map.values())
+
+
+def load_existing_agent_report_docs(store_name: str):
+    normalized_store = normalize_store_name(store_name)
+    target_db = _load_local_db(get_store_path(normalized_store))
+    source_db = target_db
+    if source_db is None and os.path.exists(LEGACY_FAISS_PATH):
+        source_db = _load_local_db(LEGACY_FAISS_PATH)
+
+    if source_db is None:
+        return []
+
+    try:
         return [
             doc
-            for doc in doc_map.values()
-            if getattr(doc, "metadata", {}).get("type") == "agent_report"
+            for doc in _iter_docstore_documents(source_db)
+            if getattr(doc, "metadata", {}).get("type", "").startswith("agent_report")
+            and infer_store_from_metadata(getattr(doc, "metadata", {}) or {})
+            == normalized_store
         ]
     except Exception:
         return []
 
 
-db = None
+def should_preserve_existing_doc(store_name: str, metadata: dict[str, Any] | None) -> bool:
+    meta = metadata or {}
+    doc_type = str(meta.get("type") or "").strip().lower()
+    source = str(meta.get("source") or "").strip().lower()
+
+    if store_name == FAISS_STORE_LOGS:
+        return doc_type.startswith("agent_report")
+    if store_name == FAISS_STORE_NEWS:
+        return doc_type.startswith("agent_report") or source == "upload" or doc_type in {
+            "regulation",
+            "rule",
+        }
+    if store_name == FAISS_STORE_CUSTOMER:
+        return doc_type.startswith("agent_report") or doc_type == "sales_strategy"
+    return False
+
+
+def load_preserved_store_docs(store_name: str):
+    normalized_store = normalize_store_name(store_name)
+    target_db = _load_local_db(get_store_path(normalized_store))
+    source_db = target_db
+    if source_db is None and os.path.exists(LEGACY_FAISS_PATH):
+        source_db = _load_local_db(LEGACY_FAISS_PATH)
+
+    if source_db is None:
+        return []
+
+    try:
+        return [
+            doc
+            for doc in _iter_docstore_documents(source_db)
+            if infer_store_from_metadata(getattr(doc, "metadata", {}) or {})
+            == normalized_store
+            and should_preserve_existing_doc(
+                normalized_store, getattr(doc, "metadata", {}) or {}
+            )
+        ]
+    except Exception:
+        return []
 
 _NULL_LIKE_VALUES = {"", "NULL", "NONE", "NAN", "N/A", "NA"}
 
@@ -226,401 +373,221 @@ def should_skip_faiss_log(log_item: dict) -> bool:
 
 
 def build_vector_db(logs, news):
-    global db
-
     start = time.time()
     print("벡터 생성 시작")
 
-    documents = []
-    documents.extend(load_existing_agent_report_docs())
-    globally_ignorable_in_keys = find_globally_ignorable_field_keys(logs, "in_fields")
-    globally_ignorable_out_keys = find_globally_ignorable_field_keys(logs, "out_fields")
+    log_documents = []
+    news_documents = []
+    customer_documents = []
 
-    # helper: 숫자/퍼센트 파싱
-    def _parse_number(text: str):
-        if not text:
-            return None
-        m = re.search(r"[-+]?[0-9]{1,3}(?:[0-9,]*)(?:\.[0-9]+)?%?", str(text))
-        if not m:
-            return None
-        s = m.group(0)
-        if s.endswith("%"):
-            try:
-                return float(s[:-1].replace(",", ""))
-            except Exception:
-                return None
-        try:
-            return float(s.replace(",", ""))
-        except Exception:
-            return None
-
-    def _extract_features(log_item: dict):
-        features = {
-            "available_amount": None,
-            "applied_rate": None,
-            "ko_codes": [],
-            "case_id": None,
-            "product_code": log_item.get("product") or log_item.get("product_code"),
-            # 추가 추출 항목
-            "loan_term_months": None,
-            "loan_term_raw": None,
-            "credit_grade": None,
-            "credit_score": None,
-            "annual_income": None,
-            "purpose": None,
-            "collateral": None,
-            "interest_type": None,
-        }
-
-        in_fields = log_item.get("in_fields", {}) or {}
-        out_fields = log_item.get("out_fields", {}) or {}
-        in_mapping = log_item.get("in_mapping", {}) or {}
-        out_mapping = log_item.get("out_mapping", {}) or {}
-
-        # 수집할 필드 목록: (key, label, value)
-        scan_fields = []
-        for src, mapping in ((in_fields, in_mapping), (out_fields, out_mapping)):
-            for k, v in src.items():
-                label = str(mapping.get(k, k))
-                scan_fields.append((k, label, v))
-                # case id 후보
-                if features["case_id"] is None and str(k).lower() in (
-                    "case_id",
-                    "id",
-                    "req_no",
-                    "request_id",
-                    "caseid",
-                ):
-                    features["case_id"] = str(v)
-
-        # 보조 키워드 및 단위 처리
-        for k, label, value in scan_fields:
-            val_str = "" if value is None else str(value)
-            l_low = label.lower()
-            v_low = val_str.lower()
-
-            # 금액 추출
-            if features["available_amount"] is None and (
-                any(
-                    tok in l_low
-                    for tok in ("대출", "한도", "금액", "limit", "available")
-                )
-                or re.search(r"\b(원|만원|억|천원|만)\b", v_low)
-            ):
-                num = _parse_number(val_str)
-                if num is not None:
-                    multiplier = 1
-                    if "만원" in v_low or (
-                        "만" in v_low and re.search(r"\d+만", v_low)
-                    ):
-                        multiplier = 10000
-                    elif "억" in v_low:
-                        multiplier = 100000000
-                    elif "천" in v_low and "원" in v_low:
-                        multiplier = 1000
-                    try:
-                        features["available_amount"] = int(num * multiplier)
-                    except Exception:
-                        features["available_amount"] = int(float(num) * multiplier)
-
-            # 대출기간 추출 (개월/년)
-            if features["loan_term_months"] is None and (
-                "개월" in v_low
-                or "년" in v_low
-                or any(tok in l_low for tok in ("기간", "term", "months", "years"))
-            ):
-                # 숫자+단위(예: 36개월, 3년)
-                m = re.search(
-                    r"(\d+(?:\.\d+)?)\s*(개월|개월|개월|월|년|yr|y|months|years)?",
-                    v_low,
-                )
-                if m:
-                    val = float(m.group(1))
-                    unit = m.group(2) or ""
-                    unit = unit.strip()
-                    months = None
-                    if unit in ("년", "y", "yr", "years"):
-                        months = int(val * 12)
-                    elif unit in ("개월", "월", "months"):
-                        months = int(val)
-                    else:
-                        # 단위 없을 경우 가정: 숫자가 크면 개월로, 작으면 년으로 추정하지 않음
-                        months = int(val)
-                    features["loan_term_months"] = months
-                    features["loan_term_raw"] = val_str
-
-            # 금리 추출
-            if features["applied_rate"] is None and (
-                any(tok in l_low for tok in ("금리", "rate", "이율", "percent"))
-                or "%" in v_low
-            ):
-                num = _parse_number(val_str)
-                if num is not None:
-                    features["applied_rate"] = float(num)
-
-            # 신용등급/점수 추출
-            if features["credit_grade"] is None and any(
-                tok in l_low for tok in ("등급", "grade", "신용")
-            ):
-                # 등급 문자(A,B,C,S) 또는 숫자(300-900)
-                g = re.search(r"\b([A-D][+-]?|S|[0-9]{3,4})\b", val_str, re.I)
-                if g:
-                    gval = g.group(1)
-                    if gval.isdigit():
-                        try:
-                            features["credit_score"] = int(gval)
-                        except Exception:
-                            features["credit_score"] = float(gval)
-                    else:
-                        features["credit_grade"] = gval.upper()
-
-            # 연소득/소득 추출
-            if features["annual_income"] is None and any(
-                tok in l_low for tok in ("소득", "연소득", "income", "salary")
-            ):
-                num = _parse_number(val_str)
-                if num is not None:
-                    multiplier = 1
-                    if "만원" in v_low or (
-                        "만" in v_low and re.search(r"\d+만", v_low)
-                    ):
-                        multiplier = 10000
-                    elif "억" in v_low:
-                        multiplier = 100000000
-                    features["annual_income"] = int(num * multiplier)
-
-            # 용도, 담보, 이자유형
-            if features["purpose"] is None and any(
-                tok in l_low for tok in ("용도", "purpose")
-            ):
-                features["purpose"] = val_str
-            if features["collateral"] is None and any(
-                tok in l_low for tok in ("담보", "collateral")
-            ):
-                features["collateral"] = val_str
-            if features["interest_type"] is None and any(
-                tok in l_low for tok in ("변동", "고정", "fixed", "variable")
-            ):
-                features["interest_type"] = val_str
-
-            # KO 코드 탐지
-            if re.match(r"^(K|KO)[0-9A-Za-z_\-]*$", str(k), re.I) or re.match(
-                r"^(K|KO)[0-9A-Za-z_\-]*$", label, re.I
-            ):
-                features["ko_codes"].append(str(k))
-
-            for m in re.findall(r"\b(KO?-?[0-9A-Za-z_]+)\b", val_str):
-                features["ko_codes"].append(m)
-
-        # dedupe
-        features["ko_codes"] = list(dict.fromkeys(features["ko_codes"]))
-        return features
-
-    logger = ingest_logger
-    # 로그
-    for i, log in enumerate(logs):
-        # 원본 로그 전체를 파일로 기록
-        try:
-            logger.info(
-                "---- RAG INGEST: original log ----\n%s",
-                json.dumps(log, ensure_ascii=False, indent=2),
-            )
-        except Exception:
-            logger.info("---- RAG INGEST: original log ---- %s", str(log))
-
-        if should_skip_faiss_log(log):
-            logger.info(
-                "Skipping FAISS ingest for product code: %s",
-                log.get("product") or log.get("product_code") or "",
-            )
-            continue
-
-        print(f"로그 처리 중... {i+1}/{len(logs)}")
-
-        # 🔥 매핑 적용
-        in_fields = sanitize_faiss_fields(
-            log.get("in_fields", {}) or {},
-            drop_keys=globally_ignorable_in_keys,
+    log_documents.extend(load_preserved_store_docs(FAISS_STORE_LOGS))
+    news_documents.extend(load_preserved_store_docs(FAISS_STORE_NEWS))
+    customer_documents.extend(load_preserved_store_docs(FAISS_STORE_CUSTOMER))
+    prepared_logs = prepare_log_records(
+        logs,
+        ingest_logger,
+        should_skip_log=should_skip_faiss_log,
+        sanitize_fields=sanitize_faiss_fields,
+        sanitize_mapping=sanitize_faiss_mapping,
+        find_ignorable_keys=find_globally_ignorable_field_keys,
+        apply_mapping=apply_mapping,
+        map_fields=map_fields,
+        clean_text=clean_faiss_text,
+    )
+    log_documents.extend(build_log_documents(prepared_logs, FAISS_STORE_LOGS))
+    news_documents.extend(
+        build_news_documents(
+            news,
+            ingest_logger,
+            clean_text=clean_faiss_text,
+            store_name=FAISS_STORE_NEWS,
         )
-        out_fields = sanitize_faiss_fields(
-            log.get("out_fields", {}) or {},
-            drop_keys=globally_ignorable_out_keys,
+    )
+    customer_documents.extend(
+        build_customer_documents(
+            prepared_logs,
+            clean_text=clean_faiss_text,
+            store_name=FAISS_STORE_CUSTOMER,
         )
-        in_mapping = sanitize_faiss_mapping(log.get("in_mapping", {}) or {})
-        out_mapping = sanitize_faiss_mapping(log.get("out_mapping", {}) or {})
-        reject_reason_details = log.get("reject_reason_details", []) or []
+    )
 
-        sanitized_log = dict(log)
-        sanitized_log["in_fields"] = in_fields
-        sanitized_log["out_fields"] = out_fields
-        sanitized_log["in_mapping"] = in_mapping
-        sanitized_log["out_mapping"] = out_mapping
+    counts = {
+        FAISS_STORE_LOGS: _rebuild_store(FAISS_STORE_LOGS, log_documents),
+        FAISS_STORE_NEWS: _rebuild_store(FAISS_STORE_NEWS, news_documents),
+        FAISS_STORE_CUSTOMER: _rebuild_store(FAISS_STORE_CUSTOMER, customer_documents),
+    }
+    total_count = sum(counts.values())
 
-        in_text = apply_mapping(in_fields, in_mapping)
-        out_text = apply_mapping(out_fields, out_mapping)
-        reject_reason_text = ", ".join(
-            clean_faiss_text(item.get("description") or item.get("code") or "")
-            for item in reject_reason_details
-            if clean_faiss_text(item.get("description") or item.get("code") or "")
+    try:
+        ingest_logger.info(
+            "FAISS stores saved: logs=%d news=%d customer=%d total=%d",
+            counts[FAISS_STORE_LOGS],
+            counts[FAISS_STORE_NEWS],
+            counts[FAISS_STORE_CUSTOMER],
+            total_count,
         )
+    except Exception:
+        ingest_logger.info("FAISS stores saved: total=%d", total_count)
 
-        full_text = clean_faiss_text(
-            f"[상품] {clean_faiss_text(log.get('product'))} [IN] {in_text} [OUT] {out_text} [거절사유] {reject_reason_text or '-'}"
-        )
+    print(f"완료: {time.time() - start:.2f}초")
+    return total_count
 
-        print(f"변환된 로그:\n{full_text[:300]}")
 
-        # feature 추출
-        features = _extract_features(sanitized_log)
+def _clear_store(store_name: str) -> None:
+    normalized_store = normalize_store_name(store_name)
+    _db_registry[normalized_store] = None
+    store_path = get_store_path(normalized_store)
+    if os.path.exists(store_path):
+        shutil.rmtree(store_path, ignore_errors=True)
 
-        # map keys to human-readable labels for storage to FAISS
-        mapped_in = map_fields(in_fields, in_mapping)
-        mapped_out = map_fields(out_fields, out_mapping)
 
-        documents.append(
-            Document(
-                page_content=full_text[:2000],
-                metadata={
-                    "type": "log",
-                    "product": log.get("product"),
-                    # store mapped fields only (no raw mapping stored)
-                    "in_fields": mapped_in,
-                    "out_fields": mapped_out,
-                    "reject_reason_codes": log.get("reject_reason_codes") or [],
-                    "reject_reason_details": reject_reason_details,
-                    "features": features,
-                },
-            )
-        )
-
-    # 뉴스
-    for i, n in enumerate(news):
-        # 원본 뉴스 아이템 전체 파일로 기록
-        try:
-            ingest_logger.info(
-                "---- RAG INGEST: original news ----\n%s",
-                json.dumps(n, ensure_ascii=False, indent=2),
-            )
-        except Exception:
-            ingest_logger.info("---- RAG INGEST: original news ---- %s", str(n))
-
-        print(f"뉴스 처리 중... {i+1}/{len(news)}")
-
-        title = n.get("title", "")
-        content = (n.get("content") or n.get("summary") or "")[:1000]
-
-        text = clean_faiss_text(f"제목: {title} 내용: {content}")
-
-        documents.append(Document(page_content=text, metadata={"type": "news"}))
-
-    print(f"document 개수: {len(documents)}")
-
-    # chunk
+def _split_documents(documents: list[Document]) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-
-    split_docs = []
+    split_docs: list[Document] = []
     for doc in documents:
         chunks = splitter.split_text(doc.page_content)
         for chunk in chunks:
             split_docs.append(Document(page_content=chunk, metadata=doc.metadata))
+    return split_docs
 
-    print(f"총 chunk 수: {len(split_docs)}")
+
+def _rebuild_store(store_name: str, documents: list[Document]) -> int:
+    normalized_store = normalize_store_name(store_name)
+    split_docs = _split_documents(documents)
+    print(f"{normalized_store} document 개수: {len(documents)} / chunk 수: {len(split_docs)}")
 
     if not split_docs:
-        ingest_logger.warning(
-            "FAISS rebuild skipped because no chunks were produced from logs/news"
-        )
-        print("No chunks produced; skipping FAISS rebuild")
-        return get_vector_count()
+        _clear_store(normalized_store)
+        return 0
 
-    print("embedding 시작")
-
-    db = FAISS.from_documents(split_docs, get_embeddings())
-
-    db.save_local("faiss_db")
-    count_after = len(getattr(db, "index_to_docstore_id", []) or [])
-    try:
-        ingest_logger.info("FAISS saved: %d vectors", count_after)
-    except Exception:
-        ingest_logger.info("FAISS saved: unknown vector count")
-
-    print(f"완료: {time.time() - start:.2f}초")
-    return count_after
+    local_db = FAISS.from_documents(split_docs, get_embeddings())
+    local_db.save_local(get_store_path(normalized_store))
+    _db_registry[normalized_store] = local_db
+    return len(getattr(local_db, "index_to_docstore_id", []) or [])
 
 
-def load_db():
-    global db
+def load_db(store_name: str | None = None):
+    if store_name is None:
+        for current_store in FAISS_STORE_PATHS:
+            load_db(current_store)
+        return
 
-    if db is None:
-        if os.path.exists("faiss_db"):
-            print("FAISS 로드")
-
-            db = FAISS.load_local(
-                "faiss_db",
+    normalized_store = normalize_store_name(store_name)
+    if _db_registry[normalized_store] is None:
+        store_path = get_store_path(normalized_store)
+        if os.path.exists(store_path):
+            print(f"FAISS 로드: {normalized_store}")
+            _db_registry[normalized_store] = FAISS.load_local(
+                store_path,
                 get_embeddings(),
-                allow_dangerous_deserialization=True,  # 🔥 핵심
+                allow_dangerous_deserialization=True,
             )
 
 
-def _get_loaded_db():
-    load_db()
-    return db
+def _get_loaded_db(store_name: str):
+    normalized_store = normalize_store_name(store_name)
+    load_db(normalized_store)
+    return _db_registry[normalized_store]
+
+
+def _similarity_search(
+    store_name: str,
+    query: str,
+    k: int,
+    allowed_types: set[str] | None = None,
+):
+    local_db = _get_loaded_db(store_name)
+    if local_db is None:
+        return []
+
+    fetch_k = max(int(k or 5) * 4, 12)
+    docs = local_db.similarity_search(query, k=fetch_k)
+    if not allowed_types:
+        return docs[:k]
+
+    matched = []
+    for doc in docs:
+        doc_type = str((getattr(doc, "metadata", {}) or {}).get("type") or "").strip().lower()
+        if doc_type in allowed_types:
+            matched.append(doc)
+        if len(matched) >= k:
+            break
+    return matched
 
 
 def search_context(query, k=5):
-    load_db()  # 🔥 추가
-
-    docs = db.similarity_search(query, k=k)
-
     logs, news, rules = [], [], []
 
-    for d in docs:
-        if d.metadata["type"] == "log":
-            # 메타데이터에 원본 필드/매핑이 있으면 사람이 읽기 좋은 형태로 재구성합니다.
-            meta = d.metadata
-            # stored fields are already mapped to human-readable keys
-            in_fields = meta.get("in_fields") or {}
-            out_fields = meta.get("out_fields") or {}
+    logs = format_log_search_results(
+        _similarity_search(FAISS_STORE_LOGS, query, k, {"log"}),
+        apply_mapping,
+    )
 
-            # create readable snippets from mapped dicts
-            in_text = apply_mapping(in_fields, {})
-            out_text = apply_mapping(out_fields, {})
-
-            formatted = f"[상품] {meta.get('product')} [IN] {in_text} [OUT] {out_text}"
-            logs.append(formatted)
-        elif d.metadata["type"] == "news":
-            news.append(d.page_content)
-        else:
-            rules.append(d.page_content)
+    news, rules = split_news_search_results(_similarity_search(
+        FAISS_STORE_NEWS,
+        query,
+        k,
+        NEWS_LIKE_TYPES | RULE_LIKE_TYPES,
+    ))
 
     return logs, news, rules
 
 
-def search_similar_logs(query):
-    load_db()
+def search_news_context(query: str, k: int = 5) -> tuple[list[str], list[str]]:
+    docs = _similarity_search(
+        FAISS_STORE_NEWS,
+        query,
+        k,
+        NEWS_LIKE_TYPES | RULE_LIKE_TYPES,
+    )
+    return split_news_search_results(docs)
 
-    return db.similarity_search(query, k=3)
+
+def search_customer_context(query: str, k: int = 5) -> list[str]:
+    return format_customer_search_results(
+        _similarity_search(FAISS_STORE_CUSTOMER, query, k, CUSTOMER_SEARCH_TYPES)
+    )
 
 
-def get_vector_count():
-    local_db = _get_loaded_db()
+def search_similar_logs(query, k: int = 3):
+    return _similarity_search(FAISS_STORE_LOGS, query, k, {"log"})
+
+
+def get_vector_count(store_name: str | None = None):
+    if store_name is None:
+        return sum(get_vector_count(current_store) for current_store in FAISS_STORE_PATHS)
+    local_db = _get_loaded_db(store_name)
     if local_db is None:
         return 0
     return len(getattr(local_db, "index_to_docstore_id", []) or [])
 
 
-def save_agent_reports(reports):
-    global db
+def _append_documents_to_store(store_name: str, documents: list[Document]) -> int:
+    normalized_store = normalize_store_name(store_name)
+    if not documents:
+        return get_vector_count(normalized_store)
 
+    local_db = _get_loaded_db(normalized_store)
+    if local_db is None:
+        local_db = FAISS.from_documents(documents, get_embeddings())
+    else:
+        local_db.add_documents(documents)
+
+    local_db.save_local(get_store_path(normalized_store))
+    _db_registry[normalized_store] = local_db
+    return len(getattr(local_db, "index_to_docstore_id", []) or [])
+
+
+def save_agent_reports(reports, store_name: str | None = None):
     if not reports:
         return get_vector_count()
 
-    if db is None:
-        load_db()
-
-    documents = []
+    documents_by_store: dict[str, list[Document]] = {
+        FAISS_STORE_LOGS: [],
+        FAISS_STORE_NEWS: [],
+        FAISS_STORE_CUSTOMER: [],
+    }
     for report in reports:
-        # 에이전트 리포트도 저장 전 원본을 파일로 기록합니다.
         try:
             ingest_logger.info(
                 "---- RAG INGEST: agent report ----\n%s",
@@ -634,41 +601,51 @@ def save_agent_reports(reports):
         agent_name = str(report.get("agent", "agent")).strip()
         if not content:
             continue
-        documents.append(
+        target_store = normalize_store_name(store_name) if store_name else infer_store_from_report(report)
+        doc_type = str(report.get("type") or f"agent_report_{agent_name}").strip().lower()
+        documents_by_store[target_store].append(
             Document(
                 page_content=f"제목: {title}\n내용: {content}",
-                metadata={"type": "agent_report", "agent": agent_name},
+                metadata={
+                    "type": doc_type,
+                    "agent": agent_name,
+                    "store": target_store,
+                },
             )
         )
 
-    if not documents:
+    if not any(documents_by_store.values()):
         return get_vector_count()
 
-    if db is None:
-        db = FAISS.from_documents(documents, get_embeddings())
-    else:
-        db.add_documents(documents)
-
-    db.save_local("faiss_db")
+    counts = {
+        current_store: _append_documents_to_store(current_store, current_docs)
+        for current_store, current_docs in documents_by_store.items()
+    }
     try:
-        count_after = len(getattr(db, "index_to_docstore_id", []) or [])
-        ingest_logger.info("FAISS saved (agent_report): %d vectors", count_after)
+        ingest_logger.info(
+            "FAISS saved (agent_report): logs=%d news=%d customer=%d total=%d",
+            counts[FAISS_STORE_LOGS],
+            counts[FAISS_STORE_NEWS],
+            counts[FAISS_STORE_CUSTOMER],
+            get_vector_count(),
+        )
     except Exception:
-        ingest_logger.info("FAISS saved (agent_report): unknown vector count")
-    return len(db.index_to_docstore_id)
+        ingest_logger.info("FAISS saved (agent_report): total=%d", get_vector_count())
+    return get_vector_count()
 
 
 def ingest_files(
-    files_data: list[tuple[str, bytes]], doc_type: str = "regulation"
+    files_data: list[tuple[str, bytes]],
+    doc_type: str = "regulation",
+    store_name: str | None = None,
 ) -> int:
     """
     files_data: list of (name, raw_bytes)
     Adds split chunks of provided files into the FAISS DB with metadata type `doc_type`.
     Returns number of vectors after ingest.
     """
-    global db
-
     documents = []
+    target_store = normalize_store_name(store_name) if store_name else infer_store_from_doc_type(doc_type)
     for name, raw in files_data:
         text = ""
         try:
@@ -702,52 +679,57 @@ def ingest_files(
         documents.append(
             Document(
                 page_content=f"제목: {name}\n내용: {text}",
-                metadata={"type": doc_type, "source": "upload", "name": name},
+                metadata={
+                    "type": doc_type,
+                    "source": "upload",
+                    "name": name,
+                    "store": target_store,
+                },
             )
         )
 
     if not documents:
         return get_vector_count()
 
-    # split
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    split_docs = []
-    for doc in documents:
-        chunks = splitter.split_text(doc.page_content)
-        for chunk in chunks:
-            split_docs.append(Document(page_content=chunk, metadata=doc.metadata))
+    split_docs = _split_documents(documents)
 
     if not split_docs:
-        return get_vector_count()
+        return get_vector_count(target_store)
 
-    # ingest into or create FAISS
-    if db is None:
-        db = FAISS.from_documents(split_docs, get_embeddings())
-    else:
-        db.add_documents(split_docs)
-
-    db.save_local("faiss_db")
+    count_after = _append_documents_to_store(target_store, split_docs)
     try:
-        count_after = len(getattr(db, "index_to_docstore_id", []) or [])
-        ingest_logger.info("FAISS saved (file_ingest): %d vectors", count_after)
+        ingest_logger.info(
+            "FAISS saved (file_ingest:%s): %d vectors", target_store, count_after
+        )
     except Exception:
         ingest_logger.info("FAISS saved (file_ingest): unknown vector count")
 
     ingest_logger.info(
         "Ingested %d chunks for %d files", len(split_docs), len(files_data)
     )
-    return len(db.index_to_docstore_id)
+    return count_after
 
 
-def list_vectors(limit: int = 200) -> list[dict]:
-    """Return metadata summary for vectors stored in FAISS (limit recent items)."""
+def _qualify_doc_id(store_name: str, doc_id: str) -> str:
+    return f"{store_name}:{doc_id}"
+
+
+def _split_qualified_doc_id(doc_id: str) -> tuple[str | None, str]:
+    text = str(doc_id)
+    if ":" not in text:
+        return None, text
+    prefix, raw_id = text.split(":", 1)
+    if prefix in FAISS_STORE_PATHS:
+        return prefix, raw_id
+    return None, text
+
+
+def _list_vectors_for_store(store_name: str, limit: int = 200) -> list[dict]:
     try:
-        local_db = _get_loaded_db()
+        local_db = _get_loaded_db(store_name)
         if local_db is None:
             return []
 
-        # FAISS stores a mapping `index_to_docstore_id` which lists doc ids in index order.
-        # Use that mapping for a robust iteration; fall back to docstore._dict if needed.
         items = []
         ids = []
         try:
@@ -759,55 +741,29 @@ def list_vectors(limit: int = 200) -> list[dict]:
         except Exception:
             ids = []
 
-        # if ids empty, try to read docstore internal dict keys
         if not ids:
             doc_map = getattr(local_db.docstore, "_dict", {}) or {}
             ids = list(doc_map.keys())
 
-        # Return the most recent ids within the limit.
         if limit and limit > 0:
             ids = ids[-limit:]
 
-        for doc_id in ids:
+        for raw_doc_id in ids:
             try:
-                doc = None
-                # try docstore lookup
-                doc_map = getattr(local_db.docstore, "_dict", None)
-                if doc_map is not None:
-                    doc = doc_map.get(doc_id)
-                    # fallback: docstore keys may be different types (int vs str),
-                    # try string-matching to locate the document when direct lookup fails.
-                    if doc is None:
-                        try:
-                            for k, v in doc_map.items():
-                                if str(k) == str(doc_id):
-                                    doc = v
-                                    break
-                        except Exception:
-                            pass
-                # fallback: attempt attribute access
+                doc_map = getattr(local_db.docstore, "_dict", {}) or {}
+                doc = doc_map.get(raw_doc_id)
                 if doc is None:
-                    doc = getattr(local_db, "docstore", {}).get(doc_id) if hasattr(local_db, "docstore") else None
-
-                # another fallback: try string-key matching on docstore attribute dict
+                    for key, value in doc_map.items():
+                        if str(key) == str(raw_doc_id):
+                            doc = value
+                            break
                 if doc is None:
-                    try:
-                        doc_attr_map = getattr(local_db.docstore, "_dict", None) or {}
-                        for k, v in getattr(local_db.docstore, "_dict", {}).items():
-                            if str(k) == str(doc_id):
-                                doc = v
-                                break
-                    except Exception:
-                        pass
-
-                if doc is None:
-                    # can't resolve this id; skip
                     continue
-
                 meta = getattr(doc, "metadata", {}) or {}
                 items.append(
                     {
-                        "id": str(doc_id),
+                        "id": _qualify_doc_id(store_name, str(raw_doc_id)),
+                        "store": store_name,
                         "type": meta.get("type"),
                         "product": meta.get("product"),
                         "agent": meta.get("agent"),
@@ -823,43 +779,49 @@ def list_vectors(limit: int = 200) -> list[dict]:
                 )
             except Exception:
                 continue
-
         return items
     except Exception:
         return []
 
 
+def list_vectors(limit: int = 200, store_name: str | None = None) -> list[dict]:
+    if store_name is not None:
+        return _list_vectors_for_store(store_name, limit=limit)
+
+    per_store_limit = max(limit, 200) if limit and limit > 0 else 200
+    items: list[dict] = []
+    for current_store in (FAISS_STORE_LOGS, FAISS_STORE_NEWS, FAISS_STORE_CUSTOMER):
+        items.extend(_list_vectors_for_store(current_store, limit=per_store_limit))
+    if limit and limit > 0:
+        return items[-limit:]
+    return items
+
+
 def get_vector_by_id(doc_id: str) -> dict | None:
-    """Return full document (page_content and metadata) for a given docstore id."""
-    try:
-        local_db = _get_loaded_db()
-        if local_db is None:
-            return None
+    store_name, raw_doc_id = _split_qualified_doc_id(doc_id)
+    candidate_stores = [store_name] if store_name else list(FAISS_STORE_PATHS.keys())
 
-        # prefer direct docstore lookup via index_to_docstore_id or internal dict
+    for current_store in candidate_stores:
+        if current_store is None:
+            continue
         try:
+            local_db = _get_loaded_db(current_store)
+            if local_db is None:
+                continue
             doc_map = getattr(local_db.docstore, "_dict", {}) or {}
-            doc = doc_map.get(doc_id)
-        except Exception:
-            doc = None
-
-        # fallback: if doc is still None, try converting id types (int vs str)
-        if doc is None:
-            try:
-                for k, v in getattr(local_db.docstore, "_dict", {}).items():
-                    if str(k) == str(doc_id):
-                        doc = v
+            doc = doc_map.get(raw_doc_id)
+            if doc is None:
+                for key, value in doc_map.items():
+                    if str(key) == str(raw_doc_id):
+                        doc = value
                         break
-            except Exception:
-                doc = None
-
-        if doc is None:
-            return None
-
-        return {
-            "id": str(doc_id),
-            "page_content": getattr(doc, "page_content", ""),
-            "metadata": getattr(doc, "metadata", {}) or {},
-        }
-    except Exception:
-        return None
+            if doc is None:
+                continue
+            return {
+                "id": _qualify_doc_id(current_store, str(raw_doc_id)),
+                "page_content": getattr(doc, "page_content", ""),
+                "metadata": getattr(doc, "metadata", {}) or {},
+            }
+        except Exception:
+            continue
+    return None

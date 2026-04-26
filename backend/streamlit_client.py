@@ -32,6 +32,9 @@ class BackendClient:
     def get_status(self) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/analysis/status", timeout=10).json()
 
+    def get_diagnostics(self) -> dict[str, Any]:
+        return requests.get(f"{self.base_url}/diagnostics/status", timeout=10).json()
+
     def get_charts(self) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/charts", timeout=30).json()
 
@@ -55,29 +58,56 @@ class BackendClient:
             f"{self.base_url}/faiss/build", json={}, timeout=180
         ).json()
 
-    def search_faiss(self, query: str, k: int = 5) -> dict[str, Any]:
+    def search_faiss(
+        self, query: str, k: int = 5, store_name: str | None = None
+    ) -> dict[str, Any]:
         return requests.post(
             f"{self.base_url}/faiss/search",
-            json={"query": query, "k": k},
+            json={"query": query, "k": k, "store_name": store_name},
             timeout=30,
         ).json()
 
-    def get_faiss_entries(self, limit: int = 200) -> dict[str, Any]:
-        return requests.get(f"{self.base_url}/faiss/entries", params={"limit": limit}, timeout=30).json()
+    def get_faiss_entries(
+        self, limit: int = 200, store_name: str | None = None
+    ) -> dict[str, Any]:
+        return requests.get(
+            f"{self.base_url}/faiss/entries",
+            params={"limit": limit, "store_name": store_name},
+            timeout=30,
+        ).json()
 
     def get_faiss_stats(self) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/faiss/stats", timeout=60).json()
 
-    def export_faiss(self, format: str = "json", limit: int = 200) -> requests.Response:
-        return requests.get(f"{self.base_url}/faiss/export", params={"format": format, "limit": limit}, timeout=60)
+    def export_faiss(
+        self, format: str = "json", limit: int = 200, store_name: str | None = None
+    ) -> requests.Response:
+        return requests.get(
+            f"{self.base_url}/faiss/export",
+            params={"format": format, "limit": limit, "store_name": store_name},
+            timeout=60,
+        )
 
     def get_faiss_entry(self, doc_id: str) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/faiss/entry/{doc_id}", timeout=30).json()
 
-    def search_faiss_features(self, type: str | None = None, feature_key: str | None = None, feature_value: str | None = None, limit: int = 200) -> dict[str, Any]:
+    def search_faiss_features(
+        self,
+        type: str | None = None,
+        feature_key: str | None = None,
+        feature_value: str | None = None,
+        limit: int = 200,
+        store_name: str | None = None,
+    ) -> dict[str, Any]:
         return requests.get(
             f"{self.base_url}/faiss/search_features",
-            params={"type": type, "feature_key": feature_key, "feature_value": feature_value, "limit": limit},
+            params={
+                "type": type,
+                "feature_key": feature_key,
+                "feature_value": feature_value,
+                "limit": limit,
+                "store_name": store_name,
+            },
             timeout=30,
         ).json()
 
