@@ -2,6 +2,7 @@ import datetime
 import html
 import json
 import os
+import re
 import threading
 import time
 import pandas as pd
@@ -3894,6 +3895,282 @@ def summarize_log_case_text(context_text: str) -> str:
     return "\n".join(picked[:4])
 
 
+def extract_product_summary_block(prompt_text: str) -> str:
+    text = str(prompt_text or "")
+    if not text.strip():
+        return ""
+
+    match = re.search(
+        r"\[상품별 승인/거절 패턴 요약\]\s*(.*?)(?=\n\[[^\n]+\]|\Z)",
+        text,
+        re.S,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def parse_product_summary_cards(prompt_text: str) -> list[dict[str, object]]:
+    block = extract_product_summary_block(prompt_text)
+    if not block or block == "상품별 패턴 요약이 없습니다.":
+        return []
+
+    cards: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+
+    for raw_line in block.splitlines():
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+
+        product_match = re.match(r"\[상품:\s*([A-Za-z0-9]+)\]\s*(.*)", line)
+        if product_match:
+            if current is not None:
+                cards.append(current)
+            current = {
+                "product_code": product_match.group(1).strip().upper(),
+                "product_name": product_match.group(2).strip() or product_match.group(1).strip().upper(),
+                "approval_rate": None,
+                "approval_cases": None,
+                "rejection_rate": None,
+                "rejection_cases": None,
+                "decision_known_cases": None,
+                "approval_patterns": [],
+                "rejection_patterns": [],
+                "reject_reasons": [],
+            }
+            continue
+
+        if current is None:
+            continue
+
+        if line.startswith("- 결정 분포:"):
+            stat_match = re.search(
+                r"승인\s+([\d.]+)%\s*\((\d+)/(\d+)\),\s*거절\s+([\d.]+)%\s*\((\d+)/(\d+)\)",
+                line,
+            )
+            if stat_match:
+                current["approval_rate"] = stat_match.group(1)
+                current["approval_cases"] = stat_match.group(2)
+                current["decision_known_cases"] = stat_match.group(3)
+                current["rejection_rate"] = stat_match.group(4)
+                current["rejection_cases"] = stat_match.group(5)
+            continue
+
+        if line.startswith("- 승인 패턴:"):
+            payload = line.split(":", 1)[1].strip()
+            current["approval_patterns"] = [] if payload == "뚜렷한 패턴 없음" else [item.strip() for item in payload.split(";") if item.strip()]
+            continue
+
+        if line.startswith("- 거절 패턴:"):
+            payload = line.split(":", 1)[1].strip()
+            current["rejection_patterns"] = [] if payload == "뚜렷한 패턴 없음" else [item.strip() for item in payload.split(";") if item.strip()]
+            continue
+
+        if line.startswith("- 주요 거절사유:"):
+            payload = line.split(":", 1)[1].strip()
+            current["reject_reasons"] = [] if payload == "데이터 없음" else [item.strip() for item in payload.split(";") if item.strip()]
+
+    if current is not None:
+        cards.append(current)
+    return cards
+
+
+def infer_product_codes_from_text(text: str) -> list[str]:
+    matches = re.findall(r"\bC\d{1,2}\b", str(text or "").upper())
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for match in matches:
+        if match in seen:
+            continue
+        seen.add(match)
+        ordered.append(match)
+    return ordered
+
+
+def load_product_summary_payload() -> dict[str, object]:
+    summary_path = os.path.join(os.path.dirname(__file__), "data", "product_pattern_summary.json")
+    if not os.path.exists(summary_path):
+        return {}
+
+    try:
+        with open(summary_path, encoding="utf-8") as fp:
+            return json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def load_product_summary_cards_from_json(context_text: str = "") -> list[dict[str, object]]:
+    payload = load_product_summary_payload()
+    if not payload:
+        return []
+
+    products = ((payload or {}).get("products") or {})
+    if not products:
+        return []
+
+    product_codes = infer_product_codes_from_text(context_text)
+    ordered_codes = product_codes or sorted(products.keys())
+    cards: list[dict[str, object]] = []
+    for product_code in ordered_codes:
+        item = products.get(product_code)
+        if not item:
+            continue
+        totals = item.get("totals") or {}
+        approval_patterns = item.get("approval_patterns") or []
+        rejection_patterns = item.get("rejection_patterns") or []
+        reject_reasons = item.get("top_reject_reason_codes") or []
+        cards.append(
+            {
+                "product_code": product_code,
+                "product_name": item.get("product_name") or product_code,
+                "approval_rate": totals.get("approval_rate_percent", "-"),
+                "approval_cases": totals.get("approval_cases", "-"),
+                "rejection_rate": totals.get("rejection_rate_percent", "-"),
+                "rejection_cases": totals.get("rejection_cases", "-"),
+                "decision_known_cases": totals.get("decision_known_cases", "-"),
+                "approval_patterns": [
+                    (
+                        f"{pattern.get('rule') or '-'} -> 승인 비율 "
+                        f"{float(pattern.get('decision_rate_percent', 0)):.1f}% "
+                        f"({pattern.get('decision_count', 0)}/{pattern.get('support', 0)})"
+                    )
+                    for pattern in approval_patterns[:3]
+                ],
+                "rejection_patterns": [
+                    (
+                        f"{pattern.get('rule') or '-'} -> 거절 비율 "
+                        f"{float(pattern.get('decision_rate_percent', 0)):.1f}% "
+                        f"({pattern.get('decision_count', 0)}/{pattern.get('support', 0)})"
+                    )
+                    for pattern in rejection_patterns[:3]
+                ],
+                "reject_reasons": [
+                    (
+                        f"{reason.get('code')} {str(reason.get('description') or '').strip()} "+
+                        f"{float(reason.get('share_of_rejections_percent', 0)):.1f}%"
+                    ).strip()
+                    for reason in reject_reasons[:3]
+                ],
+            }
+        )
+    return cards
+
+
+def render_log_product_summary_panel(prompt_text: str, updated_at, context_text: str = "") -> bool:
+    cards = parse_product_summary_cards(prompt_text)
+    if not cards:
+        cards = load_product_summary_cards_from_json(context_text)
+    if not cards:
+        return False
+
+    payload = load_product_summary_payload()
+
+    header_html = f"""
+    <div style="
+        margin: 6px 0 14px 0;
+        padding: 18px 20px;
+        border-radius: 22px;
+        background: linear-gradient(135deg, rgba(239,246,255,0.95), rgba(240,253,250,0.96));
+        border: 1px solid rgba(14,116,144,0.16);
+        box-shadow: 0 16px 34px rgba(14,116,144,0.08);
+    ">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px;">
+            <div>
+                <div style="font-size:12px; font-weight:800; letter-spacing:0.08em; color:#0f766e; text-transform:uppercase;">Prompt Signal</div>
+                <div style="font-size:18px; font-weight:900; color:#0f172a; margin-top:3px;">상품별 승인/거절 패턴이 이렇게 요약돼 들어갑니다</div>
+            </div>
+            <div style="padding:6px 10px; border-radius:999px; font-size:11px; font-weight:800; color:#155e75; background:rgba(255,255,255,0.72); border:1px solid rgba(14,116,144,0.14); white-space:nowrap;">최근 반영 {html.escape(format_status_time(updated_at))}</div>
+        </div>
+        <div style="font-size:13px; line-height:1.7; color:#334155;">product_pattern_summary.json 전체를 그대로 노출하는 대신, 현재 로그 프롬프트에 실제 주입된 상품만 골라 승인율, 거절율, 대표 패턴, 거절 사유 코드 중심으로 재구성한 화면입니다.</div>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
+
+    for index in range(0, len(cards), 2):
+        columns = st.columns(2)
+        for col_index, card in enumerate(cards[index : index + 2]):
+            with columns[col_index]:
+                product_code = html.escape(str(card.get("product_code") or "-"))
+                product_name = html.escape(str(card.get("product_name") or product_code))
+                approval_rate = html.escape(str(card.get("approval_rate") or "-"))
+                approval_cases = html.escape(str(card.get("approval_cases") or "-"))
+                rejection_rate = html.escape(str(card.get("rejection_rate") or "-"))
+                rejection_cases = html.escape(str(card.get("rejection_cases") or "-"))
+                decision_known_cases = html.escape(str(card.get("decision_known_cases") or "-"))
+                approval_patterns = card.get("approval_patterns") or []
+                rejection_patterns = card.get("rejection_patterns") or []
+                reject_reasons = card.get("reject_reasons") or []
+
+                approval_items = "".join(
+                    f'<li style="margin-bottom:6px;">{html.escape(str(item))}</li>'
+                    for item in approval_patterns[:3]
+                ) or '<li style="margin-bottom:6px; color:#64748b;">뚜렷한 승인 패턴 없음</li>'
+                rejection_items = "".join(
+                    f'<li style="margin-bottom:6px;">{html.escape(str(item))}</li>'
+                    for item in rejection_patterns[:3]
+                ) or '<li style="margin-bottom:6px; color:#64748b;">뚜렷한 거절 패턴 없음</li>'
+                reject_reason_items = "".join(
+                    f'<span style="display:inline-flex; align-items:center; padding:6px 10px; margin:0 8px 8px 0; border-radius:999px; background:rgba(254,242,242,0.92); color:#991b1b; border:1px solid rgba(239,68,68,0.12); font-size:12px; font-weight:700;">{html.escape(str(item))}</span>'
+                    for item in reject_reasons[:3]
+                ) or '<span style="display:inline-flex; align-items:center; padding:6px 10px; border-radius:999px; background:rgba(248,250,252,0.96); color:#64748b; border:1px solid rgba(148,163,184,0.16); font-size:12px; font-weight:700;">대표 거절사유 없음</span>'
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        height: 100%;
+                        margin-bottom: 16px;
+                        padding: 18px 18px 16px 18px;
+                        border-radius: 20px;
+                        background: linear-gradient(160deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98));
+                        border: 1px solid rgba(148,163,184,0.18);
+                        box-shadow: 0 14px 28px rgba(15,23,42,0.06);
+                    ">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:14px;">
+                            <div>
+                                <div style="font-size:12px; font-weight:900; color:#0891b2; letter-spacing:0.08em; text-transform:uppercase;">{product_code}</div>
+                                <div style="font-size:18px; font-weight:900; color:#0f172a; margin-top:4px;">{product_name}</div>
+                            </div>
+                            <div style="padding:6px 10px; border-radius:999px; background:rgba(241,245,249,0.95); color:#334155; font-size:12px; font-weight:800; border:1px solid rgba(148,163,184,0.14);">의사결정 표본 {decision_known_cases}건</div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+                            <div style="padding:12px 14px; border-radius:16px; background:linear-gradient(135deg, rgba(236,253,245,0.98), rgba(209,250,229,0.98)); border:1px solid rgba(34,197,94,0.16);">
+                                <div style="font-size:12px; font-weight:800; color:#166534; margin-bottom:6px;">승인 시그널</div>
+                                <div style="font-size:22px; font-weight:900; color:#14532d;">{approval_rate}%</div>
+                                <div style="font-size:12px; color:#166534; margin-top:4px;">{approval_cases}건 승인</div>
+                            </div>
+                            <div style="padding:12px 14px; border-radius:16px; background:linear-gradient(135deg, rgba(254,242,242,0.98), rgba(254,226,226,0.98)); border:1px solid rgba(239,68,68,0.16);">
+                                <div style="font-size:12px; font-weight:800; color:#b91c1c; margin-bottom:6px;">거절 시그널</div>
+                                <div style="font-size:22px; font-weight:900; color:#7f1d1d;">{rejection_rate}%</div>
+                                <div style="font-size:12px; color:#b91c1c; margin-top:4px;">{rejection_cases}건 거절</div>
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+                            <div style="padding:14px; border-radius:16px; background:rgba(240,253,244,0.7); border:1px solid rgba(34,197,94,0.12);">
+                                <div style="font-size:13px; font-weight:900; color:#166534; margin-bottom:10px;">승인으로 기우는 패턴</div>
+                                <ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6; color:#334155;">{approval_items}</ul>
+                            </div>
+                            <div style="padding:14px; border-radius:16px; background:rgba(254,242,242,0.65); border:1px solid rgba(239,68,68,0.12);">
+                                <div style="font-size:13px; font-weight:900; color:#b91c1c; margin-bottom:10px;">거절로 기우는 패턴</div>
+                                <ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6; color:#334155;">{rejection_items}</ul>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="font-size:13px; font-weight:900; color:#0f172a; margin-bottom:10px;">자주 붙는 거절사유 코드</div>
+                            <div>{reject_reason_items}</div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    if payload:
+        generated_at = format_status_time((payload.get("generated_at") or ""))
+        with st.expander("product_pattern_summary.json 전체 데이터 보기", expanded=False):
+            st.caption(f"생성 시각: {generated_at}")
+            st.json(payload, expanded=False)
+
+    return True
+
+
 def render_news_freshness_badge(last_news_time, last_new_item_time):
     collected_at = parse_status_time(last_news_time)
     new_item_at = parse_status_time(last_new_item_time)
@@ -5178,7 +5455,8 @@ def render_agent_prompt_panel(
     prompt_input = st.session_state.get(f"latest_{agent_key}_prompt_input", {}) or {}
     updated_at = st.session_state.get(f"last_{agent_key}_prompt_input_time")
 
-    st.subheader(title)
+    if agent_key != "log":
+        st.subheader(title)
     source = prompt_input.get("source", "-")
     user_input = prompt_input.get("user_input", "-")
     context_text = prompt_input.get("context", "관련 데이터가 없습니다.")
@@ -5277,8 +5555,19 @@ def render_agent_prompt_panel(
             unsafe_allow_html=True,
         )
 
+    log_summary_rendered = False
+    if agent_key == "log":
+        log_summary_rendered = render_log_product_summary_panel(prompt_text, updated_at, context_text)
+
     if not prompt_input:
-        st.info("아직 표시할 프롬프트 입력값이 없습니다.")
+        if agent_key == "log":
+            if not log_summary_rendered:
+                st.info("아직 표시할 상품 패턴 요약이 없습니다.")
+        else:
+            st.info("아직 표시할 프롬프트 입력값이 없습니다.")
+        return
+
+    if agent_key == "log":
         return
 
     st.markdown(
