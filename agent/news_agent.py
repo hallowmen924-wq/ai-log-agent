@@ -294,34 +294,12 @@ def collect_news():
     """Collect news candidates using direct article links first.
 
     Primary source: Naver news search HTML (gives article URLs directly).
-    Fallback: Google News RSS if Naver search yields nothing.
+    Google News RSS is intentionally excluded because those links do not
+    reliably yield article bodies during downstream crawling.
     Actual article content is fetched separately in the background.
     """
     news = collect_news_from_naver_search(query="카드론 대출", limit=40)
-    if news:
-        return news
-
-    url = "https://news.google.com/rss/search?q=카드론+대출&hl=ko&gl=KR&ceid=KR:ko"
-    feed = feedparser.parse(url)
-
-    fallback_news = []
-
-    for entry in feed.entries[:40]:
-        raw_link = getattr(entry, "link", "")
-        summary = getattr(entry, "summary", "")
-        resolved_link, _ = _resolve_article_url(raw_link, summary=summary, timeout=6)
-        link = resolved_link or raw_link
-        fallback_news.append(
-            {
-                "title": _clean_text(getattr(entry, "title", "")),
-                "summary": _clean_text(summary),
-                "link": link,
-                "published": getattr(entry, "published", ""),
-                "content": "",
-            }
-        )
-
-    return fallback_news
+    return news
 
 
 def analyze_news(news):

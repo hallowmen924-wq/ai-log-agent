@@ -41,6 +41,17 @@ def _load_mapping_from_frame(df: pd.DataFrame) -> dict[str, dict[str, str]]:
     desc_col = _pick_column(columns, ["설명", "항목명", "사유"])
     risk_col = _pick_column(columns, ["리스크레벨", "리스크", "등급"])
 
+    # Some KO Excel files are saved with legacy encodings and can surface as mojibake.
+    # Fall back to positional columns so KO_full.xlsx still maps reject reasons reliably.
+    if not code_col and columns:
+        code_col = columns[0]
+    if not desc_col and len(columns) >= 3:
+        desc_col = columns[2]
+    elif not desc_col and len(columns) >= 2:
+        desc_col = columns[1]
+    if not risk_col and len(columns) >= 4:
+        risk_col = columns[3]
+
     if not code_col or not desc_col:
         return {}
 
@@ -50,8 +61,15 @@ def _load_mapping_from_frame(df: pd.DataFrame) -> dict[str, dict[str, str]]:
         if not re.fullmatch(r"K\d{3}", code):
             continue
 
-        description = str(row.get(desc_col, "") or "").strip()
-        risk_level = str(row.get(risk_col, "") or "").strip() if risk_col else ""
+        raw_description = row.get(desc_col, "")
+        raw_risk_level = row.get(risk_col, "") if risk_col else ""
+        if pd.isna(raw_description):
+            raw_description = ""
+        if pd.isna(raw_risk_level):
+            raw_risk_level = ""
+
+        description = str(raw_description or "").strip()
+        risk_level = str(raw_risk_level or "").strip() if risk_col else ""
         if not description:
             continue
 
@@ -117,29 +135,79 @@ def load_reject_code_mapping(data_dir: str | Path) -> dict[str, dict[str, str]]:
     return mapping
 
 
-def extract_reject_reason_codes(out_data: str) -> list[str]:
+def _normalize_fallback_description(text: str) -> str:
+    cleaned = re.sub(r"[\x00-\x1f]+", " ", str(text or ""))
+    cleaned = re.sub(r"^[\s:=,;/\-|\[\](){}]+", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:/|-[](){}")
+    if not cleaned:
+        return ""
+    if re.fullmatch(r"(?:K\d{3}[\s,;/:\-|]*)+", cleaned, re.I):
+        return ""
+    return cleaned[:120]
+
+
+def extract_reject_reason_candidates(out_data: str) -> list[dict[str, str]]:
     if not out_data:
         return []
+
     seen: set[str] = set()
-    codes: list[str] = []
-    for code in re.findall(r"KORLT(K\d{3})", out_data.upper()):
+    candidates: list[dict[str, str]] = []
+    for segment in re.split(r"KORLT", str(out_data), flags=re.I)[1:]:
+        match = re.search(r"(K\d{3})", segment, re.I)
+        if not match:
+            continue
+        code = match.group(1).upper()
         if code in seen:
             continue
         seen.add(code)
-        codes.append(code)
-    return codes
+        candidates.append(
+            {
+                "code": code,
+                "fallback_description": _normalize_fallback_description(
+                    segment[match.end() :]
+                ),
+            }
+        )
+
+    if candidates:
+        return candidates
+
+    for code in re.findall(r"\bK\d{3}\b", str(out_data).upper()):
+        if code in seen:
+            continue
+        seen.add(code)
+        candidates.append({"code": code, "fallback_description": ""})
+    return candidates
+
+
+def extract_reject_reason_codes(out_data: str) -> list[str]:
+    return [candidate["code"] for candidate in extract_reject_reason_candidates(out_data)]
+
+
+def extract_reject_reason_fallbacks(out_data: str) -> dict[str, str]:
+    return {
+        candidate["code"]: candidate["fallback_description"]
+        for candidate in extract_reject_reason_candidates(out_data)
+        if candidate.get("fallback_description")
+    }
 
 
 def map_reject_reason_codes(
-    codes: list[str], mapping: dict[str, dict[str, str]]
+    codes: list[str],
+    mapping: dict[str, dict[str, str]],
+    fallback_descriptions: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
+    fallback_descriptions = fallback_descriptions or {}
     for code in codes:
         mapped = mapping.get(code, {})
+        description = str(mapped.get("description", "") or "").strip()
+        if not description:
+            description = str(fallback_descriptions.get(code, "") or "").strip()
         results.append(
             {
                 "code": code,
-                "description": str(mapped.get("description", "") or "").strip(),
+                "description": description,
                 "risk_level": str(mapped.get("risk_level", "") or "").strip(),
             }
         )

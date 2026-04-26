@@ -5,6 +5,7 @@ from analyzer.log_field_parser import parse_fields
 from analyzer.log_parser import parse_logs_fast
 from mapper.excel_mapper import get_excel_sheet, load_excel_mapping
 from mapper.reject_code_mapper import (
+    extract_reject_reason_fallbacks,
     extract_reject_reason_codes,
     load_reject_code_mapping,
     map_reject_reason_codes,
@@ -55,10 +56,13 @@ def analyze_logs(raw_logs):
         in_mapping = sheet_cache[(log["product"], "in")]
         out_mapping = sheet_cache[(log["product"], "out")]
         reject_reason_codes = extract_reject_reason_codes(log["out_data"])
+        reject_reason_fallbacks = extract_reject_reason_fallbacks(log["out_data"])
 
         results.append(
             {
                 "product": log["product"],
+                "raw_in_data": log.get("in_data", ""),
+                "raw_out_data": log.get("out_data", ""),
                 "in_fields": in_fields,
                 "out_fields": out_fields,
                 "in_mapping": in_mapping,
@@ -67,6 +71,7 @@ def analyze_logs(raw_logs):
                 "reject_reason_details": map_reject_reason_codes(
                     reject_reason_codes,
                     reject_code_mapping,
+                    reject_reason_fallbacks,
                 ),
             }
         )

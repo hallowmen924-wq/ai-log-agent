@@ -1,0 +1,255 @@
+{
+  "generated_at": "2026-04-26T22:30:01",
+  "source": {
+    "log_dir": "data\\logs",
+    "file_count": 2,
+    "analyzed_log_count": 438,
+    "mapping_file": "data/KO_full.xlsx + data/ko_supplement.csv"
+  },
+  "summary": {
+    "observed_unique_codes": 26,
+    "mapped_unique_codes": 26,
+    "unmapped_unique_codes": 0,
+    "mapping_catalog_size": 77
+  },
+  "mapped_codes": [
+    {
+      "code": "K145",
+      "count": 11,
+      "products": [
+        "C12"
+      ],
+      "description": "다중채무자 중 HMDS 하위고객",
+      "risk_level": ""
+    },
+    {
+      "code": "K341",
+      "count": 11,
+      "products": [
+        "C6"
+      ],
+      "description": "최근1개월 리볼빙 3개 기관이상 이용",
+      "risk_level": ""
+    },
+    {
+      "code": "K342",
+      "count": 11,
+      "products": [
+        "C6"
+      ],
+      "description": "(사업자대출) 대출건수 3건 이상",
+      "risk_level": ""
+    },
+    {
+      "code": "K348",
+      "count": 44,
+      "products": [
+        "C6"
+      ],
+      "description": "SPS급/DEP2등급 하위자",
+      "risk_level": ""
+    },
+    {
+      "code": "K351",
+      "count": 101,
+      "products": [
+        "C6"
+      ],
+      "description": "KCB 통합 R스코어 6등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K352",
+      "count": 33,
+      "products": [
+        "C6"
+      ],
+      "description": "NICE 과다채무지수 05등급 중 NICE TIPS등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K353",
+      "count": 33,
+      "products": [
+        "C6"
+      ],
+      "description": "NICE TIPS 등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K354",
+      "count": 248,
+      "products": [
+        "C12",
+        "C6"
+      ],
+      "description": "KCB I-INDEX 등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K355",
+      "count": 93,
+      "products": [
+        "C6"
+      ],
+      "description": "레벨1~5 제외 미해지 대출기관수 3건 이상(대부정보 반영)",
+      "risk_level": ""
+    },
+    {
+      "code": "K357",
+      "count": 147,
+      "products": [
+        "C6"
+      ],
+      "description": "그룹 다중채무 세그먼트 등급 4등급",
+      "risk_level": ""
+    },
+    {
+      "code": "K360",
+      "count": 68,
+      "products": [
+        "C6"
+      ],
+      "description": "KCB 소호M1 제외대상",
+      "risk_level": ""
+    },
+    {
+      "code": "K361",
+      "count": 235,
+      "products": [
+        "C6"
+      ],
+      "description": "KCB 비대면 우수지수 제외대상",
+      "risk_level": ""
+    },
+    {
+      "code": "K362",
+      "count": 73,
+      "products": [
+        "C6"
+      ],
+      "description": "개인사업자 건전성 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K363",
+      "count": 216,
+      "products": [
+        "C6"
+      ],
+      "description": "신용정보 부족 이상자",
+      "risk_level": ""
+    },
+    {
+      "code": "K364",
+      "count": 245,
+      "products": [
+        "C6"
+      ],
+      "description": "진행등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K365",
+      "count": 121,
+      "products": [
+        "C6"
+      ],
+      "description": "다중채무위험등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K366",
+      "count": 225,
+      "products": [
+        "C6"
+      ],
+      "description": "비대면연계대출등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K370",
+      "count": 11,
+      "products": [
+        "C12"
+      ],
+      "description": "결합등급 하위고객 중 KCB신용평점 하위고객",
+      "risk_level": ""
+    },
+    {
+      "code": "K372",
+      "count": 62,
+      "products": [
+        "C6"
+      ],
+      "description": "KBGS 등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K373",
+      "count": 268,
+      "products": [
+        "C6"
+      ],
+      "description": "나이스 리빙 ML5등급 하위",
+      "risk_level": ""
+    },
+    {
+      "code": "K374",
+      "count": 268,
+      "products": [
+        "C6"
+      ],
+      "description": "중위등급세분화모형 하위 고위험 차주",
+      "risk_level": ""
+    },
+    {
+      "code": "K402",
+      "count": 8,
+      "products": [
+        "C6"
+      ],
+      "description": "이지신용 비대상자",
+      "risk_level": ""
+    },
+    {
+      "code": "K502",
+      "count": 35,
+      "products": [
+        "C6"
+      ],
+      "description": "NICE 또는 KCB 미해제 연체중인 고객",
+      "risk_level": ""
+    },
+    {
+      "code": "K507",
+      "count": 68,
+      "products": [
+        "C6"
+      ],
+      "description": "NICE CB 변경 594점 이하 또는 KCB CB변경 534점 이하 고객",
+      "risk_level": ""
+    },
+    {
+      "code": "K701",
+      "count": 16,
+      "products": [
+        "C6",
+        "C9"
+      ],
+      "description": "DSR 초과",
+      "risk_level": "중"
+    },
+    {
+      "code": "K707",
+      "count": 75,
+      "products": [
+        "C6",
+        "C9"
+      ],
+      "description": "내부 정책 기준 미충족 고객",
+      "risk_level": ""
+    }
+  ],
+  "unmapped_codes": []
+}

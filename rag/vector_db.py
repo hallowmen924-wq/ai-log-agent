@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import warnings
@@ -7,6 +8,21 @@ warnings.filterwarnings(
     message=r"Core Pydantic V1 functionality isn't compatible with Python 3\.14 or greater\.",
     category=UserWarning,
 )
+
+
+class _SuppressTransformersPathAliasFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return "Accessing `__path__` from" not in message
+
+
+for _logger_name in ("transformers", "transformers.utils.import_utils"):
+    _hf_logger = logging.getLogger(_logger_name)
+    if not any(
+        isinstance(existing_filter, _SuppressTransformersPathAliasFilter)
+        for existing_filter in _hf_logger.filters
+    ):
+        _hf_logger.addFilter(_SuppressTransformersPathAliasFilter())
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -29,13 +45,13 @@ from rag.faiss_news_db import (
     split_news_search_results,
 )
 
-_embeddings = None
 import io
 import json
-import logging
 import re
 import shutil
 from typing import Any
+
+_embeddings = None
 
 # 모듈 수준 파일 로거 설정 (RAG ingest 로그 저장)
 _LOG_DIR = os.path.join("logs")
@@ -74,6 +90,7 @@ FAISS_STORE_PATHS = {
 }
 
 LEGACY_FAISS_PATH = "faiss_db"
+EMPTY_STORE_MARKER = ".empty_store"
 
 _db_registry: dict[str, FAISS | None] = {
     FAISS_STORE_LOGS: None,
@@ -134,6 +151,10 @@ def infer_store_from_report(report: dict[str, Any]) -> str:
 
 def _load_local_db(path: str) -> FAISS | None:
     if not os.path.exists(path):
+        return None
+    index_path = os.path.join(path, "index.faiss")
+    metadata_path = os.path.join(path, "index.pkl")
+    if not (os.path.exists(index_path) and os.path.exists(metadata_path)):
         return None
     try:
         return FAISS.load_local(
@@ -217,6 +238,34 @@ def load_preserved_store_docs(store_name: str):
 _NULL_LIKE_VALUES = {"", "NULL", "NONE", "NAN", "N/A", "NA"}
 
 
+def is_placeholder_numeric_text(text: str) -> bool:
+    compact = str(text or "").replace(",", "").strip()
+    if not compact:
+        return False
+
+    sign = ""
+    if compact.startswith(("+", "-")):
+        sign = compact[0]
+        compact = compact[1:]
+
+    if not compact:
+        return False
+
+    if "." in compact:
+        integer_part, fractional_part = compact.split(".", 1)
+        digits_only = f"{integer_part}{fractional_part}"
+    else:
+        digits_only = compact
+
+    if not digits_only.isdigit():
+        return False
+
+    if sign == "-":
+        return True
+
+    return len(digits_only) >= 6 and set(digits_only) == {"9"}
+
+
 def normalize_zero_like_text(text: str) -> str:
     compact = text.replace(",", "")
     if re.fullmatch(r"[+-]?0+(?:\.0+)?", compact):
@@ -257,7 +306,10 @@ def is_ignorable_faiss_value(value) -> bool:
     if value is None:
         return True
     if isinstance(value, (int, float)):
-        return float(value) == 0.0
+        numeric_value = float(value)
+        if numeric_value == 0.0:
+            return True
+        return numeric_value < 0 or is_placeholder_numeric_text(str(value))
 
     text = clean_faiss_text(value)
     if not text:
@@ -267,6 +319,8 @@ def is_ignorable_faiss_value(value) -> bool:
 
     numeric_candidate = text.replace(",", "")
     if re.fullmatch(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?", numeric_candidate):
+        if is_placeholder_numeric_text(numeric_candidate):
+            return True
         try:
             return float(numeric_candidate) == 0.0
         except Exception:
@@ -441,8 +495,16 @@ def _clear_store(store_name: str) -> None:
         shutil.rmtree(store_path, ignore_errors=True)
 
 
+def _ensure_empty_store(store_name: str) -> None:
+    store_path = get_store_path(store_name)
+    os.makedirs(store_path, exist_ok=True)
+    marker_path = os.path.join(store_path, EMPTY_STORE_MARKER)
+    with open(marker_path, "w", encoding="utf-8") as marker_file:
+        marker_file.write(store_name)
+
+
 def _split_documents(documents: list[Document]) -> list[Document]:
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=50)
     split_docs: list[Document] = []
     for doc in documents:
         chunks = splitter.split_text(doc.page_content)
@@ -458,6 +520,7 @@ def _rebuild_store(store_name: str, documents: list[Document]) -> int:
 
     if not split_docs:
         _clear_store(normalized_store)
+        _ensure_empty_store(normalized_store)
         return 0
 
     local_db = FAISS.from_documents(split_docs, get_embeddings())
@@ -475,7 +538,9 @@ def load_db(store_name: str | None = None):
     normalized_store = normalize_store_name(store_name)
     if _db_registry[normalized_store] is None:
         store_path = get_store_path(normalized_store)
-        if os.path.exists(store_path):
+        index_path = os.path.join(store_path, "index.faiss")
+        metadata_path = os.path.join(store_path, "index.pkl")
+        if os.path.exists(index_path) and os.path.exists(metadata_path):
             print(f"FAISS 로드: {normalized_store}")
             _db_registry[normalized_store] = FAISS.load_local(
                 store_path,

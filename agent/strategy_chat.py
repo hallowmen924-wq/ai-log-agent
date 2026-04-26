@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 import requests
 
 from mapper.reject_code_mapper import format_reject_reason_details
+from rag.product_pattern_summary import (
+    format_product_pattern_summary_for_prompt,
+    load_product_pattern_summary,
+)
 from rag.vector_db import (
     get_vector_count,
     save_agent_reports,
@@ -367,7 +372,30 @@ def build_log_context_from_similar_cases(query: str, k: int = 1) -> str:
     return group_logs_by_product(structured_items, limit_per_product=1)
 
 
+def extract_product_codes_from_log_context(log_context: str) -> list[str]:
+    matches = re.findall(r"\[상품 코드: (C\d+)\]", str(log_context or ""), flags=re.I)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for match in matches:
+        product_code = str(match).upper()
+        if product_code in seen:
+            continue
+        seen.add(product_code)
+        ordered.append(product_code)
+    return ordered
+
+
+def build_product_pattern_context(log_context: str) -> str:
+    summary = load_product_pattern_summary()
+    product_codes = extract_product_codes_from_log_context(log_context)
+    return format_product_pattern_summary_for_prompt(
+        summary,
+        product_codes=product_codes,
+    )
+
+
 def build_log_agent_prompt(log_context: str, user_input: str) -> str:
+    product_pattern_context = build_product_pattern_context(log_context)
     return f"""
 당신은 금융 심사 로그 분석가입니다.
 
@@ -375,6 +403,9 @@ def build_log_agent_prompt(log_context: str, user_input: str) -> str:
 
 [요청]
 사용자 질문: {user_input}
+
+[상품별 승인/거절 패턴 요약]
+{product_pattern_context}
 
 [로그(상품별로 묶여있음)]
 {log_context}
@@ -502,12 +533,16 @@ def case_based_log_inference(
         case_texts.append(";".join(case_lines))
 
     cases_block = "\n\n".join(case_texts) if case_texts else "(유사 사례 없음)"
+    product_pattern_context = build_product_pattern_context(extra_context or "")
 
     prompt = f"""
 당신은 금융 로그 분석 전문가입니다.
 
 [질문]
 {query}
+
+[상품별 승인/거절 패턴 요약]
+{product_pattern_context}
 
 [추가 로그 컨텍스트]
 {extra_context or '(없음)'}

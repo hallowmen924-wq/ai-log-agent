@@ -16,6 +16,7 @@ from agent.strategy_chat import (
 )
 from analyzer.log_analyzer import analyze_logs
 from analyzer.risk_analyzer import calculate_risk
+from rag.product_pattern_summary import write_product_pattern_summary
 from rag.vector_db import (
     FAISS_STORE_CUSTOMER,
     FAISS_STORE_LOGS,
@@ -745,6 +746,14 @@ def build_faiss_bundle(
         f"벡터 DB를 갱신 중입니다. 로그 {len(effective_logs)}건, 뉴스 {len(effective_news)}건",
     )
     build_vector_db(effective_logs, effective_news)
+    try:
+        write_product_pattern_summary(effective_logs)
+    except Exception as error:
+        record_activity_event(
+            "product_pattern_summary",
+            "failed",
+            f"상품 패턴 요약 생성 실패: {error}",
+        )
     count = get_vector_count()
     record_vector_event(
         source,
