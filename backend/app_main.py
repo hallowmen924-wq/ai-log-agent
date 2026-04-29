@@ -15,11 +15,15 @@ if str(ROOT) not in sys.path:
 # Streamlit은 이 서버에 HTTP 요청을 보내고, 서버는 분석/벡터/챗 작업을 수행합니다.
 
 from backend.schemas import (
+    CardloanDebateRequest,
+    CardloanDebateResponse,
     FaissBuildRequest,
     FullAnalysisResponse,
     GenericMessage,
+    LogPromptTemplateRequest,
     LogAnalyzeRequest,
     LogAnalyzeResponse,
+    NewsPromptTemplateRequest,
     NewsCollectResponse,
     SearchRequest,
     StrategyChatRequest,
@@ -28,12 +32,14 @@ from backend.schemas import (
 )
 from backend.services import (
     analyze_logs_bundle,
+    ask_cardloan_debate,
     ask_strategy,
     build_backend_diagnostics,
     build_faiss_bundle,
     collect_news_bundle,
     enrich_results,
     get_chart_payloads,
+    hydrate_state_from_existing_artifacts,
     run_full_analysis,
     search_faiss,
     state,
@@ -42,6 +48,11 @@ from backend.worker import worker
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
 import asyncio
+
+try:
+    from websockets.exceptions import ConnectionClosed
+except Exception:
+    ConnectionClosed = tuple()  # type: ignore[assignment]
 
 app = FastAPI(title="AI Log Agent API", version="1.0.0")
 app.add_middleware(
@@ -55,6 +66,13 @@ _faiss_stats_cache: dict[str, object] = {
 }
 
 
+@app.on_event("startup")
+def app_startup() -> None:
+    hydrate_state_from_existing_artifacts()
+    worker.update_interval(1)
+    worker.start()
+
+
 def build_ws_snapshot(snapshot: dict) -> dict:
     return {
         "news": snapshot.get("news", []),
@@ -63,10 +81,13 @@ def build_ws_snapshot(snapshot: dict) -> dict:
         "vector_events": snapshot.get("vector_events", []),
         "agent_activity_log": snapshot.get("agent_activity_log", []),
         "agent_statuses": snapshot.get("agent_statuses", {}),
+        "ollama_runtime": snapshot.get("ollama_runtime", {}),
+        "cardloan_debate": snapshot.get("cardloan_debate", {}),
         "latest_news_prompt_input": snapshot.get("latest_news_prompt_input", {}),
         "last_news_prompt_input_time": snapshot.get("last_news_prompt_input_time"),
         "latest_log_prompt_input": snapshot.get("latest_log_prompt_input", {}),
         "last_log_prompt_input_time": snapshot.get("last_log_prompt_input_time"),
+        "log_prompt_template_override": snapshot.get("log_prompt_template_override"),
         "latest_news_briefing": snapshot.get("latest_news_briefing"),
         "last_news_briefing_time": snapshot.get("last_news_briefing_time"),
         "latest_log_briefing": snapshot.get("latest_log_briefing"),
@@ -84,10 +105,27 @@ def build_ws_snapshot(snapshot: dict) -> dict:
     }
 
 
+def _is_expected_websocket_disconnect(error: Exception) -> bool:
+    if isinstance(error, WebSocketDisconnect):
+        return True
+    if ConnectionClosed and isinstance(error, ConnectionClosed):
+        return True
+    if isinstance(error, OSError) and getattr(error, "winerror", None) in {64, 10054}:
+        return True
+
+    message = str(error).lower()
+    return (
+        "websocket is not connected" in message
+        or "closing handshake" in message
+        or "connection closed" in message
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     # 화면에서 가장 먼저 확인하는 상태 API입니다.
     # 서버가 살아있는지, 워커가 도는지, 최근 분석 상태가 어떤지 전달합니다.
+    hydrate_state_from_existing_artifacts()
     snapshot = state.snapshot(include_faiss_items=False)
     snapshot["backend_diagnostics"] = build_backend_diagnostics(
         worker_running=worker.running,
@@ -136,15 +174,71 @@ def faiss_search(payload: SearchRequest) -> dict:
 @app.post("/chat/strategy", response_model=StrategyChatResponse)
 def chat_strategy(payload: StrategyChatRequest) -> StrategyChatResponse:
     try:
-        return StrategyChatResponse(**ask_strategy(payload.question))
+        return StrategyChatResponse(
+            **ask_strategy(
+                payload.question,
+                news_prompt_template=payload.news_prompt_template,
+                log_prompt_template=payload.log_prompt_template,
+            )
+        )
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
 
-@app.post("/analysis/run", response_model=FullAnalysisResponse)
-def analysis_run(log_dir: str = "data/logs") -> FullAnalysisResponse:
+@app.post("/chat/cardloan-debate", response_model=CardloanDebateResponse)
+def chat_cardloan_debate(payload: CardloanDebateRequest) -> CardloanDebateResponse:
     try:
-        snapshot = run_full_analysis(log_dir=log_dir)
+        return CardloanDebateResponse(
+            **ask_cardloan_debate(
+                payload.question,
+                reviewer_prompts=payload.reviewer_prompts,
+            )
+        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.post("/settings/log-prompt")
+def settings_log_prompt(payload: LogPromptTemplateRequest) -> dict:
+    from agent.strategy_chat import DEFAULT_LOG_AGENT_PROMPT_TEMPLATE
+
+    template = str(payload.template or "").strip() or None
+    with state.lock:
+        state.log_prompt_template_override = (
+            None
+            if template in {None, DEFAULT_LOG_AGENT_PROMPT_TEMPLATE}
+            else template
+        )
+    return {
+        "status": "ok",
+        "log_prompt_template_override": state.log_prompt_template_override,
+    }
+
+
+@app.post("/settings/news-prompt")
+def settings_news_prompt(payload: NewsPromptTemplateRequest) -> dict:
+    from agent.strategy_chat import DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE
+
+    template = str(payload.template or "").strip() or None
+    with state.lock:
+        state.news_prompt_template_override = (
+            None
+            if template in {None, DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE}
+            else template
+        )
+    return {
+        "status": "ok",
+        "news_prompt_template_override": state.news_prompt_template_override,
+    }
+
+
+@app.post("/analysis/run", response_model=FullAnalysisResponse)
+def analysis_run(
+    log_dir: str = "data/logs",
+    collect_news: bool = True,
+) -> FullAnalysisResponse:
+    try:
+        snapshot = run_full_analysis(log_dir=log_dir, collect_news=collect_news)
         return FullAnalysisResponse(**snapshot)
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
@@ -152,6 +246,7 @@ def analysis_run(log_dir: str = "data/logs") -> FullAnalysisResponse:
 
 @app.get("/analysis/status", response_model=FullAnalysisResponse)
 def analysis_status() -> FullAnalysisResponse:
+    hydrate_state_from_existing_artifacts()
     snapshot = state.snapshot(include_faiss_items=False)
     snapshot["results"] = enrich_results(snapshot["results"])
     snapshot["backend_diagnostics"] = build_backend_diagnostics(
@@ -163,6 +258,7 @@ def analysis_status() -> FullAnalysisResponse:
 
 @app.get("/diagnostics/status")
 def diagnostics_status() -> dict:
+    hydrate_state_from_existing_artifacts()
     snapshot = state.snapshot(include_faiss_items=False)
     diagnostics = build_backend_diagnostics(
         worker_running=worker.running,
@@ -262,7 +358,7 @@ def faiss_stats() -> dict:
     common rejection reasons, and average credit grades per product code.
     """
     try:
-        from rag.vector_db import list_vectors
+        from rag.vector_db import FAISS_STORE_LOGS, list_vectors
 
         snapshot = state.snapshot()
         latest_event = (snapshot.get("vector_events") or [{}])[0]
@@ -409,7 +505,7 @@ def faiss_stats() -> dict:
 def faiss_search_features(type: str | None = None, feature_key: str | None = None, feature_value: str | None = None, limit: int = 200, store_name: str | None = None) -> dict:
     """Search FAISS entries by metadata `type` and feature key/value.
 
-    - `type`: optional metadata type filter (e.g., 'log', 'news', 'agent_report')
+    - `type`: optional metadata type filter (e.g., 'log', 'news', 'signal_news')
     - `feature_key`: feature field name to match (only relevant for items with `features` metadata)
     - `feature_value`: substring to match against the feature value (optional)
     """
@@ -494,6 +590,8 @@ async def websocket_faiss_updates(websocket: WebSocket):
                 snapshot.get("news_crawl_success_count"),
                 snapshot.get("news_crawl_failure_count"),
                 snapshot.get("last_news_crawl_time"),
+                (snapshot.get("ollama_runtime", {}) or {}).get("updated_at"),
+                (snapshot.get("ollama_runtime", {}) or {}).get("status"),
             )
 
             for ev in to_send:
@@ -516,8 +614,10 @@ async def websocket_faiss_updates(websocket: WebSocket):
                     }
                 )
             await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        return
+    except Exception as error:
+        if _is_expected_websocket_disconnect(error):
+            return
+        raise
 
 
 @app.post("/worker/start", response_model=GenericMessage)

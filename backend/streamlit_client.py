@@ -15,17 +15,21 @@ class BackendClient:
     def health(self) -> dict[str, Any]:
         return requests.get(f"{self.base_url}/health", timeout=10).json()
 
-    def start_worker(self, interval_seconds: int = 10) -> dict[str, Any]:
+    def start_worker(self, interval_seconds: int = 1) -> dict[str, Any]:
         return requests.post(
             f"{self.base_url}/worker/start",
             json={"interval_seconds": interval_seconds},
             timeout=10,
         ).json()
 
-    def run_full_analysis(self, log_dir: str = "data/logs") -> dict[str, Any]:
+    def run_full_analysis(
+        self,
+        log_dir: str = "data/logs",
+        collect_news: bool = True,
+    ) -> dict[str, Any]:
         return requests.post(
             f"{self.base_url}/analysis/run",
-            params={"log_dir": log_dir},
+            params={"log_dir": log_dir, "collect_news": str(bool(collect_news)).lower()},
             timeout=180,
         ).json()
 
@@ -111,9 +115,46 @@ class BackendClient:
             timeout=30,
         ).json()
 
-    def strategy_chat(self, question: str) -> dict[str, Any]:
+    def strategy_chat(
+        self,
+        question: str,
+        news_prompt_template: str | None = None,
+        log_prompt_template: str | None = None,
+    ) -> dict[str, Any]:
         return requests.post(
             f"{self.base_url}/chat/strategy",
-            json={"question": question},
+            json={
+                "question": question,
+                "news_prompt_template": news_prompt_template,
+                "log_prompt_template": log_prompt_template,
+            },
             timeout=180,
+        ).json()
+
+    def start_cardloan_debate(
+        self,
+        question: str,
+        reviewer_prompts: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return requests.post(
+            f"{self.base_url}/chat/cardloan-debate",
+            json={
+                "question": question,
+                "reviewer_prompts": reviewer_prompts or {},
+            },
+            timeout=600,
+        ).json()
+
+    def set_news_prompt_template(self, template: str | None) -> dict[str, Any]:
+        return requests.post(
+            f"{self.base_url}/settings/news-prompt",
+            json={"template": template},
+            timeout=30,
+        ).json()
+
+    def set_log_prompt_template(self, template: str | None) -> dict[str, Any]:
+        return requests.post(
+            f"{self.base_url}/settings/log-prompt",
+            json={"template": template},
+            timeout=30,
         ).json()

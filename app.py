@@ -5,19 +5,33 @@ import os
 import re
 import threading
 import time
+import warnings
+from typing import Any
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+warnings.filterwarnings(
+    "ignore",
+    message=r"Core Pydantic V1 functionality isn't compatible with Python 3\.14 or greater\.",
+    category=UserWarning,
+)
+
 from agent.strategy_chat import regulation_agent
+from agent.strategy_chat import DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE
+from agent.strategy_chat import OLLAMA_LIGHTWEIGHT_MODEL
 from backend.streamlit_client import BackendClient
+from rag.product_pattern_summary import DEFAULT_SUMMARY_PATH, load_product_pattern_summary
 from rag.vector_db import (
     FAISS_STORE_CUSTOMER,
+    FAISS_STORE_DOCUMENT,
     FAISS_STORE_LOGS,
     FAISS_STORE_NEWS,
     get_vector_count,
     ingest_files,
+    list_vectors,
     search_context,
 )
 
@@ -26,6 +40,7 @@ _background_results: dict = {}
 _background_lock = threading.Lock()
 _ws_snapshot_buffer: dict = {}
 _ws_snapshot_lock = threading.Lock()
+_shared_backend_url = os.environ.get("BACKEND_URL", "http://127.0.0.1:18000")
 
 # 이 파일은 최종 Streamlit 진입점입니다.
 # 핵심 역할은 "직접 분석하지 않고" FastAPI 백엔드에서 준비한 데이터를 받아
@@ -51,6 +66,15 @@ def _start_faiss_ws():
     if st.session_state.get("faiss_ws_started"):
         return
     st.session_state.faiss_ws_started = True
+    base_url = str(
+        st.session_state.get(
+            "backend_url",
+            os.environ.get("BACKEND_URL", "http://127.0.0.1:18000"),
+        )
+    ).strip() or "http://127.0.0.1:18000"
+
+    global _shared_backend_url
+    _shared_backend_url = base_url
 
     def _run_ws():
         try:
@@ -62,7 +86,7 @@ def _start_faiss_ws():
 
             while True:
                 try:
-                    base = st.session_state.get("backend_url", "http://127.0.0.1:18000")
+                    base = _shared_backend_url or "http://127.0.0.1:18000"
                     if base.startswith("https://"):
                         ws_url = "wss://" + base[len("https://") :]
                     elif base.startswith("http://"):
@@ -137,10 +161,6 @@ def consume_ws_snapshot_buffer() -> bool:
             st.session_state.vector_events = events
 
         if event:
-            st.session_state.faiss_toast = {
-                "msg": f"FAISS 업데이트: {event.get('source','?')} {event.get('added_count',0)}건 추가",
-                "ts": time.time(),
-            }
             st.session_state.faiss_last_event_time = time.time()
         return True
     except Exception:
@@ -367,6 +387,18 @@ def render_dashboard_theme():
             margin-bottom: 16px;
         }
 
+        .debate-hero-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 250px;
+            gap: 18px;
+            align-items: stretch;
+            margin-bottom: 16px;
+        }
+
+        .debate-hero-copy {
+            min-width: 0;
+        }
+
         .debate-hero::after {
             content: '';
             position: absolute;
@@ -429,6 +461,153 @@ def render_dashboard_theme():
         .debate-wave span:nth-child(3) { animation-delay: 0.30s; }
         .debate-wave span:nth-child(4) { animation-delay: 0.45s; }
         .debate-wave span:nth-child(5) { animation-delay: 0.60s; }
+
+        .debate-launch-panel {
+            position: relative;
+            overflow: hidden;
+            min-height: 100%;
+            border-radius: 26px;
+            padding: 20px 18px;
+            background: radial-gradient(circle at 30% 24%, rgba(97,244,222,0.18), transparent 34%), linear-gradient(160deg, rgba(8,26,39,0.96), rgba(12,39,56,0.94));
+            border: 1px solid rgba(97,244,222,0.16);
+            box-shadow: 0 18px 44px rgba(0,0,0,0.18);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .debate-launch-panel.ready {
+            border-color: rgba(255,191,105,0.22);
+        }
+
+        .debate-launch-panel::after {
+            content: '';
+            position: absolute;
+            right: -36px;
+            bottom: -42px;
+            width: 140px;
+            height: 140px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(255,191,105,0.20), transparent 68%);
+            pointer-events: none;
+        }
+
+        .debate-launch-kicker {
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #61f4de;
+        }
+
+        .debate-launch-title {
+            font-size: 18px;
+            font-weight: 900;
+            line-height: 1.25;
+            color: #f7fbff;
+            margin-top: 8px;
+        }
+
+        .debate-launch-desc {
+            font-size: 12px;
+            line-height: 1.65;
+            color: #d9ecfb;
+            margin-top: 8px;
+        }
+
+        [class*="st-key-cardloan_debate_start"] {
+            margin-top: 6px;
+            margin-bottom: 0;
+            position: relative;
+            z-index: 8;
+            display: flex;
+            justify-content: center;
+        }
+
+        [class*="st-key-cardloan_debate_start"] button {
+            position: relative;
+            width: 154px;
+            min-width: 154px;
+            max-width: 154px;
+            height: 154px;
+            min-height: 154px;
+            border-radius: 999px;
+            border: 1px solid rgba(97,244,222,0.18);
+            background: radial-gradient(circle at 50% 36%, rgba(255,255,255,0.16), rgba(255,255,255,0.06) 26%, rgba(10,34,50,0.24) 28%), linear-gradient(160deg, rgba(97,244,222,0.98), rgba(255,191,105,0.98));
+            color: #082032;
+            font-size: 16px;
+            font-weight: 900;
+            letter-spacing: 0.01em;
+            box-shadow: 0 24px 42px rgba(8,32,50,0.24), inset 0 1px 0 rgba(255,255,255,0.22);
+            transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+            padding: 0 24px;
+            white-space: normal;
+            line-height: 1.3;
+        }
+
+        [class*="st-key-cardloan_debate_start"] button::before,
+        [class*="st-key-cardloan_debate_start"] button::after {
+            content: '';
+            position: absolute;
+            inset: 12px;
+            border-radius: 999px;
+            border: 1px dashed rgba(8,32,50,0.18);
+            animation: orbSpin 11s linear infinite;
+            pointer-events: none;
+        }
+
+        [class*="st-key-cardloan_debate_start"] button::after {
+            inset: 24px;
+            border-style: solid;
+            border-color: rgba(255,255,255,0.22);
+            animation-duration: 8s;
+            animation-direction: reverse;
+        }
+
+        [class*="st-key-cardloan_debate_start"] button:hover,
+        [class*="st-key-cardloan_debate_start"] button:focus-visible {
+            transform: translateY(-4px) scale(1.02);
+            filter: saturate(1.08);
+            box-shadow: 0 30px 48px rgba(8,32,50,0.28), inset 0 1px 0 rgba(255,255,255,0.28);
+            outline: none;
+        }
+
+        [class*="st-key-cardloan_debate_start"] button:disabled {
+            background: linear-gradient(135deg, rgba(148,163,184,0.92), rgba(203,213,225,0.9));
+            color: rgba(15,23,42,0.72);
+            border-color: rgba(148,163,184,0.24);
+            box-shadow: none;
+            transform: none;
+        }
+
+        [class*="st-key-cardloan_debate_start"] button p {
+            font-size: 16px;
+            font-weight: 900;
+            line-height: 1.3;
+            margin: 0;
+        }
+
+        @keyframes orbSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes launchPulse {
+            0%, 100% { transform: scale(0.94); opacity: 0.92; }
+            50% { transform: scale(1.04); opacity: 1; }
+        }
+
+        @media (max-width: 1080px) {
+            .debate-hero-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .debate-launch-panel {
+                min-height: 240px;
+            }
+        }
 
         .reviewer-card {
             position: relative;
@@ -676,6 +855,25 @@ def render_dashboard_theme():
             background: linear-gradient(90deg, transparent, rgba(255,191,105,0.18), transparent);
         }
 
+        .reviewer-card.speaking {
+            transform: translateY(-4px);
+        }
+
+        .reviewer-card.conservative.speaking {
+            border-color: rgba(255,143,143,0.32);
+            box-shadow: 0 20px 36px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,143,143,0.12);
+        }
+
+        .reviewer-card.sales.speaking {
+            border-color: rgba(97,244,222,0.30);
+            box-shadow: 0 20px 36px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(97,244,222,0.12);
+        }
+
+        .reviewer-card.product.speaking {
+            border-color: rgba(255,191,105,0.32);
+            box-shadow: 0 20px 36px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,191,105,0.12);
+        }
+
         .reviewer-role {
             font-size: 11px;
             font-weight: 800;
@@ -728,19 +926,19 @@ def render_dashboard_theme():
         }
 
         [class*="st-key-edit_reviewer_prompt_"] {
-            margin-top: -264px;
+            margin-top: -214px;
             margin-bottom: 12px;
             position: relative;
             z-index: 8;
             padding-right: 0;
-            height: 254px;
+            height: 206px;
         }
 
         [class*="st-key-edit_reviewer_prompt_"] button {
             position: relative;
             width: 100%;
-            height: 254px;
-            min-height: 254px;
+            height: 206px;
+            min-height: 206px;
             padding: 0;
             justify-content: flex-end;
             align-items: flex-end;
@@ -1209,6 +1407,182 @@ def render_dashboard_theme():
             color: #d9ecfb;
         }
 
+        .debate-live-shell {
+            margin: 12px 0 18px 0;
+            padding: 18px 20px;
+            border-radius: 24px;
+            background: linear-gradient(145deg, rgba(10,21,33,0.98), rgba(18,35,52,0.94));
+            color: white;
+            border: 1px solid rgba(148,163,184,0.18);
+            box-shadow: 0 22px 42px rgba(3,12,21,0.24);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .debate-live-shell::before {
+            content: '';
+            position: absolute;
+            inset: auto -10% 0 auto;
+            width: 260px;
+            height: 260px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(97,244,222,0.14), transparent 65%);
+            pointer-events: none;
+        }
+
+        .debate-live-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .debate-live-kicker {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            opacity: 0.7;
+            text-transform: uppercase;
+        }
+
+        .debate-live-title {
+            font-size: 20px;
+            font-weight: 900;
+            margin-top: 4px;
+        }
+
+        .debate-live-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .debate-live-broadcast {
+            margin-bottom: 12px;
+            padding: 12px 14px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, rgba(97,244,222,0.10), rgba(125,211,252,0.08));
+            border: 1px solid rgba(97,244,222,0.16);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .debate-live-broadcast::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(105deg, transparent 18%, rgba(255,255,255,0.08) 50%, transparent 82%);
+            transform: translateX(-120%);
+            animation: speakingSweep 2.8s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .debate-live-broadcast-title {
+            position: relative;
+            z-index: 1;
+            font-size: 13px;
+            font-weight: 900;
+            color: #f7fbff;
+            margin-bottom: 6px;
+        }
+
+        .debate-live-broadcast-body {
+            position: relative;
+            z-index: 1;
+            font-size: 12px;
+            line-height: 1.7;
+            color: rgba(217,236,251,0.90);
+        }
+
+        .debate-live-helper {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(226,238,247,0.88);
+        }
+
+        .debate-live-body {
+            position: relative;
+            padding: 18px 18px 22px 18px;
+            border-radius: 22px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+            border: 1px solid rgba(255,255,255,0.08);
+            min-height: 122px;
+            backdrop-filter: blur(12px);
+        }
+
+        .debate-live-body.streaming {
+            animation: liveBreathing 2.4s ease-in-out infinite;
+        }
+
+        .debate-live-message {
+            font-size: 14px;
+            line-height: 1.82;
+            color: rgba(241,245,249,0.96);
+            white-space: pre-wrap;
+            position: relative;
+            z-index: 1;
+        }
+
+        .debate-live-message.thinking {
+            color: rgba(209,225,239,0.92);
+        }
+
+        .debate-live-cursor {
+            display: inline-block;
+            width: 9px;
+            height: 1.05em;
+            margin-left: 4px;
+            border-radius: 2px;
+            vertical-align: -2px;
+            background: linear-gradient(180deg, rgba(97,244,222,0.96), rgba(255,191,105,0.92));
+            animation: liveCursorBlink 1s steps(1, end) infinite;
+            box-shadow: 0 0 10px rgba(97,244,222,0.22);
+        }
+
+        .debate-live-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            margin-top: 14px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .debate-live-dots span {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(97,244,222,0.95), rgba(148,163,184,0.7));
+            animation: liveDots 1.2s ease-in-out infinite;
+            box-shadow: 0 0 0 6px rgba(97,244,222,0.06);
+        }
+
+        .debate-live-dots span:nth-child(2) { animation-delay: 0.18s; }
+        .debate-live-dots span:nth-child(3) { animation-delay: 0.36s; }
+
+        .debate-live-caption {
+            margin-top: 12px;
+            font-size: 12px;
+            line-height: 1.7;
+            color: rgba(191,219,254,0.88);
+        }
+
+        @keyframes liveCursorBlink {
+            0%, 48% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+
         .debate-transcript {
             border-radius: 22px;
             padding: 18px;
@@ -1318,6 +1692,16 @@ def render_dashboard_theme():
             white-space: pre-wrap;
         }
 
+        @keyframes liveBreathing {
+            0%, 100% { transform: translateY(0); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03); }
+            50% { transform: translateY(-1px); box-shadow: inset 0 0 0 1px rgba(97,244,222,0.08); }
+        }
+
+        @keyframes liveDots {
+            0%, 80%, 100% { transform: translateY(0) scale(0.92); opacity: 0.45; }
+            40% { transform: translateY(-4px) scale(1.08); opacity: 1; }
+        }
+
         .stTabs [data-baseweb="tab-list"] {
             gap: 10px;
             background: linear-gradient(180deg, rgba(8,26,39,0.78), rgba(10,34,50,0.66));
@@ -1340,6 +1724,105 @@ def render_dashboard_theme():
             font-size: 14px;
             font-weight: 800;
             letter-spacing: -0.01em;
+
+        .reviewer-live-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin: 12px 0 10px 0;
+        }
+
+        .reviewer-status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 9px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+
+        .reviewer-live-speech {
+            position: relative;
+            margin-top: 10px;
+            padding: 14px 14px 15px 14px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05));
+            border: 1px solid rgba(255,255,255,0.10);
+            min-height: 96px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .reviewer-live-speech::before {
+            content: '';
+            position: absolute;
+            left: 28px;
+            bottom: -8px;
+            width: 16px;
+            height: 16px;
+            background: rgba(255,255,255,0.08);
+            border-right: 1px solid rgba(255,255,255,0.10);
+            border-bottom: 1px solid rgba(255,255,255,0.10);
+            transform: rotate(45deg);
+        }
+
+        .reviewer-live-speech.speaking::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(105deg, transparent 16%, rgba(255,255,255,0.12) 50%, transparent 84%);
+            transform: translateX(-120%);
+            animation: speakingSweep 2.8s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .reviewer-live-label {
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(191,219,254,0.82);
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .reviewer-live-text {
+            font-size: 13px;
+            line-height: 1.68;
+            color: #edf6ff;
+            white-space: pre-wrap;
+            position: relative;
+            z-index: 1;
+        }
+
+        .reviewer-live-text.thinking {
+            color: #d9ecfb;
+        }
+
+        .reviewer-live-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .reviewer-live-dots span {
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(97,244,222,0.95), rgba(255,255,255,0.7));
+            animation: liveDots 1.2s ease-in-out infinite;
+        }
+
+        .reviewer-live-dots span:nth-child(2) { animation-delay: 0.18s; }
+        .reviewer-live-dots span:nth-child(3) { animation-delay: 0.36s; }
             transition: all 0.2s ease;
             white-space: nowrap;
         }
@@ -1385,7 +1868,7 @@ def render_dashboard_theme():
 
         [class*="st-key-main_dashboard_section"] [role="radiogroup"] {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.28fr) minmax(0, 1fr) minmax(0, 0.94fr);
             align-items: stretch;
             gap: 8px;
             width: 100%;
@@ -1393,7 +1876,7 @@ def render_dashboard_theme():
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.28fr) minmax(0, 1fr) minmax(0, 0.94fr);
             align-items: stretch;
             gap: 8px;
             width: 100%;
@@ -1408,10 +1891,10 @@ def render_dashboard_theme():
             position: relative;
             isolation: isolate;
             overflow: hidden;
-            min-height: 64px;
+            min-height: 68px;
             min-width: 0;
             width: 100%;
-            padding: 24px 52px 10px 16px;
+            padding: 25px 52px 12px 16px;
             border-radius: 18px 18px 14px 14px;
             background:
                 linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01)),
@@ -1423,6 +1906,14 @@ def render_dashboard_theme():
             letter-spacing: -0.01em;
             transition: transform 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease, background 0.24s ease;
             box-shadow: inset 0 -1px 0 rgba(255,255,255,0.03) !important;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2),
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2) {
+            min-height: 76px;
+            padding-top: 27px;
+            padding-right: 58px;
+            border-radius: 20px 20px 16px 16px;
         }
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button::before,
@@ -1488,14 +1979,6 @@ def render_dashboard_theme():
             color: #ffe8c2;
             background: rgba(255,191,105,0.12);
             border-color: rgba(255,191,105,0.18);
-        }
-
-        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(5)::after,
-        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(5)::after {
-            content: 'FAISS';
-            color: #dbeafe;
-            background: rgba(129,140,248,0.12);
-            border-color: rgba(129,140,248,0.18);
         }
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:hover,
@@ -1651,6 +2134,13 @@ def render_dashboard_theme():
         [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked) p,
         [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(1):has(input:checked) div {
             animation-duration: 1.8s;
+        }
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2) p,
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2) div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2) p,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2) div {
+            font-size: 14px !important;
         }
 
         .section-shell {
@@ -1887,7 +2377,7 @@ def render_dashboard_theme():
         }
 
         .upload-shell {
-            margin-top: 18px;
+            margin-top: 10px;
             margin-bottom: 0;
             padding: 16px;
             border-radius: 20px;
@@ -2399,7 +2889,7 @@ def render_dashboard_theme():
         }
 
         [class*="st-key-sidebar_reg_upload"] {
-            margin-top: 8px;
+            margin-top: -4px;
             margin-bottom: 12px;
             padding: 12px 16px 16px 16px;
             background: linear-gradient(180deg, rgba(8,26,39,0.92), rgba(10,34,50,0.88));
@@ -2700,46 +3190,116 @@ def render_initial_analysis_badge():
     )
 
 
-def render_faiss_toast():
-    toast = st.session_state.get("faiss_toast")
+def _format_ollama_toast_agent_label(agent: str) -> str:
+    normalized = str(agent or "").strip()
+    if normalized == "log_agent":
+        return "로그 에이전트"
+    if normalized == "news_agent":
+        return "뉴스 에이전트"
+    if normalized == "credit_planning_agent":
+        return "신용기획부"
+    if normalized == "sales_strategy_agent":
+        return "금융영업부"
+    if normalized == "solution_planning_agent":
+        return "금융솔루션부"
+    if normalized == "decision_agent":
+        return "의사결정 에이전트"
+    if normalized == "regulation_agent":
+        return "규정 에이전트"
+    if normalized == "orchestrator":
+        return "오케스트레이터"
+    if not normalized:
+        return "Ollama"
+    return normalized.replace("_", " ").title()
+
+
+def render_ollama_toast():
+    toast = st.session_state.get("ollama_toast")
     if not toast:
         return
     try:
         age = time.time() - float(toast.get("ts", 0))
     except Exception:
         age = 9999
-    # only show recent toasts (5s)
     if age > 5:
         return
 
     css = """
     <style>
-    .faiss-toast {
+        .ollama-toast {
       position: fixed;
       right: 20px;
       top: 20px;
       z-index: 9999;
-      background: linear-gradient(90deg,#06b6d4,#3b82f6);
+            min-width: 280px;
+            max-width: 420px;
+            background: linear-gradient(135deg, rgba(15,23,42,0.96), rgba(14,116,144,0.94));
       color: white;
-      padding: 12px 16px;
-      border-radius: 10px;
-      box-shadow: 0 8px 24px rgba(15,23,42,0.2);
-      font-weight:700;
-      animation: faissToastIn 0.5s ease-out;
+            padding: 14px 16px 15px 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(103,232,249,0.28);
+            box-shadow: 0 14px 34px rgba(15,23,42,0.34);
+            overflow: hidden;
+            animation: ollamaToastIn 0.45s ease-out;
     }
-    @keyframes faissToastIn {
-      from { transform: translateY(-8px); opacity: 0 }
-      to { transform: translateY(0); opacity: 1 }
+        .ollama-toast::before {
+            content: '';
+            position: absolute;
+            inset: 0 0 auto 0;
+            height: 3px;
+            background: linear-gradient(90deg, #67e8f9, #fde68a, #67e8f9);
+            background-size: 200% 100%;
+            animation: ollamaToastSweep 1.8s linear infinite;
+        }
+        .ollama-toast-kicker {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #67e8f9;
+            margin-bottom: 6px;
+        }
+        .ollama-toast-title {
+            font-size: 14px;
+            font-weight: 800;
+            color: #f8fafc;
+            margin-bottom: 4px;
+        }
+        .ollama-toast-body {
+            font-size: 12px;
+            line-height: 1.55;
+            color: rgba(226,232,240,0.94);
+        }
+        @keyframes ollamaToastIn {
+            from { transform: translateY(-12px) scale(0.96); opacity: 0 }
+            to { transform: translateY(0) scale(1); opacity: 1 }
+        }
+        @keyframes ollamaToastSweep {
+            from { background-position: 0% 0; }
+            to { background-position: 200% 0; }
     }
     </style>
     """
 
-    st.markdown(css + f"<div class='faiss-toast'>{html.escape(str(toast.get('msg','')))}</div>", unsafe_allow_html=True)
+    kicker = html.escape(str(toast.get("kicker", "OLLAMA COMPLETED")))
+    title = html.escape(str(toast.get("title", "Ollama 작업 완료")))
+    body = html.escape(str(toast.get("msg", "")))
+    st.markdown(
+        css
+        + (
+            "<div class='ollama-toast'>"
+            f"<div class='ollama-toast-kicker'>{kicker}</div>"
+            f"<div class='ollama-toast-title'>{title}</div>"
+            f"<div class='ollama-toast-body'>{body}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 # render toast (if any) early so it appears above content
 try:
-    render_faiss_toast()
+    render_ollama_toast()
 except Exception:
     pass
 
@@ -2864,6 +3424,7 @@ def render_loading_styles():
         .loading-step.active {
             background: rgba(224,242,254,0.95);
             border-color: rgba(56,189,248,0.55);
+            box-shadow: 0 0 0 1px rgba(56,189,248,0.12), 0 10px 24px rgba(14,165,233,0.12);
         }
         .loading-step.done {
             background: rgba(220,252,231,0.9);
@@ -2883,6 +3444,9 @@ def render_loading_styles():
         }
         .loading-step.active .loading-badge { background: #0284c7; }
         .loading-step.done .loading-badge { background: #16a34a; }
+        .loading-step.active .loading-badge {
+            animation: loadingPulse 1.2s ease-in-out infinite;
+        }
         .loading-meta {
             margin-top: 12px;
             padding: 10px 12px;
@@ -2890,6 +3454,281 @@ def render_loading_styles():
             background: rgba(15, 23, 42, 0.04);
             color: #334155;
             font-size: 13px;
+        }
+        .loading-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 18px;
+            padding: 18px 18px 16px 18px;
+            margin-bottom: 14px;
+            border: 1px solid rgba(125, 211, 252, 0.28);
+            background: radial-gradient(circle at 20% 10%, rgba(125,211,252,0.18), transparent 30%), linear-gradient(135deg, rgba(15,23,42,0.96), rgba(15,118,110,0.90));
+            color: white;
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+        }
+        .loading-orbit {
+            position: absolute;
+            top: -30px;
+            right: -20px;
+            width: 140px;
+            height: 140px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+        .loading-orbit::before,
+        .loading-orbit::after {
+            content: '';
+            position: absolute;
+            inset: 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.10);
+            animation: orbitSpin 8s linear infinite;
+        }
+        .loading-orbit::after {
+            inset: 28px;
+            animation-duration: 5s;
+            animation-direction: reverse;
+        }
+        .loading-progress-track {
+            margin-top: 14px;
+            height: 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.16);
+            overflow: hidden;
+        }
+        .loading-progress-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #67e8f9, #a7f3d0, #fef08a);
+            background-size: 200% 100%;
+            animation: progressWave 2.4s linear infinite;
+        }
+        .loading-stage-strip {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 14px;
+        }
+        .loading-stage {
+            position: relative;
+            overflow: hidden;
+            min-height: 42px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.72);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .loading-stage.active {
+            color: white;
+            border-color: rgba(103,232,249,0.65);
+            box-shadow: 0 0 0 1px rgba(103,232,249,0.12), 0 12px 24px rgba(34,211,238,0.16);
+        }
+        .loading-stage.active::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.20), transparent);
+            animation: loadingSweep 1.7s linear infinite;
+        }
+        .loading-stage.done {
+            color: #ecfeff;
+            background: linear-gradient(135deg, rgba(34,197,94,0.34), rgba(45,212,191,0.22));
+            border-color: rgba(134,239,172,0.42);
+        }
+        .loading-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .loading-metric {
+            padding: 12px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            backdrop-filter: blur(6px);
+        }
+        .loading-metric-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 4px;
+        }
+        .loading-metric-value {
+            font-size: 24px;
+            font-weight: 800;
+            color: white;
+        }
+        .loading-metric-sub {
+            font-size: 12px;
+            color: rgba(255,255,255,0.78);
+            margin-top: 2px;
+        }
+        .loading-live-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .loading-live-card {
+            position: relative;
+            overflow: hidden;
+            padding: 12px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            min-height: 80px;
+        }
+        .loading-live-card.running {
+            border-color: rgba(103,232,249,0.48);
+            box-shadow: 0 10px 26px rgba(8,145,178,0.18);
+        }
+        .loading-live-card.running::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent);
+            animation: loadingSweep 1.6s linear infinite;
+        }
+        .loading-live-card.completed {
+            border-color: rgba(134,239,172,0.34);
+            background: linear-gradient(135deg, rgba(22,163,74,0.22), rgba(16,185,129,0.14));
+        }
+        .loading-live-label {
+            position: relative;
+            z-index: 1;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.74);
+            margin-bottom: 8px;
+        }
+        .loading-live-detail {
+            position: relative;
+            z-index: 1;
+            font-size: 13px;
+            line-height: 1.55;
+            color: rgba(255,255,255,0.92);
+        }
+        .loading-activity-panel {
+            margin-top: 14px;
+            border-radius: 16px;
+            padding: 14px;
+            background: rgba(5,16,28,0.34);
+            border: 1px solid rgba(255,255,255,0.12);
+            backdrop-filter: blur(8px);
+        }
+        .loading-activity-head {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(103,232,249,0.94);
+            margin-bottom: 10px;
+        }
+        .loading-activity-row {
+            display: grid;
+            grid-template-columns: 12px minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: start;
+            padding: 9px 0;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+        .loading-activity-row:first-of-type {
+            border-top: 0;
+            padding-top: 0;
+        }
+        .loading-activity-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            margin-top: 4px;
+            background: rgba(148,163,184,0.88);
+        }
+        .loading-activity-dot.running {
+            background: #67e8f9;
+            box-shadow: 0 0 0 0 rgba(103,232,249,0.54);
+            animation: loadingPulse 1.3s ease-in-out infinite;
+        }
+        .loading-activity-dot.completed {
+            background: #86efac;
+        }
+        .loading-activity-dot.failed {
+            background: #fca5a5;
+        }
+        .loading-activity-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: #f8fafc;
+            margin-bottom: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .loading-activity-detail {
+            font-size: 12px;
+            line-height: 1.5;
+            color: rgba(226,232,240,0.92);
+        }
+        .loading-activity-time {
+            font-size: 11px;
+            color: rgba(191,219,254,0.72);
+            white-space: nowrap;
+            padding-top: 1px;
+        }
+        .loading-activity-empty {
+            font-size: 12px;
+            color: rgba(226,232,240,0.82);
+            line-height: 1.6;
+        }
+        .backend-restart-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9998;
+            background: linear-gradient(180deg, rgba(2,6,23,0.82), rgba(2,6,23,0.90));
+            backdrop-filter: blur(14px);
+            padding: 34px 26px;
+            overflow-y: auto;
+        }
+        .backend-restart-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+        }
+        .backend-restart-explain {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .backend-restart-item {
+            border-radius: 14px;
+            padding: 12px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: rgba(241,245,249,0.92);
+            min-height: 82px;
+        }
+        .backend-restart-item-title {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #67e8f9;
+            margin-bottom: 6px;
+        }
+        .backend-restart-item-detail {
+            font-size: 12px;
+            line-height: 1.55;
+            color: rgba(226,232,240,0.92);
         }
         .skeleton-grid {
             display: grid;
@@ -2917,10 +3756,451 @@ def render_loading_styles():
             0% { background-position: 100% 0; }
             100% { background-position: 0 0; }
         }
+        @keyframes orbitSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes progressWave {
+            0% { background-position: 0% 0; }
+            100% { background-position: 200% 0; }
+        }
+        @keyframes loadingPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(14,165,233,0.45); }
+            50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(14,165,233,0); }
+        }
+        @keyframes loadingSweep {
+            0% { transform: translateX(-130%); }
+            100% { transform: translateX(130%); }
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _start_initial_analysis_background(log_dir: str = "data/logs") -> bool:
+    base_url = str(
+        st.session_state.get(
+            "backend_url",
+            os.environ.get("BACKEND_URL", "http://127.0.0.1:18000"),
+        )
+    ).strip() or "http://127.0.0.1:18000"
+
+    global _shared_backend_url
+    _shared_backend_url = base_url
+
+    with _background_lock:
+        task = _background_results.get("initial_analysis") or {}
+        if task.get("status") in {"running", "completed"}:
+            return False
+        _background_results["initial_analysis"] = {
+            "status": "running",
+            "started_at": datetime.datetime.now().isoformat(),
+            "base_url": base_url,
+        }
+
+    def _run_initial_analysis() -> None:
+        try:
+            result = BackendClient(base_url).run_full_analysis(
+                log_dir=log_dir,
+                collect_news=False,
+            )
+            with _background_lock:
+                _background_results["initial_analysis"] = {
+                    "status": "completed",
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "result": result,
+                }
+        except Exception as error:
+            with _background_lock:
+                _background_results["initial_analysis"] = {
+                    "status": "failed",
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "error": str(error),
+                }
+
+    threading.Thread(target=_run_initial_analysis, daemon=True).start()
+    return True
+
+
+def _is_initial_dashboard_ready(status_payload: dict[str, Any] | None) -> bool:
+    payload = status_payload or {}
+    return bool(payload.get("last_run_time") and payload.get("last_faiss_time"))
+
+
+def _set_backend_bootstrap_mode(active: bool, reason: str | None = None) -> bool:
+    previous = bool(st.session_state.get("initial_analysis_done", False))
+    st.session_state.initial_analysis_done = not active
+    if active:
+        st.session_state.initial_analysis_failed = False
+        if reason:
+            st.session_state.initial_loading_reason = reason
+        with _background_lock:
+            existing_task = dict(_background_results.get("initial_analysis") or {})
+            if existing_task.get("status") == "completed":
+                _background_results.pop("initial_analysis", None)
+                st.session_state.initial_analysis_started = False
+    else:
+        st.session_state.initial_loading_reason = None
+    return previous != st.session_state.initial_analysis_done
+
+
+def _sync_backend_bootstrap_state(status_payload: dict[str, Any] | None) -> bool:
+    payload = status_payload or {}
+    if not payload:
+        return _set_backend_bootstrap_mode(
+            True, reason="백엔드 재연결 및 파이프라인 재기동 대기"
+        )
+    if _is_initial_dashboard_ready(payload):
+        return _set_backend_bootstrap_mode(False)
+    loading_state = _derive_initial_loading_state(payload)
+    return _set_backend_bootstrap_mode(
+        True,
+        reason=str(
+            loading_state.get("latest_phase")
+            or "백엔드 재기동 후 초기 파이프라인 재실행 중"
+        ),
+    )
+
+
+def _derive_initial_loading_state(
+    status_payload: dict[str, Any] | None,
+    initial_task: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = status_payload or {}
+    task = initial_task or {}
+    diagnostics = payload.get("backend_diagnostics") or {}
+    worker_runtime = diagnostics.get("worker_runtime") or {}
+    agent_statuses = payload.get("agent_statuses") or {}
+    activity_log = payload.get("agent_activity_log") or []
+    ollama_runtime = payload.get("ollama_runtime") or {}
+    results_count = len(payload.get("results") or [])
+    news_count = len(payload.get("news") or [])
+    vector_count = int(payload.get("vector_count", 0) or 0)
+    backend_reachable = bool(payload)
+    task_started = task.get("status") in {"running", "completed"}
+    full_analysis_finished = bool(payload.get("last_run_time")) or task.get("status") == "completed"
+    faiss_finished = bool(payload.get("last_faiss_time"))
+    ready = _is_initial_dashboard_ready(payload)
+
+    active_step = 0
+    if backend_reachable:
+        active_step = 1
+    if task_started:
+        active_step = 2
+    if results_count > 0 or news_count > 0 or worker_runtime.get("log_analysis_ran") or worker_runtime.get("news_cycle_ran"):
+        active_step = 3
+    if full_analysis_finished or vector_count > 0 or worker_runtime.get("log_vector_append_ran"):
+        active_step = 4
+    if faiss_finished or worker_runtime.get("faiss_cycle_ran"):
+        active_step = 5
+    if ready:
+        active_step = 5
+
+    progress_percent = [10, 22, 38, 62, 84, 100][active_step]
+    latest_phase = "백엔드 연결 대기"
+    if faiss_finished or worker_runtime.get("faiss_cycle_ran"):
+        latest_phase = "FAISS 로드 및 인덱스 동기화"
+    elif full_analysis_finished:
+        latest_phase = "초기 전체 분석 마무리"
+    elif news_count > 0 or worker_runtime.get("news_cycle_ran") or payload.get("news_crawl_running"):
+        latest_phase = "뉴스 수집 및 이슈 정리"
+    elif results_count > 0 or worker_runtime.get("log_analysis_ran"):
+        latest_phase = "로그 분석 진행"
+    elif task_started:
+        latest_phase = "초기 전체 분석 시작"
+    elif backend_reachable:
+        latest_phase = "백엔드 연결 확인"
+
+    phase_items = [
+        {"label": "백엔드 연결", "done": active_step > 1, "active": active_step == 1},
+        {"label": "초기 분석 시작", "done": active_step > 2, "active": active_step == 2},
+        {"label": "로그/뉴스 분석", "done": active_step > 3, "active": active_step == 3},
+        {"label": "전체 분석 완료", "done": active_step > 4, "active": active_step == 4},
+        {"label": "FAISS 로드", "done": ready, "active": active_step == 5 and not ready},
+    ]
+
+    live_cards: list[dict[str, str]] = []
+    log_status = agent_statuses.get("log_analyzer") or {}
+    news_status = agent_statuses.get("news_collector") or {}
+    vector_status = agent_statuses.get("vector_store") or agent_statuses.get("startup_sequence") or {}
+    if log_status or worker_runtime.get("log_analysis_ran"):
+        live_cards.append(
+            {
+                "label": "로그 분석",
+                "state": str(
+                    log_status.get("status")
+                    or ("running" if worker_runtime.get("log_analysis_ran") else "pending")
+                ),
+                "detail": str(
+                    log_status.get("detail")
+                    or f"최근 {int(worker_runtime.get('log_analysis_elapsed_ms', 0) or 0)}ms"
+                ),
+            }
+        )
+    if news_status or payload.get("news_crawl_running") or worker_runtime.get("news_cycle_ran"):
+        news_detail = str(news_status.get("detail") or "뉴스 수집 사이클 점검 중")
+        if payload.get("news_crawl_running"):
+            news_detail = (
+                f"본문 크롤링 {int(payload.get('news_crawl_success_count', 0) or 0)}/"
+                f"{int(payload.get('news_crawl_target_count', 0) or 0)}"
+            )
+        live_cards.append(
+            {
+                "label": "뉴스 수집",
+                "state": "running"
+                if payload.get("news_crawl_running")
+                else str(
+                    news_status.get("status")
+                    or ("running" if worker_runtime.get("news_cycle_ran") else "pending")
+                ),
+                "detail": news_detail,
+            }
+        )
+    if vector_status or worker_runtime.get("faiss_cycle_ran") or worker_runtime.get("log_vector_append_ran"):
+        live_cards.append(
+            {
+                "label": "벡터 동기화",
+                "state": str(
+                    vector_status.get("status")
+                    or (
+                        "running"
+                        if worker_runtime.get("faiss_cycle_ran") or worker_runtime.get("log_vector_append_ran")
+                        else "pending"
+                    )
+                ),
+                "detail": str(vector_status.get("detail") or f"현재 {vector_count} vectors"),
+            }
+        )
+    if str(ollama_runtime.get("status") or "") == "running":
+        live_cards.append(
+            {
+                "label": "Ollama 생성",
+                "state": "running",
+                "detail": str(ollama_runtime.get("agent") or "에이전트 응답 생성 중"),
+            }
+        )
+
+    activity_items: list[dict[str, str]] = []
+    for event in list(activity_log)[:5]:
+        activity_items.append(
+            {
+                "source": str(event.get("source") or "system"),
+                "status": str(event.get("status") or "pending"),
+                "detail": str(event.get("detail") or ""),
+                "timestamp": format_status_time(event.get("timestamp")),
+            }
+        )
+    return {
+        "active_step": active_step,
+        "progress_percent": progress_percent,
+        "latest_phase": latest_phase,
+        "results_count": results_count,
+        "news_count": news_count,
+        "vector_count": vector_count,
+        "worker_runtime": worker_runtime,
+        "phase_items": phase_items,
+        "live_cards": live_cards,
+        "activity_items": activity_items,
+        "loading_reason": st.session_state.get("initial_loading_reason") or latest_phase,
+        "ready": ready,
+    }
+
+
+def render_initial_loading_hero(
+    target,
+    loading_state: dict[str, Any],
+    eta_text: str,
+    elapsed_text: str,
+) -> None:
+    latest_phase = html.escape(str(loading_state.get("latest_phase") or "백엔드 준비"))
+    progress_percent = int(loading_state.get("progress_percent", 18) or 18)
+    results_count = int(loading_state.get("results_count", 0) or 0)
+    news_count = int(loading_state.get("news_count", 0) or 0)
+    vector_count = int(loading_state.get("vector_count", 0) or 0)
+    worker_runtime = loading_state.get("worker_runtime") or {}
+    phase_items = loading_state.get("phase_items") or []
+    loading_reason = html.escape(str(loading_state.get("loading_reason") or latest_phase))
+    live_cards = loading_state.get("live_cards") or []
+    activity_items = loading_state.get("activity_items") or []
+    phase_sub = html.escape(
+        ", ".join(
+            part
+            for part in [
+                f"로그 분석 {int(worker_runtime.get('log_analysis_elapsed_ms', 0) or 0)}ms" if worker_runtime.get("log_analysis_ran") else "",
+                f"벡터 적재 {int(worker_runtime.get('log_vector_append_elapsed_ms', 0) or 0)}ms" if worker_runtime.get("log_vector_append_ran") else "",
+                f"FAISS {int(worker_runtime.get('faiss_cycle_elapsed_ms', 0) or 0)}ms" if worker_runtime.get("faiss_cycle_ran") else "",
+            ]
+            if part
+        ) or "진행 신호를 수집하는 중"
+    )
+    stage_html = "".join(
+        f"<div class='loading-stage{' done' if item.get('done') else (' active' if item.get('active') else '')}'><span>{html.escape(str(item.get('label') or '-'))}</span></div>"
+        for item in phase_items
+    )
+    cards_html = "".join(
+        (
+            f"<div class='loading-live-card {html.escape(str(card.get('state') or 'pending'))}'>"
+            f"<div class='loading-live-label'>{html.escape(str(card.get('label') or '-'))}</div>"
+            f"<div class='loading-live-detail'>{html.escape(str(card.get('detail') or '-'))}</div>"
+            "</div>"
+        )
+        for card in live_cards[:4]
+    )
+    activity_html = "".join(
+        (
+            "<div class='loading-activity-row'>"
+            f"<div class='loading-activity-dot {html.escape(str(item.get('status') or 'pending'))}'></div>"
+            f"<div class='loading-activity-body'><div class='loading-activity-title'>{html.escape(str(item.get('source') or '-'))}</div>"
+            f"<div class='loading-activity-detail'>{html.escape(str(item.get('detail') or '-'))}</div></div>"
+            f"<div class='loading-activity-time'>{html.escape(str(item.get('timestamp') or '-'))}</div>"
+            "</div>"
+        )
+        for item in activity_items
+    )
+    html_block = f"""
+    <div class='loading-hero'>
+        <div class='loading-orbit'></div>
+        <div style='font-size:12px; font-weight:800; letter-spacing:0.08em; color:rgba(255,255,255,0.72); text-transform:uppercase;'>Live Bootstrap</div>
+        <div style='font-size:28px; font-weight:900; margin-top:6px;'>화면 로딩 중 백엔드 파이프라인을 처리하고 있습니다</div>
+        <div style='font-size:14px; line-height:1.65; margin-top:8px; color:rgba(255,255,255,0.84);'>현재 단계: {latest_phase}<br>{phase_sub}<br>상태 요약: {loading_reason}<br>예상 소요 {html.escape(eta_text)} · 경과 {html.escape(elapsed_text)}</div>
+        <div class='loading-stage-strip'>{stage_html}</div>
+        <div class='loading-progress-track'>
+            <div class='loading-progress-fill' style='width:{progress_percent}%;'></div>
+        </div>
+        <div class='loading-metrics'>
+            <div class='loading-metric'>
+                <div class='loading-metric-label'>Analyzed Logs</div>
+                <div class='loading-metric-value'>{results_count}</div>
+                <div class='loading-metric-sub'>증분 로그 포함</div>
+            </div>
+            <div class='loading-metric'>
+                <div class='loading-metric-label'>News Signals</div>
+                <div class='loading-metric-value'>{news_count}</div>
+                <div class='loading-metric-sub'>수집 및 요약 진행</div>
+            </div>
+            <div class='loading-metric'>
+                <div class='loading-metric-label'>FAISS Vectors</div>
+                <div class='loading-metric-value'>{vector_count}</div>
+                <div class='loading-metric-sub'>검색 인덱스 동기화</div>
+            </div>
+        </div>
+        <div class='loading-live-grid'>{cards_html or "<div class='loading-live-card pending'><div class='loading-live-label'>백엔드 부트스트랩</div><div class='loading-live-detail'>실시간 작업 이벤트를 기다리는 중</div></div>"}</div>
+        <div class='loading-activity-panel'>
+            <div class='loading-activity-head'>실시간 작업 로그</div>
+            {activity_html or "<div class='loading-activity-empty'>백엔드가 재기동되면 수행 단계가 여기서 실시간으로 움직입니다.</div>"}
+        </div>
+    </div>
+    """
+    target.markdown(html_block, unsafe_allow_html=True)
+
+
+def render_backend_restart_loading_overlay(
+    loading_state: dict[str, Any],
+    elapsed_text: str,
+) -> None:
+    render_loading_styles()
+    hero_box = st.empty()
+    latest_phase = html.escape(str(loading_state.get("latest_phase") or "백엔드 준비 중"))
+    explain_items = [
+        ("임베딩 워밍업", "로컬 sentence-transformers 모델과 임베딩 객체를 다시 깨웁니다."),
+        ("로그 분석", "저장된 로그를 다시 읽고 구조화해 분석 결과를 복구합니다."),
+        ("뉴스 수집", "신규 뉴스 수집과 본문 크롤링, 이슈 정리를 재가동합니다."),
+        ("FAISS 동기화", "로그/뉴스 벡터를 add_documents로 붙이고 검색 인덱스를 다시 맞춥니다."),
+    ]
+    explain_html = "".join(
+        (
+            "<div class='backend-restart-item'>"
+            f"<div class='backend-restart-item-title'>{html.escape(title)}</div>"
+            f"<div class='backend-restart-item-detail'>{html.escape(detail)}</div>"
+            "</div>"
+        )
+        for title, detail in explain_items
+    )
+    hero_html = f"""
+    <div class='backend-restart-overlay'>
+        <div class='backend-restart-shell'>
+            <div style='font-size:13px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:#67e8f9; margin-bottom:10px;'>Backend Restart Detected</div>
+            <div style='font-size:32px; font-weight:900; color:white; line-height:1.2;'>백엔드가 재기동되어 준비가 끝날 때까지 화면을 보류합니다</div>
+            <div style='font-size:14px; line-height:1.7; color:rgba(226,232,240,0.92); margin-top:10px;'>현재 단계: {latest_phase}<br>재기동 직후에는 이전 화면 데이터가 남아 있어도 그대로 보여주지 않고, 로그 분석과 벡터 동기화가 끝난 뒤에만 대시보드를 다시 엽니다.<br>경과 시간 {html.escape(elapsed_text)}</div>
+            <div class='backend-restart-explain'>{explain_html}</div>
+        </div>
+    </div>
+    """
+    hero_box.markdown(hero_html, unsafe_allow_html=True)
+    render_initial_loading_hero(hero_box, loading_state, eta_text="30~90초", elapsed_text=elapsed_text)
+
+
+def render_initial_loading_screen() -> None:
+    render_loading_styles()
+    hero_box = st.empty()
+    checklist_box = st.empty()
+    skeleton_box = st.empty()
+    try:
+        status_payload = get_backend_client().get_status()
+        sync_session_from_backend(status_payload)
+    except Exception:
+        status_payload = {}
+
+    with _background_lock:
+        initial_task = dict(_background_results.get("initial_analysis") or {})
+    started_at = parse_status_time(initial_task.get("started_at")) or datetime.datetime.now()
+    elapsed_seconds = max(0, int((datetime.datetime.now() - started_at).total_seconds()))
+    loading_state = _derive_initial_loading_state(status_payload, initial_task)
+    render_initial_loading_hero(
+        hero_box,
+        loading_state,
+        eta_text="30~90초",
+        elapsed_text=f"{elapsed_seconds}초",
+    )
+    render_loading_checklist(
+        checklist_box,
+        active_step=min(int(loading_state.get("active_step", 0) or 0), 4),
+        eta_text="30~90초",
+        elapsed_text=f"{elapsed_seconds}초",
+    )
+    render_loading_skeleton(skeleton_box)
+
+
+@fragment_decorator(run_every="2s")
+def render_live_initial_loading_fragment():
+    render_initial_loading_screen()
+
+
+@fragment_decorator(run_every="2s")
+def monitor_backend_bootstrap_fragment():
+    changed = False
+    status_payload: dict[str, Any] | None = None
+    try:
+        status_payload = get_backend_client().get_status()
+        sync_session_from_backend(status_payload)
+        changed = _sync_backend_bootstrap_state(status_payload)
+    except Exception:
+        changed = _sync_backend_bootstrap_state(None)
+    if not st.session_state.get("initial_analysis_done", False):
+        try:
+            get_backend_client().start_worker(interval_seconds=1)
+        except Exception:
+            pass
+        with _background_lock:
+            initial_task = dict(_background_results.get("initial_analysis") or {})
+        if initial_task.get("status") != "running" and not bool(
+            st.session_state.get("initial_analysis_started", False)
+        ):
+            launched = _start_initial_analysis_background(log_dir="data/logs")
+            if launched:
+                st.session_state.initial_analysis_started = True
+            with _background_lock:
+                initial_task = dict(_background_results.get("initial_analysis") or {})
+    if not st.session_state.get("initial_analysis_done", False):
+        started_at = parse_status_time(initial_task.get("started_at")) or datetime.datetime.now()
+        elapsed_seconds = max(0, int((datetime.datetime.now() - started_at).total_seconds()))
+        render_backend_restart_loading_overlay(
+            _derive_initial_loading_state(status_payload, initial_task),
+            elapsed_text=f"{elapsed_seconds}초",
+        )
+    if changed:
+        st.rerun()
 
 
 def render_loading_checklist(
@@ -2964,7 +4244,7 @@ def render_loading_checklist(
 def render_loading_skeleton(target):
     target.markdown(
         """
-                f"{persona['name']} 프롬프트 편집",
+        <div class='loading-panel'>
             <div class='loading-title'>대시보드 미리보기</div>
             <div class='loading-sub'>차트와 카드 영역을 준비하고 있습니다.</div>
             <div class='skeleton-grid'>
@@ -2986,6 +4266,8 @@ def get_backend_client() -> BackendClient:
         "backend_url",
         os.environ.get("BACKEND_URL", "http://127.0.0.1:18000"),
     )
+    global _shared_backend_url
+    _shared_backend_url = str(base_url).strip() or "http://127.0.0.1:18000"
     return BackendClient(base_url)
 
 
@@ -3008,6 +4290,8 @@ def get_backend_health() -> dict:
             h = client.health()
             # if health OK, persist to session and return
             st.session_state.backend_url = base
+            global _shared_backend_url
+            _shared_backend_url = base
             return h
         except Exception:
             continue
@@ -3016,6 +4300,13 @@ def get_backend_health() -> dict:
 
 def sync_session_from_backend(payload: dict):
     # 백엔드 응답을 Streamlit 세션 상태로 옮겨서 화면 어디서든 재사용합니다.
+    previous_ollama_runtime = st.session_state.get("ollama_runtime", {}) or {}
+    incoming_ollama_runtime = payload.get("ollama_runtime", previous_ollama_runtime) or {}
+    previous_started_at = str(previous_ollama_runtime.get("started_at") or "").strip()
+    previous_completed_at = str(previous_ollama_runtime.get("completed_at") or "").strip()
+    incoming_started_at = str(incoming_ollama_runtime.get("started_at") or "").strip()
+    incoming_completed_at = str(incoming_ollama_runtime.get("completed_at") or "").strip()
+    incoming_status = str(incoming_ollama_runtime.get("status") or "").strip()
     st.session_state.results = payload.get("results", st.session_state.get("results", []))
     st.session_state.issues = payload.get("issues", st.session_state.get("issues", []))
     st.session_state.news = payload.get("news", st.session_state.get("news", []))
@@ -3035,6 +4326,10 @@ def sync_session_from_backend(payload: dict):
     st.session_state.last_log_prompt_input_time = payload.get(
         "last_log_prompt_input_time", st.session_state.get("last_log_prompt_input_time")
     )
+    st.session_state.log_prompt_template_override = payload.get(
+        "log_prompt_template_override",
+        st.session_state.get("log_prompt_template_override"),
+    )
     st.session_state.latest_news_briefing = payload.get("latest_news_briefing", st.session_state.get("latest_news_briefing"))
     st.session_state.last_news_briefing_time = payload.get("last_news_briefing_time", st.session_state.get("last_news_briefing_time"))
     st.session_state.latest_news_prompt_input = payload.get(
@@ -3043,13 +4338,30 @@ def sync_session_from_backend(payload: dict):
     st.session_state.last_news_prompt_input_time = payload.get(
         "last_news_prompt_input_time", st.session_state.get("last_news_prompt_input_time")
     )
+    st.session_state.news_prompt_template_override = payload.get(
+        "news_prompt_template_override",
+        st.session_state.get("news_prompt_template_override"),
+    )
     st.session_state.agent_statuses = payload.get("agent_statuses", st.session_state.get("agent_statuses", {}))
     st.session_state.agent_activity_log = payload.get("agent_activity_log", st.session_state.get("agent_activity_log", []))
     st.session_state.vector_events = payload.get("vector_events", st.session_state.get("vector_events", []))
+    st.session_state.ollama_runtime = incoming_ollama_runtime
     st.session_state.last_faiss_time = payload.get("last_faiss_time", st.session_state.get("last_faiss_time"))
     st.session_state.backend_diagnostics = payload.get(
         "backend_diagnostics", st.session_state.get("backend_diagnostics", {})
     )
+    incoming_cardloan_debate = payload.get(
+        "cardloan_debate", st.session_state.get("cardloan_debate", {})
+    ) or {}
+    current_cardloan_debate = st.session_state.get("cardloan_debate", {}) or {}
+    incoming_cardloan_status = str(incoming_cardloan_debate.get("status") or "").strip()
+    should_keep_cardloan_debate = (
+        incoming_cardloan_status == "running"
+        or bool(st.session_state.get("cardloan_debate_task_id"))
+        or bool(current_cardloan_debate.get("round_results"))
+        or str(current_cardloan_debate.get("status") or "").strip() in {"running", "completed"}
+    )
+    st.session_state.cardloan_debate = incoming_cardloan_debate if should_keep_cardloan_debate else {}
     incoming_faiss_items = payload.get("full_faiss_items")
     if incoming_faiss_items:
         st.session_state.full_faiss_items = incoming_faiss_items
@@ -3065,6 +4377,44 @@ def sync_session_from_backend(payload: dict):
     st.session_state.news_crawl_failure_count = payload.get("news_crawl_failure_count", st.session_state.get("news_crawl_failure_count", 0))
     st.session_state.last_news_crawl_time = payload.get("last_news_crawl_time", st.session_state.get("last_news_crawl_time"))
     st.session_state.last_news_crawl_error = payload.get("last_news_crawl_error", st.session_state.get("last_news_crawl_error"))
+    agent_label = _format_ollama_toast_agent_label(
+        str(incoming_ollama_runtime.get("agent") or "")
+    )
+    model_label = str(incoming_ollama_runtime.get("model") or OLLAMA_LIGHTWEIGHT_MODEL)
+    if (
+        incoming_status == "running"
+        and incoming_started_at
+        and incoming_started_at != previous_started_at
+    ):
+        prompt_preview = str(incoming_ollama_runtime.get("prompt") or "").strip()
+        prompt_preview = re.sub(r"\s+", " ", prompt_preview)
+        if len(prompt_preview) > 72:
+            prompt_preview = prompt_preview[:72].rstrip() + "..."
+        if not prompt_preview:
+            prompt_preview = "프롬프트를 구성하고 응답 생성을 시작했습니다."
+        st.session_state.ollama_toast = {
+            "kicker": "OLLAMA STARTED",
+            "title": f"{agent_label} 분석 시작",
+            "msg": f"{model_label} · {prompt_preview}",
+            "ts": time.time(),
+        }
+    if (
+        incoming_status == "completed"
+        and incoming_completed_at
+        and incoming_completed_at != previous_completed_at
+    ):
+        response_preview = str(incoming_ollama_runtime.get("response_text") or "").strip()
+        response_preview = re.sub(r"\s+", " ", response_preview)
+        if len(response_preview) > 96:
+            response_preview = response_preview[:96].rstrip() + "..."
+        if not response_preview:
+            response_preview = "응답 생성을 완료했습니다."
+        st.session_state.ollama_toast = {
+            "kicker": "OLLAMA COMPLETED",
+            "title": f"{agent_label} 작업 완료",
+            "msg": f"{model_label} · {response_preview}",
+            "ts": time.time(),
+        }
     has_bootstrap_data = bool(
         payload.get("results") or payload.get("news") or payload.get("vector_count")
     )
@@ -3115,6 +4465,111 @@ def get_relative_minutes(value) -> str:
         return f"{minutes}분 전"
     hours = minutes // 60
     return f"{hours}시간 전"
+
+
+CARDLOAN_DEBATE_DEFAULT_QUESTION = (
+    "최신 뉴스 신호와 승인/거절 사례를 바탕으로 카드론 리스크 정책, 승인 전환 전략, 신규 상품 구조를 순차 토론하라."
+)
+
+
+def get_default_cardloan_debate_question() -> str:
+    return CARDLOAN_DEBATE_DEFAULT_QUESTION
+
+
+def get_cardloan_debate_agent_ids() -> set[str]:
+    return {str(persona.get("id") or "").strip() for persona in get_reviewer_personas()}
+
+
+def is_cardloan_debate_agent(agent: str) -> bool:
+    return str(agent or "").strip() in get_cardloan_debate_agent_ids()
+
+
+def get_cardloan_debate_thinking_message(current_stage: str, runtime: dict[str, Any], round_results: list[dict[str, Any]]) -> str:
+    runtime_text = str(runtime.get("response_text") or "").strip()
+    if runtime_text:
+        return runtime_text
+
+    stage_name = str(current_stage or "").strip()
+    started_at = parse_status_time(runtime.get("started_at") or runtime.get("updated_at"))
+    elapsed = 0 if started_at is None else max(0, int((datetime.datetime.now() - started_at).total_seconds()))
+    turn = (elapsed // 2) % 3
+
+    stage_scripts = {
+        "신용기획부": [
+            "음.. 잠시 데이터좀 확인하겠습니다. 최신 뉴스 신호에서 카드론 리스크가 먼저 커지는 지점을 보고 있습니다.",
+            "승인 정책에 먼저 손봐야 할 구간을 정리하는 중입니다. 규제, 금리, 연체 징후를 같이 대조하고 있습니다.",
+            "미래 리스크를 과하게 막지 않으면서도 선제 수정할 기준을 묶고 있습니다. 곧 첫 판단을 제시하겠습니다.",
+        ],
+        "금융영업부": [
+            "음.. 승인과 거절 사례를 나란히 다시 보고 있습니다. 어떤 고객을 전환할 수 있을지 바로 추리고 있습니다.",
+            "거절 고객을 승인 가능 고객으로 바꾸려면 조건을 얼마나 조정해야 하는지 비교 중입니다.",
+            "채널, 한도, 금리 조합을 다시 맞추고 있습니다. 전환 가능한 시나리오를 곧 정리하겠습니다.",
+        ],
+        "금융솔루션부": [
+            "잠시만요. 리스크 정책과 영업 전략이 부딪히는 부분을 상품 구조로 풀 수 있는지 보고 있습니다.",
+            "두 부서 의견을 엮어서 카드론 구조를 설계하는 중입니다. 위험 통제와 매출 확대를 같이 맞추고 있습니다.",
+            "상품 이름, 대상 고객, 수익 모델까지 한 번에 정리하고 있습니다. 마무리 제안을 곧 드리겠습니다.",
+        ],
+    }
+    fallback_scripts = [
+        "음.. 잠시 데이터좀 확인하겠습니다. 지금 관련 신호와 사례를 함께 정리하고 있습니다.",
+        "단계별 근거를 다시 맞춰 보고 있습니다. 조금만 더 기다리시면 자연스럽게 이어서 말씀드리겠습니다.",
+        "핵심 포인트를 압축하는 중입니다. 곧 정돈된 문장으로 이어서 답변드리겠습니다.",
+    ]
+    scripts = stage_scripts.get(stage_name, fallback_scripts)
+    if not round_results and not stage_name:
+        return "토론을 시작하면 최신 뉴스, 승인 사례, 거절 사례를 묶어서 세 부서가 순서대로 바로 이야기합니다."
+    return scripts[turn]
+
+
+def build_cardloan_live_broadcast(
+    current_stage: str,
+    runtime: dict[str, Any],
+    round_results: list[dict[str, Any]],
+    summary: str,
+    is_streaming: bool,
+) -> tuple[str, str]:
+    stage_name = str(current_stage or "대기").strip() or "대기"
+    runtime_text = str(runtime.get("response_text") or "").strip()
+    completed_count = len(round_results)
+    latest_name = str((round_results[-1] or {}).get("name") or "").strip() if round_results else ""
+
+    if is_streaming:
+        if runtime_text:
+            return (
+                f"{stage_name}가 근거를 묶어 실시간으로 발언 중입니다.",
+                f"현재 {completed_count}개 부서 의견이 정리됐고, 새 문장이 도착하는 즉시 아래 LIVE OLLAMA 본문에 이어서 반영됩니다.",
+            )
+        return (
+            f"{stage_name}가 데이터를 검토하며 다음 문장을 준비 중입니다.",
+            "첫 문장이 아직 없어도 흐름이 끊기지 않도록 내부 추론 멘트를 부드럽게 이어서 중계하고 있습니다.",
+        )
+
+    if round_results:
+        if str(summary or "").strip():
+            return (
+                f"{latest_name or stage_name} 단계까지 정리됐습니다.",
+                str(summary).strip(),
+            )
+        return (
+            "토론 라운드가 마무리됐습니다.",
+            f"총 {completed_count}개 부서 의견이 정리됐고, 아래 종합 메모와 단계별 상세 결과에서 이어서 확인할 수 있습니다.",
+        )
+
+    return (
+        "토론실이 대기 중입니다.",
+        "시작 버튼을 누르면 신용기획부부터 순서대로 실행되고, LIVE OLLAMA 영역이 단계별 현황을 실시간으로 중계합니다.",
+    )
+
+
+def refresh_cardloan_debate_runtime() -> None:
+    consume_ws_snapshot_buffer()
+    try:
+        payload = get_backend_client().get_status()
+        sync_session_from_backend(payload)
+    except Exception:
+        pass
+    _sync_cardloan_debate_background_tasks()
 
 
 def get_latest_failure_summary() -> tuple[str, str]:
@@ -3205,13 +4660,26 @@ def render_main_section_status_styles() -> None:
     round_results = st.session_state.get("reviewer_debate_round", []) or []
     main_sections = [
         "🤖 운영 현황",
-        "💬 AI 심사 전략",
-        "📰 뉴스 에이전트 입력",
-        "📄 로그 에이전트 입력",
+        "💬 AI 카드론 토론실",
+        "📄 대출상품 Dashboard",
         "🧠 Vector DB",
     ]
     selected_section = st.session_state.get("main_dashboard_section") or main_sections[0]
     active_index = main_sections.index(selected_section) if selected_section in main_sections else 0
+    tab_weights = [1.0, 1.28, 1.0, 0.94]
+    total_weight = sum(tab_weights)
+    usable_width = "(100% - 20px - 24px)"
+
+    def _tab_width(weight: float) -> str:
+        return f"calc({usable_width} * {weight / total_weight:.8f})"
+
+    tab_widths = [_tab_width(weight) for weight in tab_weights]
+    tab_offsets = [
+        "10px",
+        f"calc(10px + {tab_widths[0]} + 8px)",
+        f"calc(10px + {tab_widths[0]} + 8px + {tab_widths[1]} + 8px)",
+        f"calc(10px + {tab_widths[0]} + 8px + {tab_widths[1]} + 8px + {tab_widths[2]} + 8px)",
+    ]
 
     operations_badge = (
         f"{_compact_badge_metric(metrics['running_agents'])} RUN"
@@ -3219,33 +4687,30 @@ def render_main_section_status_styles() -> None:
         else f"{_compact_badge_metric(metrics['activity_events'])} EVT"
     )
     strategy_badge = f"{_compact_badge_metric(len(round_results))} MEMO" if round_results else "3 AI"
-    news_badge = f"{_compact_badge_metric(metrics['news_count'])} NEWS"
-    log_badge = f"{_compact_badge_metric(metrics['results_count'])} LOG"
+    dashboard_badge = f"{_compact_badge_metric(metrics['results_count'])} LOG"
     vector_badge = f"{_compact_badge_metric(metrics['vector_count'])} VEC"
 
     operations_dot = "#61f4de" if metrics["running_agents"] > 0 else "#8fb9d6"
     strategy_dot = "#f9a8d4" if round_results else "#c4b5fd"
-    news_dot = "#61f4de" if metrics["news_count"] > 0 else "#8fb9d6"
-    log_dot = "#ffbf69" if metrics["results_count"] > 0 else "#8fb9d6"
+    dashboard_dot = "#ffbf69" if metrics["results_count"] > 0 else "#8fb9d6"
     vector_dot = "#a5b4fc" if metrics["vector_count"] > 0 else "#8fb9d6"
 
     active_backgrounds = [
         "linear-gradient(120deg, rgba(151,244,222,0.16), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(13,45,62,0.98), rgba(18,68,84,0.94))",
         "linear-gradient(120deg, rgba(249,168,212,0.18), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(59,24,67,0.98), rgba(111,45,87,0.94))",
-        "linear-gradient(120deg, rgba(96,165,250,0.18), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(20,44,76,0.98), rgba(18,72,118,0.94))",
         "linear-gradient(120deg, rgba(255,191,105,0.18), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(71,40,20,0.98), rgba(132,77,27,0.94))",
         "linear-gradient(120deg, rgba(165,180,252,0.20), rgba(255,255,255,0.00) 42%), linear-gradient(135deg, rgba(34,33,79,0.98), rgba(60,61,133,0.94))",
     ]
-    active_accents = ["#61f4de", "#f9a8d4", "#60a5fa", "#ffbf69", "#a5b4fc"]
+    active_accents = ["#61f4de", "#f9a8d4", "#ffbf69", "#a5b4fc"]
     active_glows = [
         "rgba(97,244,222,0.28)",
         "rgba(249,168,212,0.30)",
-        "rgba(96,165,250,0.30)",
         "rgba(255,191,105,0.30)",
         "rgba(165,180,252,0.32)",
     ]
 
-    indicator_left = f"calc(10px + ({active_index} * ((100% - 20px - 32px) / 5 + 8px)))"
+    indicator_left = tab_offsets[active_index]
+    indicator_width = tab_widths[active_index]
     active_background = active_backgrounds[active_index]
     active_accent = active_accents[active_index]
     active_glow = active_glows[active_index]
@@ -3262,12 +4727,41 @@ def render_main_section_status_styles() -> None:
             position: relative;
         }}
 
+        [class*="st-key-main_dashboard_section"] [role="radiogroup"],
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.28fr) minmax(0, 1fr) minmax(0, 0.94fr);
+            gap: 8px;
+            align-items: stretch;
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"] {{
+            min-height: 70px;
+            padding-top: 25px;
+            padding-bottom: 12px;
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2),
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2) {{
+            min-height: 78px;
+            padding-top: 28px;
+            padding-bottom: 14px;
+        }}
+
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2) p,
+        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(2) div,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2) p,
+        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(2) div {{
+            font-size: 14px !important;
+        }}
+
         [class*="st-key-main_dashboard_section"]::after {{
             content: '';
             position: absolute;
             left: {indicator_left};
             bottom: 9px;
-            width: calc((100% - 20px - 32px) / 5);
+            width: {indicator_width};
             height: 4px;
             border-radius: 999px;
             background: linear-gradient(90deg, {active_accent}, rgba(255,255,255,0.92));
@@ -3289,16 +4783,11 @@ def render_main_section_status_styles() -> None:
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(3)::after,
         [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(3)::after {{
-            content: '{_css_content_escape(news_badge)}';
+            content: '{_css_content_escape(dashboard_badge)}';
         }}
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(4)::after,
         [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(4)::after {{
-            content: '{_css_content_escape(log_badge)}';
-        }}
-
-        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(5)::after,
-        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(5)::after {{
             content: '{_css_content_escape(vector_badge)}';
         }}
 
@@ -3314,16 +4803,11 @@ def render_main_section_status_styles() -> None:
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(3)::before,
         [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(3)::before {{
-            background: {news_dot};
+            background: {dashboard_dot};
         }}
 
         [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(4)::before,
         [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(4)::before {{
-            background: {log_dot};
-        }}
-
-        [class*="st-key-main_dashboard_section"] [data-baseweb="button-group"] button:nth-child(5)::before,
-        [class*="st-key-main_dashboard_section"] label[data-baseweb="radio"]:nth-child(5)::before {{
             background: {vector_dot};
         }}
 
@@ -3455,7 +4939,7 @@ def render_dashboard_hero(metrics: dict):
             <div class="hero-chip">
                 <div class="hero-chip-label">활성 Agent</div>
                 <div class="hero-chip-value">{metrics['running_agents']}</div>
-                <div class="hero-chip-detail">완료 {metrics['completed_agents']} · 실패 {metrics['failed_agents']}</div>
+                <div class="hero-chip-detail">완료 {metrics['completed_agents']}{'' if int(metrics.get('failed_agents', 0) or 0) <= 0 else f' · 실패 {metrics["failed_agents"]}'}</div>
             </div>
             <div class="hero-chip">
                 <div class="hero-chip-label">최근 전략 질문</div>
@@ -3471,10 +4955,10 @@ def render_dashboard_hero(metrics: dict):
 def render_dashboard_workflow(metrics: dict):
     statuses = st.session_state.get("agent_statuses", {}) or {}
     workflow_items = [
-        ("01", "신규 로그 수집", statuses.get("log_agent", {}).get("status", "pending"), "실시간 로그와 생성 로그를 수집하고 대표 케이스를 추립니다."),
+        ("01", "로그 브리핑 갱신", statuses.get("log_agent", {}).get("status", "pending"), "신규 로그를 요약하고 상품 패턴 기반 브리핑을 갱신합니다."),
         ("02", "뉴스 리스크 반영", statuses.get("news_agent", {}).get("status", "pending"), "시장 뉴스와 이슈 태그를 묶어 심사 영향도를 갱신합니다."),
         ("03", "규제/근거 결합", statuses.get("regulation_agent", {}).get("status", "pending"), "규제 문서와 검색 결과를 결합해 준수 여부를 해석합니다."),
-        ("04", "심사 전략 생성", statuses.get("decision_agent", {}).get("status", "pending"), "전략 질의와 Agent 요약을 합쳐 최종 판단 초안을 만듭니다."),
+        ("04", "전략 응답 합성", statuses.get("orchestrator", {}).get("status", "pending"), "별도 최종판단 Agent 없이 로그/뉴스/규제 결과를 코드에서 합성합니다."),
         ("05", "FAISS 동기화", statuses.get("vector_store", {}).get("status", "pending"), f"누적 벡터 {metrics['vector_count']}건 · 최근 이벤트 {metrics['vector_events']}건"),
     ]
 
@@ -3530,9 +5014,8 @@ def build_agent_flow_figure() -> go.Figure:
         {"id": "log_agent", "label": "Log Agent", "x": 0.27, "y": 0.76, "status": statuses.get("log_agent", {}).get("status", "pending"), "detail": status_detail("log_agent", str(latest_log)[:90])},
         {"id": "news_agent", "label": "News Agent", "x": 0.27, "y": 0.14, "status": statuses.get("news_agent", {}).get("status", "pending"), "detail": status_detail("news_agent", str(latest_news)[:90])},
         {"id": "regulation_agent", "label": "Regulation", "x": 0.51, "y": 0.46, "status": statuses.get("regulation_agent", {}).get("status", "pending"), "detail": status_detail("regulation_agent", "업로드 문서와 규제 문맥 통합")},
-        {"id": "orchestrator", "label": "Orchestrator", "x": 0.72, "y": 0.46, "status": statuses.get("orchestrator", {}).get("status", "pending"), "detail": status_detail("orchestrator", str(latest_question)[:90])},
-        {"id": "decision_agent", "label": "Decision", "x": 0.92, "y": 0.62, "status": statuses.get("decision_agent", {}).get("status", "pending"), "detail": status_detail("decision_agent", "최종 심사 응답과 전략 판단")},
-        {"id": "vector_store", "label": "Vector DB", "x": 0.92, "y": 0.24, "status": statuses.get("vector_store", {}).get("status", "pending"), "detail": status_detail("vector_store", f"누적 {vector_count} vectors | 최근 +{telemetry['latest_vector_added']}")},
+        {"id": "orchestrator", "label": "Orchestrator", "x": 0.74, "y": 0.46, "status": statuses.get("orchestrator", {}).get("status", "pending"), "detail": status_detail("orchestrator", str(latest_question)[:90] + " | 최종 응답은 코드 합성")},
+        {"id": "vector_store", "label": "Vector DB", "x": 0.92, "y": 0.32, "status": statuses.get("vector_store", {}).get("status", "pending"), "detail": status_detail("vector_store", f"누적 {vector_count} vectors | 최근 +{telemetry['latest_vector_added']}")},
     ]
     edges = [
         ("source_logs", "log_agent"),
@@ -3540,9 +5023,7 @@ def build_agent_flow_figure() -> go.Figure:
         ("log_agent", "regulation_agent"),
         ("news_agent", "regulation_agent"),
         ("regulation_agent", "orchestrator"),
-        ("orchestrator", "decision_agent"),
         ("orchestrator", "vector_store"),
-        ("decision_agent", "vector_store"),
     ]
     lookup = {node["id"]: node for node in nodes}
     color_map = {
@@ -3576,10 +5057,10 @@ def build_agent_flow_figure() -> go.Figure:
             textposition="bottom center",
             textfont={"color": "#e7f4ff", "size": 12, "family": "IBM Plex Sans KR"},
             marker={
-                "size": [36, 36, 48, 48, 54, 58, 50, 50],
+                "size": [36, 36, 48, 48, 54, 58, 50],
                 "color": [color_map.get(node["status"], "#8fb9d6") for node in nodes],
                 "line": {"width": 2, "color": "rgba(7,19,30,0.95)"},
-                "symbol": ["diamond", "diamond", "circle", "circle", "hexagon", "hexagon", "square", "square"],
+                "symbol": ["diamond", "diamond", "circle", "circle", "hexagon", "hexagon", "square"],
             },
             hovertemplate="<b>%{text}</b><br>%{customdata}<extra></extra>",
             customdata=[html.escape(node["detail"]) for node in nodes],
@@ -3838,6 +5319,11 @@ def render_live_insight_sections():
 
 def render_operations_showcase():
     metrics = build_overview_metrics()
+    failed_agents_detail = (
+        f"Failed {metrics['failed_agents']}건"
+        if int(metrics.get("failed_agents", 0) or 0) > 0
+        else f"Completed {metrics['completed_agents']}건"
+    )
     render_initial_analysis_badge()
     render_dashboard_hero(metrics)
     render_agent_flow_section()
@@ -3858,7 +5344,7 @@ def render_operations_showcase():
         )
     with metric_row_bottom[1]:
         render_dashboard_metric_card(
-            "Agent 상태", str(metrics["running_agents"]), "현재 실행 중인 Agent 수와 운영 온도", f"Failed {metrics['failed_agents']}건", "amber"
+            "Agent 상태", str(metrics["running_agents"]), "현재 실행 중인 Agent 수와 운영 온도", failed_agents_detail, "amber"
         )
 
     render_dashboard_workflow(metrics)
@@ -3878,21 +5364,6 @@ def render_operations_showcase():
         unsafe_allow_html=True,
     )
     render_live_insight_sections()
-
-
-def summarize_log_case_text(context_text: str) -> str:
-    text = str(context_text or "").strip()
-    if not text:
-        return ""
-
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    picked: list[str] = []
-    for line in lines:
-        if line.startswith("[") or "case_id=" in line or line.startswith("입력필드=") or line.startswith("출력필드="):
-            picked.append(line)
-    if not picked:
-        picked = lines[:3]
-    return "\n".join(picked[:4])
 
 
 def extract_product_summary_block(prompt_text: str) -> str:
@@ -3987,15 +5458,13 @@ def infer_product_codes_from_text(text: str) -> list[str]:
 
 
 def load_product_summary_payload() -> dict[str, object]:
-    summary_path = os.path.join(os.path.dirname(__file__), "data", "product_pattern_summary.json")
-    if not os.path.exists(summary_path):
-        return {}
-
     try:
-        with open(summary_path, encoding="utf-8") as fp:
-            return json.load(fp)
-    except (OSError, json.JSONDecodeError):
+        payload = load_product_pattern_summary(DEFAULT_SUMMARY_PATH)
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
         return {}
+    return payload
 
 
 def load_product_summary_cards_from_json(context_text: str = "") -> list[dict[str, object]]:
@@ -4055,10 +5524,15 @@ def load_product_summary_cards_from_json(context_text: str = "") -> list[dict[st
     return cards
 
 
+def _get_faiss_session_cache_version(store_name: str | None = None) -> str:
+    last_faiss_time = st.session_state.get("last_faiss_time") or ""
+    vector_count = st.session_state.get("vector_count") or ""
+    store_key = store_name or "all"
+    return f"{store_key}::{last_faiss_time}::{vector_count}"
+
+
 def render_log_product_summary_panel(prompt_text: str, updated_at, context_text: str = "") -> bool:
-    cards = parse_product_summary_cards(prompt_text)
-    if not cards:
-        cards = load_product_summary_cards_from_json(context_text)
+    cards = load_product_summary_cards_from_json("")
     if not cards:
         return False
 
@@ -4075,12 +5549,12 @@ def render_log_product_summary_panel(prompt_text: str, updated_at, context_text:
     ">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px;">
             <div>
-                <div style="font-size:12px; font-weight:800; letter-spacing:0.08em; color:#0f766e; text-transform:uppercase;">Prompt Signal</div>
+                <div style="font-size:12px; font-weight:800; letter-spacing:0.08em; color:#0f766e; text-transform:uppercase;">FAISS Summary</div>
                 <div style="font-size:18px; font-weight:900; color:#0f172a; margin-top:3px;">상품별 승인/거절 패턴이 이렇게 요약돼 들어갑니다</div>
             </div>
             <div style="padding:6px 10px; border-radius:999px; font-size:11px; font-weight:800; color:#155e75; background:rgba(255,255,255,0.72); border:1px solid rgba(14,116,144,0.14); white-space:nowrap;">최근 반영 {html.escape(format_status_time(updated_at))}</div>
         </div>
-        <div style="font-size:13px; line-height:1.7; color:#334155;">product_pattern_summary.json 전체를 그대로 노출하는 대신, 현재 로그 프롬프트에 실제 주입된 상품만 골라 승인율, 거절율, 대표 패턴, 거절 사유 코드 중심으로 재구성한 화면입니다.</div>
+        <div style="font-size:13px; line-height:1.7; color:#334155;">data/product_pattern_summary.json을 읽어서 현재 로그 맥락에 맞는 상품 요약만 바로 보여주는 화면입니다.</div>
     </div>
     """
     st.markdown(header_html, unsafe_allow_html=True)
@@ -4164,7 +5638,7 @@ def render_log_product_summary_panel(prompt_text: str, updated_at, context_text:
 
     if payload:
         generated_at = format_status_time((payload.get("generated_at") or ""))
-        with st.expander("product_pattern_summary.json 전체 데이터 보기", expanded=False):
+        with st.expander("상품 패턴 요약 전체 데이터 보기", expanded=False):
             st.caption(f"생성 시각: {generated_at}")
             st.json(payload, expanded=False)
 
@@ -4340,40 +5814,40 @@ def render_strategy_response(message):
 def get_reviewer_personas() -> list[dict[str, str]]:
     return [
         {
-            "id": "conservative",
+            "id": "credit_planning_agent",
             "emoji": "🧑‍💼",
-            "name": "보수적 심사관",
-            "display": "신용기획부 직원",
-            "tone": "리스크 우선",
+            "name": "신용기획부",
+            "display": "신용기획부",
+            "tone": "리스크 정책",
             "accent": "#ff8f8f",
             "avatar_class": "conservative",
-            "tagline": "부실 조짐이 보이면 바로 제동을 겁니다.",
-            "description": "연체 가능성, 규제 위반, 부실화 신호를 먼저 보는 성향입니다. 승인보다 방어 논리를 우선합니다.",
-            "default_prompt": "너는 신용기획부 소속의 매우 보수적인 심사관이다. 대출 심사에서 손실 가능성, 부도 가능성, 규제 위반, 한도 과다, 금리 리스크를 최우선으로 본다. 승인 가능성이 있더라도 먼저 거절 사유와 보완 필요사항을 제시하라. 최종 의견은 위험요인 중심으로 단호하게 작성하라.",
+            "tagline": "미래 리스크를 먼저 보고 심사 룰을 선제적으로 바꿉니다.",
+            "description": "뉴스 신호와 시장 변화를 읽어 미래 리스크를 예측하고, 현재 심사 정책의 취약점과 보완 룰을 설계하는 역할입니다.",
+            "default_prompt": "너는 신용기획부 리스크 정책 담당자다. 목표: 미래 리스크를 선제적으로 차단하고 카드론 심사 기준을 개선하라. 시장 신호 TOP5를 바탕으로 향후 발생할 주요 리스크를 예측하고, 현재 심사 정책의 취약점을 도출하고, 보완해야 할 심사 기준과 구체적 룰을 작성하라. 반드시 JSON만 출력하라.",
         },
         {
-            "id": "sales",
+            "id": "sales_strategy_agent",
             "emoji": "😎",
-            "name": "영업 심사관",
-            "display": "금융영업부 직원",
-            "tone": "승인 우선",
+            "name": "금융영업부",
+            "display": "금융영업부",
+            "tone": "전환 영업",
             "accent": "#61f4de",
             "avatar_class": "sales",
-            "tagline": "조건만 맞추면 고객은 놓치지 않습니다.",
-            "description": "고객 유지, 승인율, 매출 확대를 중요하게 보는 성향입니다. 거절보다 조건부 승인과 완화책을 찾습니다.",
-            "default_prompt": "너는 금융영업부 소속의 공격적인 영업 심사관이다. 고객 유지, 승인율 개선, 한도 제안, 조건부 승인 전략을 우선한다. 리스크가 있더라도 대안을 찾아 승인 가능한 구조를 제시하라. 최종 의견은 승인 방향의 논리와 실무적 완화 조건을 중심으로 작성하라.",
+            "tagline": "거절 고객도 승인 가능한 구조로 다시 바꿔냅니다.",
+            "description": "승인 사례와 거절 사례의 차이를 비교해 현재 고객의 거절 원인을 좁히고, 승인율과 수익, 영업 채널 전략을 함께 설계합니다.",
+            "default_prompt": "너는 금융영업부 전략 담당자다. 목표: 거절된 고객을 승인 가능한 고객으로 전환하고 승인율과 수익, 영업 채널을 동시에 고려하라. 현재 고객, 고금액 승인 사례, 유사 거절 사례를 비교해 핵심 원인과 전환 조건, 실행 전략을 JSON으로 작성하라.",
         },
         {
-            "id": "product",
+            "id": "solution_planning_agent",
             "emoji": "⚖️",
-            "name": "상품기획 심사관",
-            "display": "금융솔루션부 직원",
-            "tone": "상품 전략",
+            "name": "금융솔루션부",
+            "display": "금융솔루션부",
+            "tone": "상품 기획",
             "accent": "#ffbf69",
             "avatar_class": "product",
-            "tagline": "이 건을 어떤 상품으로 설계할지가 핵심입니다.",
-            "description": "개별 건 승인 여부보다 어떤 상품 구조와 정책이 맞는지 보는 성향입니다. 신상품 적합성과 전략적 확장성을 따집니다.",
-            "default_prompt": "너는 금융솔루션부 소속의 상품기획 담당자다. 이 건이 어떤 금융상품 구조와 맞는지, 기존 정책을 어떻게 조정하면 더 적합한지, 신상품 기획 관점에서 어떤 실험이 가능한지를 제안하라. 최종 의견은 상품 전략과 구조적 개선 방향을 중심으로 작성하라.",
+            "tagline": "리스크와 영업 충돌을 상품 구조로 해결합니다.",
+            "description": "신용기획부의 리스크 정책과 금융영업부의 전환 전략 충돌을 풀고, 카드론 매출을 키우는 신상품 구조와 기존 상품 개선안을 설계합니다.",
+            "default_prompt": "너는 금융솔루션부 상품 기획자다. 목표: 리스크를 통제하면서도 카드론 매출을 확대하는 상품을 설계하라. 리스크 정책과 영업 전략의 충돌 지점을 분석하고, 이를 해결할 상품 구조, 신상품 1개, 기존 상품 개선안을 반드시 JSON으로 작성하라.",
         },
     ]
 
@@ -4431,6 +5905,10 @@ def ensure_strategy_debate_state() -> None:
         st.session_state.reviewer_prompt_dialog_open = False
     if "reviewer_prompt_saved_feedback" not in st.session_state:
         st.session_state.reviewer_prompt_saved_feedback = {}
+    if "cardloan_debate" not in st.session_state:
+        st.session_state.cardloan_debate = {}
+    if "cardloan_debate_task_id" not in st.session_state:
+        st.session_state.cardloan_debate_task_id = None
 
 
 def open_reviewer_prompt_dialog(reviewer_id: str) -> None:
@@ -4534,36 +6012,89 @@ else:
 
 def build_reviewer_question(persona: dict[str, str], user_question: str, custom_prompt: str) -> str:
     return (
-        f"[역할]\n{custom_prompt.strip()}\n\n"
-        "[출력 지시]\n"
-        f"너는 반드시 {persona['display']} 입장에서만 판단해야 한다. "
-        "최종 결론에서는 자신의 부서 성향이 드러나야 하고, 승인/보류/거절 중 하나의 스탠스를 분명히 드러내라. "
-        "리스크, 기회, 보완조건, 한줄 결론을 포함해 답하라.\n\n"
-        f"[사용자 질문]\n{user_question.strip()}"
+        f"[부서 역할 프롬프트]\n{custom_prompt.strip()}\n\n"
+        f"[토론 주제]\n{user_question.strip()}\n\n"
+        "[실행 메모]\n"
+        "실제 카드론 토론실 실행 시에는 이 역할 프롬프트 위에 FAISS에서 검색한 시장 신호, 승인/거절 사례, 앞단계 결과가 자동으로 주입됩니다. "
+        "이 미리보기는 부서 기본 임무와 토론 주제만 보여줍니다."
     )
 
 
 def summarize_debate_result(response_payload: dict) -> tuple[str, str, str]:
-    sections = response_payload.get("sections", {}) if isinstance(response_payload, dict) else {}
-    final_decision = sections.get("final_decision") or response_payload.get("answer") or "분석 결과가 없습니다."
-    log_text = sections.get("log_analysis", "")
-    news_text = sections.get("news_analysis", "")
-    regulation_text = sections.get("regulation_analysis", "")
-    preview = " ".join(str(final_decision).split())[:180]
-    evidence = " / ".join(
-        [text for text in [log_text[:60], news_text[:60], regulation_text[:60]] if text]
-    )
-    if not evidence:
-        evidence = "근거 요약이 없습니다."
-    if "거절" in final_decision:
-        verdict = "거절/보수"
-    elif "조건부 승인" in final_decision:
-        verdict = "조건부 승인"
-    elif "승인" in final_decision:
-        verdict = "승인"
+    if not isinstance(response_payload, dict):
+        return "판단 대기", str(response_payload or "분석 결과가 없습니다."), "근거 요약이 없습니다."
+
+    parsed = response_payload.get("parsed") or {}
+    raw_text = str(response_payload.get("raw_text") or response_payload.get("answer") or "").strip()
+    preview = " ".join(str(response_payload.get("preview") or raw_text or "분석 결과가 없습니다.").split())[:180]
+    evidence = " ".join(str(response_payload.get("evidence") or raw_text or "근거 요약이 없습니다.").split())[:220]
+    verdict = str(response_payload.get("verdict") or parsed.get("current_status") or "판단 대기").strip() or "판단 대기"
+    return verdict, preview, evidence
+
+
+def build_cardloan_stage_spoken_message(item: dict[str, Any]) -> str:
+    preview = str(item.get("preview") or "").strip()
+    evidence = str(item.get("evidence") or "").strip()
+    if preview and evidence and evidence != preview:
+        return f"{preview}\n{evidence}"
+    return preview or evidence or "아직 발언이 정리되지 않았습니다."
+
+
+def build_cardloan_live_display_text(
+    current_stage: str,
+    runtime_text: str,
+    thinking_text: str,
+    broadcast_body: str,
+    round_results: list[dict[str, Any]],
+    is_streaming: bool,
+) -> str:
+    text = str(runtime_text or "").strip()
+    if not text:
+        return thinking_text
+
+    stripped = text.lstrip()
+    looks_like_json = stripped.startswith("{") or stripped.startswith("[") or ('"' in stripped[:80] and ":" in stripped[:120])
+    if looks_like_json:
+        if is_streaming:
+            return broadcast_body or thinking_text
+        if round_results:
+            return build_cardloan_stage_spoken_message(round_results[-1])
+        return thinking_text
+    return text
+
+
+def build_cardloan_typewriter_text(
+    text: str,
+    message_key: str,
+    *,
+    is_streaming: bool,
+) -> tuple[str, bool]:
+    target_text = str(text or "")
+    if not target_text:
+        return "", False
+
+    cache = dict(st.session_state.get("cardloan_live_typewriter", {}) or {})
+    cached_key = str(cache.get("key") or "")
+    cached_target = str(cache.get("target") or "")
+    cached_visible_len = int(cache.get("visible_len") or 0)
+    growth_step = 28 if is_streaming else 52
+
+    if cached_key != message_key or cached_target != target_text:
+        inherited_visible_len = 0
+        if target_text.startswith(cached_target):
+            inherited_visible_len = len(cached_target)
+        elif cached_target.startswith(target_text):
+            inherited_visible_len = min(len(target_text), cached_visible_len)
+        visible_len = min(len(target_text), max(inherited_visible_len, growth_step))
     else:
-        verdict = "판단 대기"
-    return verdict, preview, evidence[:220]
+        visible_len = min(len(target_text), cached_visible_len + growth_step)
+
+    st.session_state.cardloan_live_typewriter = {
+        "key": message_key,
+        "target": target_text,
+        "visible_len": visible_len,
+    }
+    return target_text[:visible_len], visible_len < len(target_text)
 
 
 def build_debate_consensus(personas: list[dict[str, str]], round_results: list[dict]) -> str:
@@ -4571,46 +6102,128 @@ def build_debate_consensus(personas: list[dict[str, str]], round_results: list[d
         return "아직 토론 결과가 없습니다."
     lines = []
     for item in round_results:
-        lines.append(f"{item['persona']['name']}: {item['verdict']} · {item['preview']}")
-    stances = [item["verdict"] for item in round_results]
-    if any("거절" in stance for stance in stances) and any("승인" in stance for stance in stances):
-        title = "의견 충돌: 리스크와 성장 관점이 정면으로 갈렸습니다."
-    elif all("승인" in stance or "조건부" in stance for stance in stances):
-        title = "대체로 승인 기조이지만, 조건 정교화가 필요합니다."
-    else:
-        title = "보수적 의견이 우세하며 추가 보완 자료가 필요합니다."
+        lines.append(f"{item['name']}: {item['verdict']} · {item['preview']}")
+    title = "신용기획부 → 금융영업부 → 금융솔루션부 순서로 카드론 전략이 정리되었습니다."
     return title + "\n\n" + "\n".join(lines)
 
 
-def render_role_based_strategy_tab():
-    ensure_strategy_debate_state()
-    personas = get_reviewer_personas()
-    persona_map = {persona["id"]: persona for persona in personas}
-    selected_id = st.session_state.get("selected_reviewer_id", personas[0]["id"])
-    selected_persona = persona_map.get(selected_id, personas[0])
+def _sync_cardloan_debate_background_tasks() -> None:
+    try:
+        with _background_lock:
+            tasks = list(_background_results.items())
+        for task_id, payload in tasks:
+            if not str(task_id).startswith("cardloan_debate_"):
+                continue
+            if payload.get("status") == "completed":
+                result = payload.get("result") or {}
+                st.session_state.reviewer_debate_round = result.get("round_results", []) or []
+                st.session_state.strategy_debate_status = f"최근 카드론 토론 완료 · {format_status_time(result.get('completed_at'))}"
+                st.session_state.cardloan_debate_task_id = None
+                with _background_lock:
+                    _background_results.pop(task_id, None)
+            elif payload.get("status") == "failed":
+                st.session_state.strategy_debate_status = f"카드론 토론실 실패 · {payload.get('error', '-')}"
+                st.session_state.cardloan_debate_task_id = None
+                with _background_lock:
+                    _background_results.pop(task_id, None)
+    except Exception:
+        pass
 
-    st.markdown(
-        """
-        <div class="debate-hero">
-            <div class="debate-kicker">Role-based Multi-Agent</div>
-            <div class="debate-title">심사관 흉내내는 AI 토론실</div>
-            <div class="debate-subtitle">세 명의 서로 다른 성향의 심사관이 같은 안건을 두고 각자 의견을 제시합니다. 카드를 누르면 해당 심사관의 Ollama 질의 프롬프트를 팝업에서 바로 수정할 수 있습니다.</div>
-            <div class="debate-wave"><span></span><span></span><span></span><span></span><span></span></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+def _start_cardloan_debate_background_task(question: str, reviewer_prompts: dict[str, str]) -> None:
+    task_id = f"cardloan_debate_{int(time.time() * 1000)}"
+    st.session_state.cardloan_debate_task_id = task_id
+    st.session_state.reviewer_debate_round = []
+    st.session_state.strategy_debate_status = "카드론 토론실을 시작했습니다. Ollama가 3개 부서를 순서대로 실행합니다."
+    st.session_state.cardloan_debate = {
+        "status": "running",
+        "question": question,
+        "summary": "신용기획부 단계 준비 중",
+        "current_stage": "신용기획부",
+        "round_results": [],
+    }
+
+    backend_url = str(st.session_state.get("backend_url") or os.environ.get("BACKEND_URL", "http://127.0.0.1:18000")).strip() or "http://127.0.0.1:18000"
+
+    def _run_task(task_id: str, backend_url: str, question: str, reviewer_prompts: dict[str, str]) -> None:
+        try:
+            client = BackendClient(backend_url)
+            result = client.start_cardloan_debate(question, reviewer_prompts=reviewer_prompts)
+            with _background_lock:
+                _background_results[task_id] = {
+                    "status": "completed",
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "result": result,
+                }
+        except Exception as error:
+            with _background_lock:
+                _background_results[task_id] = {
+                    "status": "failed",
+                    "updated_at": datetime.datetime.now().isoformat(),
+                    "error": str(error),
+                }
+
+    threading.Thread(
+        target=_run_task,
+        args=(task_id, backend_url, question, dict(reviewer_prompts or {})),
+        daemon=True,
+    ).start()
+
+
+def render_cardloan_debate_stage_detail(item: dict[str, Any]) -> None:
+    response = item.get("response") or {}
+    parsed = response.get("parsed") or {}
+    raw_text = str(response.get("raw_text") or response.get("answer") or "").strip()
+    st.markdown(f"#### {item.get('stage_title') or item.get('name')}")
+    st.caption(f"생성 시각: {format_status_time(item.get('generated_at'))}")
+    if parsed:
+        st.json(parsed)
+    elif raw_text:
+        st.code(raw_text, language="json")
+    else:
+        st.info("아직 결과가 없습니다.")
+    if raw_text:
+        with st.expander("원본 Ollama 응답", expanded=False):
+            st.code(raw_text, language="json")
+
+
+def render_cardloan_reviewer_cards(personas: list[dict[str, str]]) -> None:
+    debate_state = st.session_state.get("cardloan_debate", {}) or {}
+    round_results = debate_state.get("round_results") or st.session_state.get("reviewer_debate_round", []) or []
+    current_stage = str(debate_state.get("current_stage") or "").strip()
+    raw_runtime = st.session_state.get("ollama_runtime", {}) or {}
+    runtime = raw_runtime if is_cardloan_debate_agent(raw_runtime.get("agent")) else {}
+    thinking_text = get_cardloan_debate_thinking_message(current_stage, runtime, round_results)
+    statuses = st.session_state.get("agent_statuses", {}) or {}
+    result_map = {str(item.get("persona_id") or ""): item for item in round_results}
 
     reviewer_cols = st.columns(3)
     for column, persona in zip(reviewer_cols, personas):
-        is_active = persona["id"] == selected_id
+        is_selected = persona["id"] == st.session_state.get("selected_reviewer_id", personas[0]["id"])
+        is_speaking = persona["name"] == current_stage and str(debate_state.get("status") or "") == "running"
+        info = statuses.get(persona["id"], {}) or {}
+        status_code = str(
+            info.get("status")
+            or (
+                "running"
+                if is_speaking
+                else "completed" if persona["id"] in result_map else "pending"
+            )
+        )
+        status_label, status_color, _ = get_agent_status_palette(status_code)
+        result = result_map.get(persona["id"], {})
+        speech_text = str(result.get("preview") or info.get("detail") or persona["tagline"] or "대기 중").strip()
+        if is_speaking and (not speech_text or speech_text == "대기 중"):
+            speech_text = thinking_text
+        is_thinking = is_speaking and not str(result.get("preview") or "").strip()
+
         with column:
             column.markdown(
                 f"""
-                <div class="reviewer-card {persona['avatar_class']}{' active' if is_active else ''}">
+                <div class="reviewer-card {persona['avatar_class']}{' active' if is_selected else ''}{' speaking' if is_speaking else ''}">
                     <div class="reviewer-role">{persona['emoji']} Reviewer</div>
                     <div class="reviewer-avatar-wrap">
-                        <div class="reviewer-avatar {persona['avatar_class']}{' active badge-speaking' if is_active else ''}">
+                        <div class="reviewer-avatar {persona['avatar_class']}{' active badge-speaking' if is_speaking else ''}">
                             <div class="reviewer-avatar-hair"></div>
                             <div class="reviewer-avatar-head"></div>
                             <div class="reviewer-avatar-eye left"></div>
@@ -4625,8 +6238,15 @@ def render_role_based_strategy_tab():
                         </div>
                     </div>
                     <div class="reviewer-desc">{persona['description']}</div>
-                    <div class="reviewer-select-note">"{persona['tagline']}"</div>
-                    <div class="reviewer-select-note cta">프롬프트 편집을 눌러 이 심사관의 성향을 조정하세요</div>
+                    <div class="reviewer-live-head">
+                        <div class="reviewer-select-note">\"{html.escape(persona['tagline'])}\"</div>
+                        <span class="reviewer-status-chip" style="color:{status_color};">{html.escape(status_label)}</span>
+                    </div>
+                    <div class="reviewer-live-speech{' speaking' if is_speaking else ''}">
+                        <div class="reviewer-live-label">{html.escape('Now Speaking' if is_speaking else 'Latest Note')}</div>
+                        <div class="reviewer-live-text{' thinking' if is_thinking else ''}">{html.escape(speech_text[:220] or '대기 중')}</div>
+                        {'<div class="reviewer-live-dots"><span></span><span></span><span></span></div>' if is_speaking else ''}
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -4635,115 +6255,108 @@ def render_role_based_strategy_tab():
                 "프롬프트 편집 열기",
                 key=f"edit_reviewer_prompt_{persona['id']}",
                 use_container_width=True,
-                type="primary" if is_active else "secondary",
+                type="primary" if is_selected else "secondary",
             ):
                 open_reviewer_prompt_dialog(persona["id"])
 
-    if st.session_state.get("reviewer_prompt_dialog_open"):
-        render_reviewer_prompt_dialog(selected_persona)
 
-    spotlight_col, control_col = st.columns([1.05, 0.95])
-    with spotlight_col:
-        prompt_preview = st.session_state.reviewer_prompts.get(selected_id, selected_persona["default_prompt"])
-        prompt_preview = " ".join(str(prompt_preview).split())[:210]
-        st.markdown(
-            f"""
-            <div class="prompt-panel selected-reviewer-stage {selected_persona['avatar_class']}">
-                <div class="selected-reviewer-head">
-                    <div>
-                        <div class="prompt-panel-title">{selected_persona['name']} 발언 준비</div>
-                        <div class="prompt-panel-subtitle">선택된 심사관이 어떤 기준으로 판단하는지 먼저 확인하고, 필요하면 팝업에서 역할 프롬프트를 수정할 수 있습니다.</div>
-                    </div>
-                    <div class="selected-reviewer-chip {selected_persona['avatar_class']}">{selected_persona['display']} · {selected_persona['tone']}</div>
+def render_cardloan_debate_live_panel(personas: list[dict[str, str]]) -> None:
+    debate_state = st.session_state.get("cardloan_debate", {}) or {}
+    round_results = debate_state.get("round_results") or st.session_state.get("reviewer_debate_round", []) or []
+    current_stage = str(debate_state.get("current_stage") or "대기").strip() or "대기"
+    summary = str(debate_state.get("summary") or st.session_state.get("strategy_debate_status") or "").strip()
+    raw_runtime = st.session_state.get("ollama_runtime", {}) or {}
+    runtime = raw_runtime if is_cardloan_debate_agent(raw_runtime.get("agent")) else {}
+    runtime_agent = _format_ollama_toast_agent_label(str(runtime.get("agent") or ""))
+    runtime_text = str(runtime.get("response_text") or "").strip()
+    runtime_status = str(runtime.get("status") or ("running" if str(debate_state.get("status") or "") == "running" else "idle"))
+    runtime_label, runtime_color, _ = get_agent_status_palette(runtime_status)
+    is_streaming = runtime_status == "running" or str(debate_state.get("status") or "") == "running"
+    thinking_text = get_cardloan_debate_thinking_message(current_stage, runtime, round_results)
+    live_text = runtime_text or thinking_text
+    live_helper = "실시간 답변 생성 중" if is_streaming else "최근 생성 결과"
+    broadcast_title, broadcast_body = build_cardloan_live_broadcast(
+        current_stage,
+        runtime,
+        round_results,
+        summary,
+        is_streaming,
+    )
+    live_text = build_cardloan_live_display_text(
+        current_stage,
+        runtime_text,
+        thinking_text,
+        broadcast_body,
+        round_results,
+        is_streaming,
+    )
+    live_message_key = "|".join(
+        [
+            str(current_stage or ""),
+            str(runtime.get("updated_at") or debate_state.get("updated_at") or ""),
+            str(runtime_status or ""),
+            str(len(round_results)),
+            str(len(live_text)),
+        ]
+    )
+    live_text_typed, is_typing_live_text = build_cardloan_typewriter_text(
+        live_text,
+        live_message_key,
+        is_streaming=is_streaming,
+    )
+    live_text_html = html.escape(live_text_typed).replace("\n", "<br>")
+    live_cursor_html = '<span class="debate-live-cursor"></span>' if is_typing_live_text or is_streaming else ""
+    live_caption = (
+        "JSON 원문 대신 현재 단계가 실제로 어떤 판단을 만들고 있는지 자연어 문장으로 중계합니다."
+        if is_streaming
+        else "완료된 뒤에도 화면에는 JSON 대신 읽기 쉬운 문장으로 정리된 발언을 우선 보여줍니다."
+    )
+
+    st.markdown(
+        f"""
+        <div class="debate-status">
+            <div class="debate-status-title">현재 단계 · {html.escape(current_stage)}</div>
+            <div class="debate-status-text">{html.escape(summary or '카드론 토론실 대기 중입니다.')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class="debate-live-shell">
+            <div class="debate-live-header">
+                <div>
+                    <div class="debate-live-kicker">Live Ollama</div>
+                    <div class="debate-live-title">{html.escape(runtime_agent or current_stage or '카드론 토론실')}</div>
                 </div>
-                <div class="selected-reviewer-bubble {selected_persona['avatar_class']}">“{selected_persona['tagline']}”</div>
-                <div class="selected-reviewer-preview {selected_persona['avatar_class']}">
-                    <div class="selected-reviewer-preview-label">Current Prompt Snapshot</div>
-                    <div class="selected-reviewer-preview-text">{html.escape(prompt_preview)}...</div>
-                </div>
+                <span style="padding:6px 10px; border-radius:999px; font-size:11px; font-weight:800; background:rgba(255,255,255,0.12); color:{runtime_color}; border:1px solid rgba(255,255,255,0.12);">{html.escape(runtime_label)}</span>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.caption("프롬프트 수정은 상단 심사관 카드의 편집 영역에서 실행됩니다.")
-
-    with control_col:
-        strategy_question = st.text_area(
-            "토론 안건",
-            value=st.session_state.get("strategy_debate_question", ""),
-            height=190,
-            key="strategy_debate_question_editor",
-        )
-        st.session_state.strategy_debate_question = strategy_question
-        action_col_a, action_col_b = st.columns(2)
-        with action_col_a:
-            run_clicked = st.button("3인 토론 시작", use_container_width=True, type="primary")
-        with action_col_b:
-            if st.button("선택 프롬프트 기본값 복원", use_container_width=True):
-                st.session_state.reviewer_prompts[selected_id] = selected_persona["default_prompt"]
-                save_reviewer_prompt_store(st.session_state.reviewer_prompts)
-                st.session_state[f"reviewer_prompt_editor_dialog_{selected_id}"] = selected_persona["default_prompt"]
-
-    if run_clicked and strategy_question.strip():
-        round_results: list[dict] = []
-        status_placeholder = st.empty()
-        for persona in personas:
-            status_placeholder.markdown(
-                f"""
-                <div class="debate-status">
-                    <div class="debate-status-title">{persona['name']} 의견 생성 중</div>
-                    <div class="debate-status-text">{persona['display']} 관점에서 문맥 검색과 심사 판단을 수행하고 있습니다.</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            composed_question = build_reviewer_question(
-                persona,
-                strategy_question,
-                st.session_state.reviewer_prompts.get(persona["id"], persona["default_prompt"]),
-            )
-            try:
-                response_payload = get_backend_client().strategy_chat(composed_question)
-                latest_status = get_backend_client().get_status()
-                sync_session_from_backend(latest_status)
-            except Exception:
-                response_payload = {
-                    "answer": f"{persona['name']} 의견 생성에 실패했습니다.",
-                    "sections": {},
-                }
-            verdict, preview, evidence = summarize_debate_result(response_payload)
-            round_results.append(
-                {
-                    "persona": persona,
-                    "response": response_payload,
-                    "verdict": verdict,
-                    "preview": preview,
-                    "evidence": evidence,
-                    "generated_at": datetime.datetime.now().isoformat(),
-                }
-            )
-        st.session_state.reviewer_debate_round = round_results
-        st.session_state.strategy_debate_status = f"최근 토론 완료 · {format_status_time(datetime.datetime.now().isoformat())}"
-        status_placeholder.empty()
-
-    if st.session_state.get("strategy_debate_status"):
-        st.markdown(
-            f"""
-            <div class="debate-status">
-                <div class="debate-status-title">최근 토론 상태</div>
-                <div class="debate-status-text">{html.escape(st.session_state.get('strategy_debate_status', ''))}</div>
+            <div class="debate-live-broadcast">
+                <div class="debate-live-broadcast-title">{html.escape(broadcast_title)}</div>
+                <div class="debate-live-broadcast-body">{html.escape(broadcast_body)}</div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            <div class="debate-live-meta">
+                <span class="debate-live-helper">{html.escape(live_helper)}</span>
+                <span class="debate-live-helper">현재 단계 {html.escape(current_stage)}</span>
+                <span class="debate-live-helper">업데이트 {html.escape(format_status_time(runtime.get('updated_at') or debate_state.get('updated_at')))}</span>
+            </div>
+            <div class="debate-live-body{' streaming' if is_streaming else ''}">
+                <div class="debate-live-message{' thinking' if live_text == thinking_text or live_text == broadcast_body else ''}">{live_text_html}{live_cursor_html}</div>
+                {'<div class="debate-live-dots"><span></span><span></span><span></span></div>' if is_streaming else ''}
+            </div>
+            <div class="debate-live-caption">{html.escape(live_caption)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    round_results = st.session_state.get("reviewer_debate_round", []) or []
     if round_results:
         st.markdown(
             f"""
             <div class="consensus-card">
-                <div class="consensus-label">Debate Consensus</div>
-                <div class="consensus-title">3인 토론 종합 메모</div>
+                <div class="consensus-label">Cardloan Debate</div>
+                <div class="consensus-title">3개 부서 토론 종합 메모</div>
                 <div class="consensus-body">{html.escape(build_debate_consensus(personas, round_results))}</div>
             </div>
             """,
@@ -4754,19 +6367,18 @@ def render_role_based_strategy_tab():
         with transcript_col:
             st.markdown('<div class="debate-transcript">', unsafe_allow_html=True)
             for item in round_results:
-                persona = item["persona"]
-                bubble_color = persona["accent"]
+                persona = next((p for p in personas if p["id"] == item.get("persona_id")), personas[0])
                 st.markdown(
                     f"""
                     <div class="debate-bubble">
                         <div class="debate-bubble-head">
                             <div class="debate-bubble-avatar">
-                                <div class="debate-bubble-mini-avatar" style="background:{bubble_color};">{persona['emoji']}</div>
-                                <div class="debate-bubble-name">{persona['name']} · {persona['display']}</div>
+                                <div class="debate-bubble-mini-avatar" style="background:{persona['accent']};">{persona['emoji']}</div>
+                                <div class="debate-bubble-name">{item.get('name')} · {item.get('stage_title')}</div>
                             </div>
-                            <span class="debate-bubble-badge" style="background:{bubble_color};">{html.escape(item['verdict'])}</span>
+                            <span class="debate-bubble-badge" style="background:{persona['accent']};">{html.escape(str(item.get('verdict') or '-'))}</span>
                         </div>
-                        <div class="debate-bubble-text">{html.escape(item['preview'])}\n\n근거: {html.escape(item['evidence'])}</div>
+                        <div class="debate-bubble-text">{html.escape(build_cardloan_stage_spoken_message(item))}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -4774,12 +6386,93 @@ def render_role_based_strategy_tab():
             st.markdown('</div>', unsafe_allow_html=True)
 
         with detail_col:
-            detail_tabs = st.tabs([persona["name"] for persona in personas])
+            detail_tabs = st.tabs([item.get("name") or f"stage-{index + 1}" for index, item in enumerate(round_results)])
             for tab, item in zip(detail_tabs, round_results):
                 with tab:
-                    render_strategy_response(item["response"])
+                    render_cardloan_debate_stage_detail(item)
+
+
+def should_render_cardloan_live_panel() -> bool:
+    debate_state = st.session_state.get("cardloan_debate", {}) or {}
+    round_results = debate_state.get("round_results") or st.session_state.get("reviewer_debate_round", []) or []
+    runtime = st.session_state.get("ollama_runtime", {}) or {}
+    runtime_text = str(runtime.get("response_text") or "").strip()
+    summary = str(debate_state.get("summary") or st.session_state.get("strategy_debate_status") or "").strip()
+    status = str(debate_state.get("status") or "").strip()
+    current_stage = str(debate_state.get("current_stage") or "").strip()
+    return bool(
+        round_results
+        or runtime_text
+        or summary
+        or status == "running"
+        or current_stage not in {"", "대기"}
+        or st.session_state.get("cardloan_debate_task_id")
+    )
+
+
+@fragment_decorator(run_every="800ms")
+def render_live_cardloan_ollama_fragment() -> None:
+    refresh_cardloan_debate_runtime()
+    personas = get_reviewer_personas()
+    if should_render_cardloan_live_panel():
+        render_cardloan_debate_live_panel(personas)
+
+
+def render_role_based_strategy_tab():
+    ensure_strategy_debate_state()
+    personas = get_reviewer_personas()
+    persona_map = {persona["id"]: persona for persona in personas}
+    selected_id = st.session_state.get("selected_reviewer_id", personas[0]["id"])
+    selected_persona = persona_map.get(selected_id, personas[0])
+    debate_state = st.session_state.get("cardloan_debate", {}) or {}
+    debate_running = str(debate_state.get("status") or "").strip() == "running" or bool(st.session_state.get("cardloan_debate_task_id"))
+    st.session_state.strategy_debate_question = get_default_cardloan_debate_question()
+
+    hero_main, hero_action = st.columns([0.72, 0.28])
+    with hero_main:
+        st.markdown(
+            """
+            <div class="debate-hero">
+                <div class="debate-hero-copy">
+                    <div class="debate-kicker">Cardloan Strategy Room</div>
+                    <div class="debate-title">AI 카드론 토론실</div>
+                    <div class="debate-subtitle">신용기획부가 시장 리스크를 먼저 정리하고, 금융영업부가 승인 전환 전략을 만들고, 마지막으로 금융솔루션부가 카드론 상품 구조를 설계합니다.</div>
+                    <div class="debate-wave"><span></span><span></span><span></span><span></span><span></span></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with hero_action:
+        
+        run_clicked = st.button(
+            "토론시작",
+            key="cardloan_debate_start",
+            use_container_width=False,
+            type="primary",
+            disabled=debate_running,
+        )
+
+    if st.session_state.get("reviewer_prompt_dialog_open"):
+        render_reviewer_prompt_dialog(selected_persona)
+
+    if run_clicked:
+        _start_cardloan_debate_background_task(
+            get_default_cardloan_debate_question(),
+            st.session_state.get("reviewer_prompts", {}) or {},
+        )
+
+    debate_state = st.session_state.get("cardloan_debate", {}) or {}
+    debate_running = str(debate_state.get("status") or "").strip() == "running" or bool(st.session_state.get("cardloan_debate_task_id"))
+
+    refresh_cardloan_debate_runtime()
+    render_cardloan_reviewer_cards(personas)
+
+    if HAS_FRAGMENT_REFRESH and debate_running:
+        render_live_cardloan_ollama_fragment()
     else:
-        st.info("토론 안건을 입력하고 '3인 토론 시작'을 누르면 세 심사관이 각자 의견을 생성합니다.")
+        if should_render_cardloan_live_panel():
+            render_cardloan_debate_live_panel(personas)
 
 
 # `get_vector_count` is provided by `rag.vector_db` import; avoid redefining it here.
@@ -4797,7 +6490,8 @@ def get_faiss_store_options() -> list[tuple[str, str | None]]:
     return [
         ("전체 DB", None),
         ("심사 로그 DB", FAISS_STORE_LOGS),
-        ("뉴스/규제 DB", FAISS_STORE_NEWS),
+        ("뉴스 신호 DB", FAISS_STORE_NEWS),
+        ("규제 문서 DB", FAISS_STORE_DOCUMENT),
         ("고객 패턴 DB", FAISS_STORE_CUSTOMER),
     ]
 
@@ -4806,14 +6500,17 @@ def get_live_faiss_items(
     limit: int = 1000, store_name: str | None = None
 ) -> tuple[list[dict], int]:
     cache_key = f"full_faiss_items::{store_name or 'all'}"
+    cache_meta_key = f"{cache_key}::meta"
+    cache_version = _get_faiss_session_cache_version(store_name)
     if store_name is None:
         items = st.session_state.get("full_faiss_items", []) or []
         if items:
             return items[:limit], int(st.session_state.get("vector_count", len(items)) or 0)
 
     cached_items = st.session_state.get(cache_key, []) or []
-    if cached_items:
-        return cached_items[:limit], get_vector_count(store_name)
+    cached_meta = st.session_state.get(cache_meta_key, {}) or {}
+    if cached_items and cached_meta.get("version") == cache_version:
+        return cached_items[:limit], int(cached_meta.get("total_count", len(cached_items)) or len(cached_items))
 
     try:
         entries_resp = get_backend_client().get_faiss_entries(limit=limit, store_name=store_name)
@@ -4821,6 +6518,10 @@ def get_live_faiss_items(
         total_count = int((entries_resp or {}).get("total_count", len(items)) or 0)
         if items:
             st.session_state[cache_key] = items
+            st.session_state[cache_meta_key] = {
+                "version": cache_version,
+                "total_count": total_count,
+            }
             if store_name is None:
                 st.session_state.full_faiss_items = items
             return items, total_count
@@ -4833,11 +6534,518 @@ def get_live_faiss_items(
         items = list_vectors(limit=limit, store_name=store_name)
         if items:
             st.session_state[cache_key] = items
+            st.session_state[cache_meta_key] = {
+                "version": cache_version,
+                "total_count": len(items),
+            }
             if store_name is None:
                 st.session_state.full_faiss_items = items
-        return items, get_vector_count(store_name)
+        return items, int((st.session_state.get("vector_count") if store_name is None else len(items)) or len(items))
     except Exception:
         return [], 0
+
+
+def render_live_signal_news_board() -> None:
+    news_items, news_total_count = get_live_faiss_items(limit=1000, store_name=FAISS_STORE_NEWS)
+    signal_items = [
+        item
+        for item in news_items
+        if str(item.get("type") or "").strip().lower() == "signal_news"
+    ]
+
+    st.markdown("#### 실시간 signal_news 전체 보기")
+    if not signal_items:
+        st.info("현재 실시간으로 표시할 signal_news가 없습니다.")
+        return
+
+    summary_col_a, summary_col_b, summary_col_c = st.columns(3)
+    summary_col_a.metric("signal_news 수", len(signal_items))
+    summary_col_b.metric("뉴스 신호 DB 전체", news_total_count)
+    latest_signal = signal_items[0]
+    summary_col_c.metric("최근 source", latest_signal.get("source") or "-")
+
+    board_rows: list[dict[str, Any]] = []
+    for item in signal_items:
+        features = item.get("features") or {}
+        board_rows.append(
+            {
+                "id": item.get("id"),
+                "source": item.get("source"),
+                "product": item.get("product"),
+                "name": item.get("name"),
+                "tags": ", ".join(features.get("tags") or []),
+                "signal_summary": str(features.get("signal_summary") or "")[:140],
+                "snippet": str(item.get("snippet") or "")[:180],
+            }
+        )
+    st.dataframe(pd.DataFrame(board_rows), height=320, width="stretch", hide_index=True)
+
+    for item in signal_items:
+        features = item.get("features") or {}
+        title = str(item.get("name") or item.get("title") or item.get("id") or "signal_news").strip()
+        label = f"{title[:72]} · {str(item.get('id') or '')[:8]}"
+        with st.expander(label, expanded=False):
+            detail_col_a, detail_col_b = st.columns([1.1, 1])
+            with detail_col_a:
+                st.markdown("##### page_content / snippet")
+                st.code(str(item.get("snippet") or item.get("page_content") or "")[:2500], language="text")
+            with detail_col_b:
+                st.markdown("##### metadata.features")
+                st.json(features)
+
+
+def _summarize_top_counts(values: list[Any], top_n: int = 4) -> tuple[dict[str, int], str]:
+    counter: dict[str, int] = {}
+    for value in values:
+        text = str(value or "-").strip() or "-"
+        counter[text] = counter.get(text, 0) + 1
+    ordered = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+    summary = ", ".join(f"{key} {count}건" for key, count in ordered[:top_n])
+    return counter, summary or "-"
+
+
+def _format_customer_pattern_top_reason(features: dict[str, Any]) -> str:
+    reasons = features.get("top_reject_reason_codes") or []
+    if not reasons:
+        return "-"
+    top_reason = reasons[0] or {}
+    description = str(top_reason.get("description") or "").strip()
+    code = str(top_reason.get("code") or "").strip()
+    count = int(top_reason.get("count") or 0)
+    label = description or code or "-"
+    return f"{label} ({count}건)" if count else label
+
+
+def _classify_vector_event(event: dict[str, Any]) -> tuple[str, str, str]:
+    source = str(event.get("source") or "-").strip().lower()
+    detail = str(event.get("detail") or "").strip()
+    combined = f"{source} {detail}"
+    if "news" in combined or "뉴스" in detail:
+        return "news", "뉴스 증분 적재", "news"
+    if "log" in combined or "심사 로그" in detail or "구조화" in detail:
+        return "log", "심사로그 증분 적재", "log"
+    return "mixed", "FAISS 증분 적재", "mixed"
+
+
+def render_live_vector_append_board(vector_events: list[dict[str, Any]]) -> None:
+    recent_events = [
+        event
+        for event in vector_events[:8]
+        if int(event.get("added_count", 0) or 0) > 0
+    ]
+    if not recent_events:
+        return
+
+    latest_event = recent_events[0]
+    latest_group, latest_label, latest_css = _classify_vector_event(latest_event)
+    now = datetime.datetime.now()
+    aggregate = {
+        "log": {"added": 0, "events": 0},
+        "news": {"added": 0, "events": 0},
+        "mixed": {"added": 0, "events": 0},
+    }
+    for event in recent_events:
+        event_group, _, _ = _classify_vector_event(event)
+        aggregate[event_group]["added"] += int(event.get("added_count", 0) or 0)
+        aggregate[event_group]["events"] += 1
+
+    pulse_cards = "".join(
+        f"""
+        <div class='vector-live-card {card_css}'>
+            <div class='vector-live-card-label'>{html.escape(card_label)}</div>
+            <div class='vector-live-card-value'>+{int(aggregate[card_key]['added'] or 0)}</div>
+            <div class='vector-live-card-sub'>최근 이벤트 {int(aggregate[card_key]['events'] or 0)}회</div>
+        </div>
+        """
+        for card_key, card_label, card_css in [
+            ("log", "심사로그 add", "log"),
+            ("news", "뉴스 add", "news"),
+            ("mixed", "기타 add", "mixed"),
+        ]
+    )
+
+    ticker = "".join(
+        f"<span>{html.escape(str(event.get('source') or '-'))} +{int(event.get('added_count', 0) or 0)} · {html.escape(str(event.get('detail') or '-'))}</span>"
+        for event in recent_events[:5]
+    )
+    event_time = parse_status_time(latest_event.get("timestamp"))
+    age_seconds = max(
+        0,
+        int((now - event_time).total_seconds()) if event_time is not None else 0,
+    )
+    progress_width = min(100, max(18, int(latest_event.get("added_count", 0) or 0) * 12))
+
+    st.markdown(
+        f"""
+        <style>
+        .vector-live-board {{
+            position: relative;
+            overflow: hidden;
+            margin: 8px 0 16px 0;
+            padding: 18px;
+            border-radius: 22px;
+            background: linear-gradient(135deg, rgba(8,26,39,0.94), rgba(12,49,67,0.92));
+            border: 1px solid rgba(97,244,222,0.18);
+            box-shadow: 0 20px 50px rgba(2, 12, 27, 0.28);
+        }}
+        .vector-live-board::after {{
+            content: '';
+            position: absolute;
+            inset: auto -8% -45% auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(97,244,222,0.18), transparent 68%);
+            pointer-events: none;
+        }}
+        .vector-live-head {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 14px;
+            margin-bottom: 14px;
+        }}
+        .vector-live-kicker {{
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(217,236,251,0.72);
+        }}
+        .vector-live-title {{
+            font-size: 27px;
+            font-weight: 900;
+            color: #f7fbff;
+            margin-top: 5px;
+            line-height: 1.15;
+        }}
+        .vector-live-sub {{
+            font-size: 13px;
+            line-height: 1.6;
+            color: rgba(217,236,251,0.82);
+            margin-top: 7px;
+            max-width: 760px;
+        }}
+        .vector-live-badge {{
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: #d9ecfb;
+            font-size: 12px;
+            font-weight: 800;
+            white-space: nowrap;
+        }}
+        .vector-live-progress {{
+            position: relative;
+            overflow: hidden;
+            height: 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.10);
+            margin-bottom: 14px;
+        }}
+        .vector-live-progress-fill {{
+            height: 100%;
+            width: {progress_width}%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #61f4de, #7dd3fc, #ffbf69);
+            background-size: 200% 100%;
+            animation: vectorFlow 1.8s linear infinite;
+            box-shadow: 0 0 24px rgba(97,244,222,0.35);
+        }}
+        .vector-live-grid {{
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 12px;
+        }}
+        .vector-live-card-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }}
+        .vector-live-card {{
+            position: relative;
+            overflow: hidden;
+            min-height: 108px;
+            border-radius: 18px;
+            padding: 14px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.10);
+        }}
+        .vector-live-card::after {{
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, transparent, rgba(255,255,255,0.14), transparent);
+            transform: translateX(-140%);
+            animation: vectorSweep 2.4s ease-in-out infinite;
+        }}
+        .vector-live-card.log {{ box-shadow: inset 0 0 0 1px rgba(245,158,11,0.18); }}
+        .vector-live-card.news {{ box-shadow: inset 0 0 0 1px rgba(34,197,94,0.18); }}
+        .vector-live-card.mixed {{ box-shadow: inset 0 0 0 1px rgba(125,211,252,0.18); }}
+        .vector-live-card-label {{
+            font-size: 12px;
+            color: rgba(217,236,251,0.72);
+            font-weight: 700;
+        }}
+        .vector-live-card-value {{
+            font-size: 36px;
+            line-height: 1;
+            margin-top: 10px;
+            font-weight: 900;
+            color: #f7fbff;
+            animation: vectorCountPop 0.6s ease-out;
+        }}
+        .vector-live-card-sub {{
+            font-size: 12px;
+            margin-top: 8px;
+            color: rgba(217,236,251,0.74);
+        }}
+        .vector-live-event {{
+            position: relative;
+            border-radius: 18px;
+            padding: 15px 16px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.10);
+        }}
+        .vector-live-event.log {{ box-shadow: 0 0 0 1px rgba(245,158,11,0.16), 0 0 26px rgba(245,158,11,0.12); }}
+        .vector-live-event.news {{ box-shadow: 0 0 0 1px rgba(34,197,94,0.16), 0 0 26px rgba(34,197,94,0.12); }}
+        .vector-live-event.mixed {{ box-shadow: 0 0 0 1px rgba(125,211,252,0.16), 0 0 26px rgba(125,211,252,0.12); }}
+        .vector-live-event-kicker {{
+            font-size: 12px;
+            color: rgba(217,236,251,0.74);
+            font-weight: 800;
+            margin-bottom: 8px;
+        }}
+        .vector-live-event-value {{
+            font-size: 40px;
+            font-weight: 900;
+            color: #ffffff;
+            line-height: 1;
+            text-shadow: 0 0 20px rgba(255,255,255,0.12);
+        }}
+        .vector-live-event-sub {{
+            margin-top: 10px;
+            font-size: 13px;
+            color: rgba(217,236,251,0.82);
+            line-height: 1.55;
+        }}
+        .vector-live-ticker {{
+            overflow: hidden;
+            margin-top: 12px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 10px 0;
+        }}
+        .vector-live-ticker-track {{
+            display: inline-flex;
+            gap: 28px;
+            white-space: nowrap;
+            padding-left: 100%;
+            animation: vectorTicker 18s linear infinite;
+        }}
+        .vector-live-ticker span {{
+            color: rgba(217,236,251,0.82);
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        @keyframes vectorFlow {{
+            0% {{ background-position: 0% 0; }}
+            100% {{ background-position: 200% 0; }}
+        }}
+        @keyframes vectorSweep {{
+            0% {{ transform: translateX(-140%); }}
+            100% {{ transform: translateX(140%); }}
+        }}
+        @keyframes vectorCountPop {{
+            0% {{ opacity: 0; transform: translateY(12px) scale(0.94); }}
+            100% {{ opacity: 1; transform: translateY(0) scale(1); }}
+        }}
+        @keyframes vectorTicker {{
+            0% {{ transform: translateX(0); }}
+            100% {{ transform: translateX(-100%); }}
+        }}
+        @media (max-width: 1080px) {{
+            .vector-live-grid, .vector-live-card-grid {{
+                grid-template-columns: 1fr;
+            }}
+            .vector-live-head {{
+                flex-direction: column;
+            }}
+        }}
+        </style>
+        <div class='vector-live-board'>
+            <div class='vector-live-head'>
+                <div>
+                    <div class='vector-live-kicker'>Live Vector Sync</div>
+                    <div class='vector-live-title'>{html.escape(latest_label)} · +{int(latest_event.get('added_count', 0) or 0)}</div>
+                    <div class='vector-live-sub'>{html.escape(str(latest_event.get('detail') or '-'))}</div>
+                </div>
+                <div class='vector-live-badge'>{html.escape(str(latest_event.get('source') or '-'))} · {age_seconds}초 전</div>
+            </div>
+            <div class='vector-live-progress'>
+                <div class='vector-live-progress-fill'></div>
+            </div>
+            <div class='vector-live-grid'>
+                <div class='vector-live-card-grid'>
+                    {pulse_cards}
+                </div>
+                <div class='vector-live-event {latest_css}'>
+                    <div class='vector-live-event-kicker'>최근 증분 적재</div>
+                    <div class='vector-live-event-value'>+{int(latest_event.get('added_count', 0) or 0)}</div>
+                    <div class='vector-live-event-sub'>누적 {int(latest_event.get('before_count', 0) or 0)} → {int(latest_event.get('after_count', 0) or 0)}<br>{html.escape(str(latest_event.get('source') or '-'))}</div>
+                </div>
+            </div>
+            <div class='vector-live-ticker'><div class='vector-live-ticker-track'>{ticker}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_runtime_live_stage(
+    statuses: dict[str, Any],
+    vector_events: list[dict[str, Any]],
+    diagnostics: dict[str, Any],
+) -> None:
+    running_agents = [
+        (agent_key, info or {})
+        for agent_key, info in statuses.items()
+        if str((info or {}).get("status") or "") == "running"
+    ]
+    latest_vector = vector_events[0] if vector_events else {}
+    crawl_running = bool(st.session_state.get("news_crawl_running", False))
+    has_vector_update = bool(int(latest_vector.get("added_count", 0) or 0) > 0)
+    if not running_agents and not crawl_running and not has_vector_update:
+        return
+
+    title = "운영 파이프라인이 실시간으로 반응 중입니다"
+    subtitle = "신호가 들어오면 에이전트 실행과 FAISS 반영 상태를 즉시 업데이트합니다."
+    badge = "LIVE"
+    if running_agents:
+        lead_key, lead_info = running_agents[0]
+        title = f"{lead_key} 실행 중 · 실시간 운영 동기화"
+        subtitle = str(lead_info.get("detail") or "최신 입력을 처리하고 있습니다.")
+        badge = f"RUN {len(running_agents)}"
+    elif crawl_running:
+        title = "뉴스 크롤링 진행 중 · 수집 결과가 이어서 반영됩니다"
+        subtitle = (
+            f"대상 {int(st.session_state.get('news_crawl_target_count', 0) or 0)}건 / "
+            f"성공 {int(st.session_state.get('news_crawl_success_count', 0) or 0)} / "
+            f"실패 {int(st.session_state.get('news_crawl_failure_count', 0) or 0)}"
+        )
+        badge = "CRAWL"
+    elif has_vector_update:
+        title = f"FAISS 업데이트 감지 · +{int(latest_vector.get('added_count', 0) or 0)}"
+        subtitle = str(latest_vector.get("detail") or "신규 데이터가 벡터 스토어에 반영되었습니다.")
+        badge = "SYNC"
+
+    chip_html = "".join(
+        f"<span class='runtime-stage-chip'>{html.escape(agent_key)} running</span>"
+        for agent_key, _ in running_agents[:4]
+    )
+    if has_vector_update:
+        chip_html += (
+            f"<span class='runtime-stage-chip vector'>{html.escape(str(latest_vector.get('source') or '-'))} "
+            f"+{int(latest_vector.get('added_count', 0) or 0)}</span>"
+        )
+    if crawl_running:
+        chip_html += "<span class='runtime-stage-chip crawl'>news crawler active</span>"
+
+    ticker_items = []
+    for agent_key, info in running_agents[:4]:
+        ticker_items.append(
+            f"<span>{html.escape(agent_key)} · {html.escape(str(info.get('detail') or 'running'))}</span>"
+        )
+    for event in vector_events[:4]:
+        ticker_items.append(
+            f"<span>{html.escape(str(event.get('source') or '-'))} +{int(event.get('added_count', 0) or 0)} · {html.escape(str(event.get('detail') or '-'))}</span>"
+        )
+    ticker_html = "".join(ticker_items)
+
+    st.markdown(
+        f"""
+        <style>
+        .runtime-stage-board {{
+            position: relative;
+            overflow: hidden;
+            margin: 8px 0 18px 0;
+            border-radius: 24px;
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(8,26,39,0.95), rgba(14,48,68,0.92));
+            border: 1px solid rgba(125,211,252,0.18);
+            box-shadow: 0 22px 52px rgba(2,12,27,0.26);
+        }}
+        .runtime-stage-board::before, .runtime-stage-board::after {{
+            content: '';
+            position: absolute;
+            border-radius: 999px;
+            pointer-events: none;
+        }}
+        .runtime-stage-board::before {{
+            inset: -25% auto auto -8%;
+            width: 220px;
+            height: 220px;
+            background: radial-gradient(circle, rgba(97,244,222,0.14), transparent 72%);
+            animation: runtimeOrb 6s ease-in-out infinite;
+        }}
+        .runtime-stage-board::after {{
+            inset: auto -10% -42% auto;
+            width: 240px;
+            height: 240px;
+            background: radial-gradient(circle, rgba(255,191,105,0.12), transparent 72%);
+            animation: runtimeOrb 7.5s ease-in-out infinite reverse;
+        }}
+        .runtime-stage-head {{ position: relative; z-index: 1; display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }}
+        .runtime-stage-kicker {{ font-size:12px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; color:rgba(217,236,251,0.72); }}
+        .runtime-stage-title {{ margin-top:6px; font-size:28px; line-height:1.14; font-weight:900; color:#f7fbff; }}
+        .runtime-stage-sub {{ margin-top:9px; max-width:760px; font-size:13px; line-height:1.68; color:rgba(217,236,251,0.82); }}
+        .runtime-stage-pill {{ position:relative; z-index:1; padding:9px 13px; border-radius:999px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.14); color:#f8fafc; font-size:12px; font-weight:900; white-space:nowrap; }}
+        .runtime-stage-pulse {{ position:relative; z-index:1; margin-top:14px; height:12px; border-radius:999px; background:rgba(255,255,255,0.10); overflow:hidden; }}
+        .runtime-stage-pulse-fill {{ height:100%; border-radius:999px; background:linear-gradient(90deg, #61f4de, #7dd3fc, #ffbf69); background-size:200% 100%; animation:runtimeFlow 2.1s linear infinite; }}
+        .runtime-stage-body {{ position:relative; z-index:1; display:grid; grid-template-columns:1.1fr 0.9fr; gap:12px; margin-top:14px; }}
+        .runtime-stage-chip-row {{ display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start; }}
+        .runtime-stage-chip {{ padding:8px 10px; border-radius:999px; font-size:12px; font-weight:800; color:#f8fafc; border:1px solid rgba(255,255,255,0.10); background:rgba(30,64,175,0.34); animation:runtimeChipPulse 1.8s ease-in-out infinite; }}
+        .runtime-stage-chip.vector {{ background:rgba(14,116,144,0.34); }}
+        .runtime-stage-chip.crawl {{ background:rgba(5,150,105,0.34); }}
+        .runtime-stage-stat {{ padding:16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.10); }}
+        .runtime-stage-stat-label {{ font-size:12px; color:rgba(217,236,251,0.70); font-weight:700; }}
+        .runtime-stage-stat-value {{ margin-top:10px; font-size:38px; line-height:1; font-weight:900; color:#ffffff; animation:runtimeNumberPulse 0.65s ease-out; }}
+        .runtime-stage-stat-sub {{ margin-top:10px; font-size:12px; line-height:1.55; color:rgba(217,236,251,0.78); }}
+        .runtime-stage-ticker {{ position:relative; z-index:1; overflow:hidden; margin-top:13px; border-radius:14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); padding:10px 0; }}
+        .runtime-stage-ticker-track {{ display:inline-flex; gap:28px; white-space:nowrap; padding-left:100%; animation:runtimeTicker 20s linear infinite; }}
+        .runtime-stage-ticker span {{ color:rgba(217,236,251,0.82); font-size:12px; font-weight:700; }}
+        @keyframes runtimeFlow {{ 0% {{ background-position:0% 0; }} 100% {{ background-position:200% 0; }} }}
+        @keyframes runtimeOrb {{ 0%,100% {{ transform:translate3d(0,0,0) scale(1); }} 50% {{ transform:translate3d(10px,-8px,0) scale(1.06); }} }}
+        @keyframes runtimeChipPulse {{ 0%,100% {{ transform:translateY(0); }} 50% {{ transform:translateY(-1px); }} }}
+        @keyframes runtimeNumberPulse {{ 0% {{ opacity:0; transform:translateY(10px) scale(0.96); }} 100% {{ opacity:1; transform:translateY(0) scale(1); }} }}
+        @keyframes runtimeTicker {{ 0% {{ transform:translateX(0); }} 100% {{ transform:translateX(-100%); }} }}
+        @media (max-width: 1080px) {{ .runtime-stage-head {{ flex-direction:column; }} .runtime-stage-body {{ grid-template-columns:1fr; }} }}
+        </style>
+        <div class='runtime-stage-board'>
+            <div class='runtime-stage-head'>
+                <div>
+                    <div class='runtime-stage-kicker'>Live Ops Stage</div>
+                    <div class='runtime-stage-title'>{html.escape(title)}</div>
+                    <div class='runtime-stage-sub'>{html.escape(subtitle)}</div>
+                </div>
+                <div class='runtime-stage-pill'>{html.escape(badge)}</div>
+            </div>
+            <div class='runtime-stage-pulse'><div class='runtime-stage-pulse-fill'></div></div>
+            <div class='runtime-stage-body'>
+                <div class='runtime-stage-chip-row'>{chip_html}</div>
+                <div class='runtime-stage-stat'>
+                    <div class='runtime-stage-stat-label'>최근 FAISS 증분 반영</div>
+                    <div class='runtime-stage-stat-value'>+{int(latest_vector.get('added_count', 0) or 0)}</div>
+                    <div class='runtime-stage-stat-sub'>마지막 활동 {html.escape(str(diagnostics.get('last_activity_source') or '-'))}<br>실행 중 에이전트 {len(running_agents)}개</div>
+                </div>
+            </div>
+            <div class='runtime-stage-ticker'><div class='runtime-stage-ticker-track'>{ticker_html}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_vector_db_panel():
@@ -4845,6 +7053,13 @@ def render_vector_db_panel():
 
     vector_events = st.session_state.get("vector_events", []) or []
     latest_vector_event = vector_events[0] if vector_events else {}
+    render_live_vector_append_board(vector_events)
+    grouped_items: dict[str, list[dict[str, Any]]] = {
+        FAISS_STORE_LOGS: [],
+        FAISS_STORE_NEWS: [],
+        FAISS_STORE_CUSTOMER: [],
+        FAISS_STORE_DOCUMENT: [],
+    }
     store_options = get_faiss_store_options()
     selected_store_label = st.selectbox(
         "조회할 DB",
@@ -4853,80 +7068,89 @@ def render_vector_db_panel():
     )
     selected_store = dict(store_options).get(selected_store_label)
     items, total_count = get_live_faiss_items(limit=1000, store_name=selected_store)
-    recent_items = list(reversed(items[-10:])) if items else []
+    store_snapshots: list[dict[str, Any]] = []
+    store_descriptions = {
+        FAISS_STORE_LOGS: "구조화 심사로그와 generated_log",
+        FAISS_STORE_NEWS: "원본 뉴스와 signal_news",
+        FAISS_STORE_DOCUMENT: "업로드 규제문서와 규제 분석 결과",
+        FAISS_STORE_CUSTOMER: "product_pattern_summary, sales_strategy, generated_customer",
+    }
+    for item in items:
+        store_name = str(item.get("store") or "").strip().lower()
+        if store_name in grouped_items:
+            grouped_items[store_name].append(item)
+
+    if selected_store is None:
+        for snapshot_label, snapshot_store in store_options[1:]:
+            snapshot_items = grouped_items.get(snapshot_store, [])
+            _, type_summary = _summarize_top_counts([item.get("type") for item in snapshot_items])
+            _, product_summary = _summarize_top_counts([item.get("product") for item in snapshot_items if item.get("product")])
+            store_snapshots.append(
+                {
+                    "DB": snapshot_label,
+                    "store": snapshot_store,
+                    "현재 로드": len(snapshot_items),
+                    "주요 type": type_summary,
+                    "주요 product": product_summary,
+                    "설명": store_descriptions.get(snapshot_store, "-"),
+                }
+            )
+    else:
+        _, type_summary = _summarize_top_counts([item.get("type") for item in items])
+        _, product_summary = _summarize_top_counts([item.get("product") for item in items if item.get("product")])
+        store_snapshots.append(
+            {
+                "DB": selected_store_label,
+                "store": selected_store,
+                "현재 로드": len(items),
+                "주요 type": type_summary,
+                "주요 product": product_summary,
+                "설명": store_descriptions.get(selected_store, "-"),
+            }
+        )
+
+    type_counts, _ = _summarize_top_counts([item.get("type") for item in items])
+    product_counts, _ = _summarize_top_counts([item.get("product") for item in items if item.get("product")])
 
     vector_metric_cols = st.columns(4)
     vector_metric_cols[0].metric(
         f"{selected_store_label} 벡터 수", total_count
     )
     vector_metric_cols[1].metric(
-        "마지막 증감", latest_vector_event.get("added_count", 0)
+        "문서 type 수", len(type_counts)
     )
     vector_metric_cols[2].metric(
-        "최근 적재 소스", latest_vector_event.get("source", "-")
+        "상품 코드 수", len(product_counts)
     )
     vector_metric_cols[3].metric(
-        "실시간 표시 항목", len(items)
+        "마지막 증감", latest_vector_event.get("added_count", 0)
     )
 
-    st.markdown("#### 실시간 적재값 미리보기")
-    if not recent_items:
-        st.info("실시간으로 표시할 Vector DB 항목이 아직 없습니다.")
-    else:
-        preview_df = pd.DataFrame(
-            [
-                {
-                    "id": it.get("id"),
-                    "store": it.get("store"),
-                    "type": it.get("type"),
-                    "product": it.get("product"),
-                    "source": it.get("source"),
-                    "name": it.get("name"),
-                    "snippet": (it.get("snippet") or "")[:180],
-                }
-                for it in recent_items
-            ]
-        )
-        st.dataframe(
-            preview_df,
-            height=280,
-            width="stretch",
-            hide_index=True,
-        )
+    st.caption(
+        f"현재 화면은 {selected_store_label} 기준 단일 조회 결과로만 렌더링합니다. 로드된 항목 {len(items)}건"
+        + (f" / 총 벡터 {total_count}건" if total_count else "")
+    )
 
-        selected_entry_id = st.selectbox(
-            "상세 확인할 벡터 항목",
-            options=[""] + [str(it.get("id") or "") for it in recent_items],
-            key="vector_live_entry_select",
-        )
-        if selected_entry_id:
-            selected_item = next(
-                (it for it in recent_items if str(it.get("id")) == selected_entry_id),
-                None,
+    st.markdown("#### 현재 FAISS 스토어 구조")
+    st.dataframe(pd.DataFrame(store_snapshots), width="stretch", hide_index=True)
+
+    if items:
+        dist_col_a, dist_col_b = st.columns(2)
+        with dist_col_a:
+            st.markdown("#### 선택 DB type 분포")
+            type_df = pd.DataFrame(
+                [{"type": key, "count": value} for key, value in sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))]
             )
-            if selected_item is not None:
-                detail_col, meta_col = st.columns([1.2, 1])
-                with detail_col:
-                    st.markdown("##### 선택 항목 원문 미리보기")
-                    st.code(selected_item.get("snippet", "")[:1200], language="text")
-                with meta_col:
-                    st.markdown("##### 선택 항목 메타데이터")
-                    st.json(
-                        {
-                            "id": selected_item.get("id"),
-                            "store": selected_item.get("store"),
-                            "type": selected_item.get("type"),
-                            "product": selected_item.get("product"),
-                            "agent": selected_item.get("agent"),
-                            "source": selected_item.get("source"),
-                            "name": selected_item.get("name"),
-                            "features": selected_item.get("features") or {},
-                            "in_fields": selected_item.get("in_fields") or {},
-                            "out_fields": selected_item.get("out_fields") or {},
-                            "reject_reason_codes": selected_item.get("reject_reason_codes") or [],
-                            "reject_reason_details": selected_item.get("reject_reason_details") or [],
-                        }
-                    )
+            st.dataframe(type_df, width="stretch", hide_index=True)
+        with dist_col_b:
+            st.markdown("#### 선택 DB product 분포")
+            if product_counts:
+                product_df = pd.DataFrame(
+                    [{"product": key, "count": value} for key, value in sorted(product_counts.items(), key=lambda item: (-item[1], item[0]))]
+                )
+                st.dataframe(product_df, width="stretch", hide_index=True)
+            else:
+                st.info("선택한 DB에는 product 메타데이터가 없습니다.")
 
     event_col, vector_col = st.columns([1.2, 1])
     with event_col:
@@ -5035,7 +7259,7 @@ def render_vector_db_panel():
     if not items:
         st.info("FAISS에 저장된 항목이 없습니다.")
     else:
-        st.caption("WebSocket으로 갱신된 세션 스냅샷을 우선 사용하고, 초기 로드 시에는 백엔드에서 목록을 보강합니다.")
+        st.caption("현재 탭은 store/type/product/features 중심의 최신 FAISS shape를 보여줍니다. WebSocket 스냅샷을 우선 사용하고, 초기 로드 시에는 백엔드 목록으로 보강합니다.")
         full_df = pd.DataFrame(
             [
                 {
@@ -5045,6 +7269,7 @@ def render_vector_db_panel():
                     "product": it.get("product"),
                     "source": it.get("source"),
                     "name": it.get("name"),
+                    "feature_keys": ", ".join(list((it.get("features") or {}).keys())[:6]),
                     "snippet": (it.get("snippet") or "")[:200],
                 }
                 for it in items
@@ -5055,12 +7280,15 @@ def render_vector_db_panel():
 
 def render_runtime_dashboard():
     st.subheader("🤖 에이전트 실시간 작업 현황")
+    render_live_vector_append_board(st.session_state.get("vector_events", []) or [])
 
     # 백그라운드 작업 결과를 메인 스레드로 폴링하여 session_state로 반영
     try:
         with _background_lock:
             tasks = list(_background_results.items())
         for task_id, payload in tasks:
+            if not str(task_id).startswith("reg_"):
+                continue
             # 반영 처리
             if payload.get("status") == "completed":
                 result = payload.get("result")
@@ -5128,6 +7356,9 @@ def render_runtime_dashboard():
         )
 
     diagnostics = st.session_state.get("backend_diagnostics", {}) or {}
+    statuses = st.session_state.get("agent_statuses", {}) or {}
+    vector_events = st.session_state.get("vector_events", []) or []
+    render_runtime_live_stage(statuses, vector_events, diagnostics)
     if diagnostics:
         st.markdown("#### 백엔드 진단")
         diag_cols = st.columns(4)
@@ -5197,12 +7428,32 @@ def render_runtime_dashboard():
             cadence_cols[2].metric("뉴스 cadence", f"{int(worker_runtime.get('news_cycle_seconds', 0) or 0)}s")
             cadence_cols[3].metric("FAISS cadence", f"{int(worker_runtime.get('faiss_cycle_seconds', 0) or 0)}s")
 
+            log_runtime_cols = st.columns(4)
+            log_runtime_cols[0].metric("1회 로그 생성량", int(worker_runtime.get("log_burst_count", 0) or 0))
+            log_runtime_cols[1].metric("로그 분석 cadence", f"{int(worker_runtime.get('log_analysis_seconds', 0) or 0)}s")
+            log_runtime_cols[2].metric("로그 브리핑 cadence", f"{int(worker_runtime.get('log_agent_seconds', 0) or 0)}s")
+            log_runtime_cols[3].metric("FAISS 재빌드 기준", f"+{int(worker_runtime.get('faiss_log_rebuild_threshold', 0) or 0)} logs")
+
+            generated_products = str(worker_runtime.get("log_generated_products") or "-")
+            if generated_products and generated_products != "-":
+                st.caption(f"최근 burst 상품 분포: {generated_products}")
+
             phase_df = pd.DataFrame(
                 [
                     {
                         "phase": "log_cycle",
                         "ran": bool(worker_runtime.get("log_cycle_ran")),
                         "elapsed_ms": int(worker_runtime.get("log_cycle_elapsed_ms", 0) or 0),
+                    },
+                    {
+                        "phase": "log_analysis",
+                        "ran": bool(worker_runtime.get("log_analysis_ran")),
+                        "elapsed_ms": int(worker_runtime.get("log_analysis_elapsed_ms", 0) or 0),
+                    },
+                    {
+                        "phase": "log_agent",
+                        "ran": bool(worker_runtime.get("log_agent_ran")),
+                        "elapsed_ms": int(worker_runtime.get("log_agent_elapsed_ms", 0) or 0),
                     },
                     {
                         "phase": "news_cycle",
@@ -5222,6 +7473,8 @@ def render_runtime_dashboard():
                 + f"{int(worker_runtime.get('last_loop_elapsed_ms', 0) or 0)}ms"
                 + " · FAISS 재빌드 이유: "
                 + str(worker_runtime.get("faiss_rebuild_reason") or "-")
+                + f" · 뉴스 유입={bool(worker_runtime.get('faiss_rebuild_due_to_news'))}"
+                + f" / 로그 누적 기준 충족={bool(worker_runtime.get('faiss_rebuild_due_to_logs'))}"
             )
 
     status_map = {
@@ -5235,7 +7488,6 @@ def render_runtime_dashboard():
         ("log_agent", "Log Agent"),
         ("news_agent", "News Agent"),
         ("regulation_agent", "Regulation Agent"),
-        ("decision_agent", "Decision Agent"),
         ("vector_store", "Vector Store"),
     ]
     statuses = st.session_state.get("agent_statuses", {})
@@ -5351,9 +7603,21 @@ def render_runtime_dashboard():
         )
         updated_at = format_status_time(info.get("updated_at"))
         detail = info.get("detail", "아직 실행 이력이 없습니다.")
+        pulse_dot = ""
+        card_class = "idle"
+        if status_code == "running":
+            pulse_dot = "<span class='runtime-agent-dot running'></span>"
+            card_class = "running"
+        elif status_code == "completed":
+            pulse_dot = "<span class='runtime-agent-dot completed'></span>"
+            card_class = "completed"
+        elif status_code == "failed":
+            pulse_dot = "<span class='runtime-agent-dot failed'></span>"
+            card_class = "failed"
         agent_cols[index % 3].markdown(
             f"""
-            <div style=\"
+            <style>
+            .runtime-agent-card {{
                 min-height: 152px;
                 border-radius: 16px;
                 padding: 14px;
@@ -5361,9 +7625,35 @@ def render_runtime_dashboard():
                 background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.98));
                 border: 1px solid rgba(148, 163, 184, 0.18);
                 box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
-            \">
-                <div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;\">
-                    <div style=\"font-size:14px; font-weight:800; color:#0f172a;\">{title}</div>
+            }}
+            .runtime-agent-card.running {{
+                border-color: rgba(59,130,246,0.32);
+                box-shadow: 0 14px 30px rgba(59,130,246,0.12);
+                animation: runtimeAgentLift 1.8s ease-in-out infinite;
+            }}
+            .runtime-agent-card.completed {{
+                border-color: rgba(34,197,94,0.24);
+            }}
+            .runtime-agent-card.failed {{
+                border-color: rgba(239,68,68,0.24);
+            }}
+            .runtime-agent-dot {{ width: 10px; height: 10px; border-radius: 999px; display: inline-block; }}
+            .runtime-agent-dot.running {{ background:#2563eb; box-shadow: 0 0 0 rgba(37,99,235,0.55); animation: runtimeAgentPulse 1.25s infinite; }}
+            .runtime-agent-dot.completed {{ background:#16a34a; }}
+            .runtime-agent-dot.failed {{ background:#dc2626; }}
+            @keyframes runtimeAgentPulse {{
+                0% {{ box-shadow: 0 0 0 0 rgba(37,99,235,0.52); }}
+                70% {{ box-shadow: 0 0 0 12px rgba(37,99,235,0); }}
+                100% {{ box-shadow: 0 0 0 0 rgba(37,99,235,0); }}
+            }}
+            @keyframes runtimeAgentLift {{
+                0%, 100% {{ transform: translateY(0); }}
+                50% {{ transform: translateY(-3px); }}
+            }}
+            </style>
+            <div class="runtime-agent-card {card_class}">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:#0f172a;">{pulse_dot}{title}</div>
                     <span style=\"padding:4px 8px; border-radius:999px; font-size:11px; font-weight:700; background:{background}; color:{color};\">{label}</span>
                 </div>
                 <div style=\"font-size:12px; color:#64748b; margin-bottom:8px;\">업데이트: {updated_at}</div>
@@ -5452,6 +7742,9 @@ def render_runtime_dashboard():
 def render_agent_prompt_panel(
     agent_key: str, title: str, accent_color: str, soft_background: str
 ):
+    if "news_prompt_template_editor" not in st.session_state:
+        st.session_state.news_prompt_template_editor = ""
+
     prompt_input = st.session_state.get(f"latest_{agent_key}_prompt_input", {}) or {}
     updated_at = st.session_state.get(f"last_{agent_key}_prompt_input_time")
 
@@ -5461,13 +7754,22 @@ def render_agent_prompt_panel(
     user_input = prompt_input.get("user_input", "-")
     context_text = prompt_input.get("context", "관련 데이터가 없습니다.")
     prompt_text = prompt_input.get("prompt", "-")
-
-    metric_cols = st.columns(3)
-    metric_cols[0].metric("최근 갱신", format_status_time(updated_at))
-    metric_cols[1].metric("실행 소스", source)
-    metric_cols[2].metric("컨텍스트 길이", len(context_text))
+    is_faiss_log_ingest = bool(
+        agent_key == "log"
+        and (
+            prompt_input.get("mode") == "faiss_ingest"
+            or "faiss_logs_db.py" in str(source)
+        )
+    )
 
     if agent_key == "news":
+        active_news_template = str(
+            st.session_state.get("news_prompt_template_override")
+            or DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE
+        )
+        if not st.session_state.get("news_prompt_template_editor"):
+            st.session_state.news_prompt_template_editor = active_news_template
+
         news_items = st.session_state.get("news", []) or []
         crawled_items = [
             item for item in news_items if str(item.get("content", "")).strip()
@@ -5543,27 +7845,62 @@ def render_agent_prompt_panel(
                 unsafe_allow_html=True,
             )
 
-    if agent_key == "log" and context_text and context_text != "관련 데이터가 없습니다.":
-        preview = summarize_log_case_text(context_text)
         st.markdown(
             f"""
-            <div style="margin: 6px 0 16px 0; padding: 16px 18px; border-radius: 18px; background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,250,252,0.98)); border: 1px solid rgba(148,163,184,0.18); box-shadow: 0 10px 24px rgba(15,23,42,0.05);">
-                <div style="font-size:14px; font-weight:800; color:#0f172a; margin-bottom:10px;">현재 로그 에이전트 대표 케이스 1건</div>
-                <div style="font-size:13px; line-height:1.65; color:#334155; white-space:pre-wrap;">{html.escape(preview)}</div>
+            <div style="margin: 8px 0 14px 0; padding: 18px 20px; border-radius: 22px; background: linear-gradient(135deg, rgba(240,253,250,0.98), rgba(236,254,255,0.98)); border: 1px solid rgba(20,184,166,0.18); box-shadow: 0 12px 30px rgba(15,118,110,0.08);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px;">
+                    <div style="font-size:15px; font-weight:900; color:#0f172a;">뉴스 Agent 프롬프트 편집</div>
+                    <span style="padding:6px 10px; border-radius:999px; font-size:11px; font-weight:800; background:rgba(255,255,255,0.78); color:#0f766e; border:1px solid rgba(15,23,42,0.08);">placeholder: {{news_text}}</span>
+                </div>
+                <div style="font-size:13px; line-height:1.65; color:#335c67;">입력 탭에서 수정한 템플릿이 실제 Ollama 뉴스 에이전트 호출과 백그라운드 뉴스 신호 생성에 함께 적용됩니다.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+        news_prompt_editor = st.text_area(
+            "뉴스 Agent Prompt Template",
+            key="news_prompt_template_editor",
+            height=360,
+            help="{news_text} placeholder를 포함하면 최신 크롤링 뉴스 본문이 그 자리에 주입됩니다.",
+        )
+        template_info_col, template_action_col, template_reset_col = st.columns([1.2, 0.9, 0.9])
+        with template_info_col:
+            mode_label = "커스텀 적용 중" if st.session_state.get("news_prompt_template_override") else "기본 템플릿 사용 중"
+            st.markdown(
+                f"""
+                <div style="padding:10px 12px; border-radius:16px; background:rgba(255,255,255,0.82); border:1px solid rgba(148,163,184,0.16); font-size:13px; font-weight:700; color:#0f766e;">{mode_label}</div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with template_action_col:
+            if st.button("프롬프트 적용", key="apply_news_prompt_template", use_container_width=True):
+                if "{news_text}" not in news_prompt_editor:
+                    st.error("뉴스 프롬프트에는 {news_text} placeholder가 포함돼야 합니다.")
+                else:
+                    try:
+                        result = get_backend_client().set_news_prompt_template(news_prompt_editor)
+                        st.session_state.news_prompt_template_override = result.get("news_prompt_template_override")
+                        st.success("뉴스 에이전트 프롬프트를 적용했습니다.")
+                    except Exception as error:
+                        st.error(f"프롬프트 적용 실패: {error}")
+        with template_reset_col:
+            if st.button("기본값 복원", key="reset_news_prompt_template", use_container_width=True):
+                try:
+                    result = get_backend_client().set_news_prompt_template(DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE)
+                    st.session_state.news_prompt_template_override = result.get("news_prompt_template_override")
+                    st.session_state.news_prompt_template_editor = DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE
+                    st.success("기본 뉴스 프롬프트로 복원했습니다.")
+                except Exception as error:
+                    st.error(f"기본값 복원 실패: {error}")
 
     log_summary_rendered = False
     if agent_key == "log":
         log_summary_rendered = render_log_product_summary_panel(prompt_text, updated_at, context_text)
+        if log_summary_rendered:
+            return
 
     if not prompt_input:
-        if agent_key == "log":
-            if not log_summary_rendered:
-                st.info("아직 표시할 상품 패턴 요약이 없습니다.")
-        else:
+        if agent_key != "log":
             st.info("아직 표시할 프롬프트 입력값이 없습니다.")
         return
 
@@ -5581,15 +7918,58 @@ def render_agent_prompt_panel(
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
         ">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
-                <div style="font-size:14px; font-weight:800; color:#0f172a;">현재 프롬프트 입력 상태</div>
+                <div style="font-size:14px; font-weight:800; color:#0f172a;">{"현재 FAISS 적재 입력 상태" if is_faiss_log_ingest else "현재 프롬프트 입력 상태"}</div>
                 <span style="padding:4px 10px; border-radius:999px; font-size:11px; font-weight:800; background:rgba(255,255,255,0.8); color:{accent_color}; border:1px solid rgba(15,23,42,0.08);">{html.escape(source)}</span>
             </div>
-            <div style="font-size:12px; font-weight:700; color:{accent_color}; margin-bottom:6px;">사용자 지시 / 작업 문장</div>
+            <div style="font-size:12px; font-weight:700; color:{accent_color}; margin-bottom:6px;">{"정제 기준 / 적재 설명" if is_faiss_log_ingest else "사용자 지시 / 작업 문장"}</div>
             <div style="font-size:13px; line-height:1.65; color:#334155; white-space:pre-wrap;">{html.escape(user_input)}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    if agent_key == "news":
+        st.markdown("#### FAISS 적재 미리보기")
+        latest_news_briefing = str(st.session_state.get("latest_news_briefing") or "").strip()
+        latest_signal_payload: dict[str, Any] = {}
+        try:
+            latest_signal_payload = json.loads(latest_news_briefing) if latest_news_briefing else {}
+        except Exception:
+            latest_signal_payload = {}
+
+        preview_title = "periodic news signal"
+        preview_search_text = str(
+            latest_signal_payload.get("search_text") or latest_news_briefing or "-"
+        ).strip()
+        preview_features = {
+            "tags": latest_signal_payload.get("tags") or [],
+            "signal_summary": latest_signal_payload.get("signal_summary") or "",
+            "risk_signal": latest_signal_payload.get("risk_signal") or [],
+            "opportunity_signal": latest_signal_payload.get("opportunity_signal") or [],
+            "linked_decision": latest_signal_payload.get("linked_decision") or [],
+        }
+
+        st.markdown(
+            f"""
+            <div style="display:grid; grid-template-columns: 0.9fr 1.1fr; gap:14px; margin: 10px 0 14px 0;">
+                <div style="padding:16px 18px; border-radius:20px; background:linear-gradient(135deg, rgba(15,23,42,0.98), rgba(15,118,110,0.92)); color:white; box-shadow:0 16px 34px rgba(15,23,42,0.16);">
+                    <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; margin-bottom:8px;">Stored Document Shape</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                        <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">store = news</span>
+                        <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">type = signal_news</span>
+                        <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">agent = news</span>
+                    </div>
+                    <div style="font-size:13px; line-height:1.7; opacity:0.95; white-space:pre-wrap;">제목: {html.escape(preview_title)}\n내용: {html.escape(preview_search_text[:520] + ('...' if len(preview_search_text) > 520 else ''))}</div>
+                </div>
+                <div style="padding:16px 18px; border-radius:20px; background:linear-gradient(135deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98)); border:1px solid rgba(148,163,184,0.18); box-shadow:0 12px 28px rgba(15,23,42,0.06);">
+                    <div style="font-size:13px; font-weight:900; color:#0f172a; margin-bottom:10px;">metadata.features 에 저장되는 값</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.json(preview_features)
+        return
 
     prompt_col, context_col = st.columns([1.1, 1])
     with prompt_col:
@@ -5598,6 +7978,157 @@ def render_agent_prompt_panel(
     with context_col:
         st.markdown("#### 투입 컨텍스트")
         st.code(context_text, language="text")
+
+
+def render_ollama_live_panel() -> None:
+    statuses = st.session_state.get("agent_statuses", {}) or {}
+    activity_log = st.session_state.get("agent_activity_log", []) or []
+    ollama_runtime = st.session_state.get("ollama_runtime", {}) or {}
+    relevant_sources = {"log_agent", "news_agent", "orchestrator"}
+    running_sources = [
+        source
+        for source in ("log_agent", "news_agent")
+        if (statuses.get(source, {}) or {}).get("status") == "running"
+    ]
+    recent_ollama_events = [
+        event for event in activity_log if str(event.get("source") or "") in relevant_sources
+    ]
+    latest_event = recent_ollama_events[0] if recent_ollama_events else {}
+
+    st.subheader("Ollama 실시간 실행 상태")
+    st.markdown(
+        f"""
+        <div style="margin: 8px 0 16px 0; padding: 20px 22px; border-radius: 24px; background: linear-gradient(135deg, rgba(236,254,255,0.98), rgba(239,246,255,0.98)); border: 1px solid rgba(56,189,248,0.18); box-shadow: 0 16px 34px rgba(14,116,144,0.08);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px;">
+                <div>
+                    <div style="font-size:12px; font-weight:800; letter-spacing:0.08em; color:#0369a1; text-transform:uppercase;">Live Runtime</div>
+                    <div style="font-size:22px; font-weight:900; color:#0f172a; margin-top:4px;">지금 Ollama가 무엇을 처리 중인지 바로 보여줍니다</div>
+                </div>
+                <div style="padding:7px 12px; border-radius:999px; font-size:11px; font-weight:800; background:rgba(255,255,255,0.86); color:#0f766e; border:1px solid rgba(15,23,42,0.08);">model {html.escape(str(OLLAMA_LIGHTWEIGHT_MODEL))}</div>
+            </div>
+            <div style="font-size:13px; line-height:1.7; color:#334155;">로그 Agent와 뉴스 Agent의 현재 상태, 마지막 실행 이벤트, 최근 프롬프트 입력을 실시간 상태 동기화로 묶어서 보여주는 탭입니다.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("실행 중 Agent", len(running_sources))
+    metric_cols[1].metric("최근 이벤트", str(latest_event.get("source") or "-"))
+    metric_cols[2].metric("최근 갱신", format_status_time(latest_event.get("timestamp")))
+    metric_cols[3].metric("이벤트 수", len(recent_ollama_events[:12]))
+
+    runtime_agent = str(ollama_runtime.get("agent") or "-")
+    runtime_status = str(ollama_runtime.get("status") or "idle")
+    runtime_model = str(ollama_runtime.get("model") or OLLAMA_LIGHTWEIGHT_MODEL)
+    runtime_text = str(ollama_runtime.get("response_text") or "").strip()
+    runtime_error = str(ollama_runtime.get("error") or "").strip()
+    runtime_updated_at = format_status_time(ollama_runtime.get("updated_at"))
+    runtime_started_at = format_status_time(ollama_runtime.get("started_at"))
+    runtime_label, runtime_color, _ = get_agent_status_palette(runtime_status)
+
+    st.markdown(
+        f"""
+        <div style="padding:18px 20px; border-radius:24px; background:linear-gradient(135deg, rgba(15,23,42,0.98), rgba(14,116,144,0.92)); color:white; box-shadow:0 18px 36px rgba(15,23,42,0.16); margin: 8px 0 18px 0;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
+                <div>
+                    <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.74; margin-bottom:8px;">Live Generation</div>
+                    <div style="font-size:20px; font-weight:900;">현재 생성 중인 Ollama 출력</div>
+                </div>
+                <span style="padding:6px 10px; border-radius:999px; font-size:11px; font-weight:800; background:rgba(255,255,255,0.14); color:{runtime_color}; border:1px solid rgba(255,255,255,0.12);">{html.escape(runtime_label)}</span>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+                <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">agent = {html.escape(runtime_agent)}</span>
+                <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">model = {html.escape(runtime_model)}</span>
+                <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">started = {html.escape(runtime_started_at)}</span>
+                <span style="padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800;">updated = {html.escape(runtime_updated_at)}</span>
+            </div>
+            <div style="font-size:13px; line-height:1.7; white-space:pre-wrap; min-height:120px;">{html.escape(runtime_text or '아직 생성 중 텍스트가 없습니다.')}</div>
+            {f'<div style="margin-top:12px; font-size:12px; color:#fecaca; font-weight:700;">오류: {html.escape(runtime_error)}</div>' if runtime_error else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    agent_specs = [
+        ("log_agent", "로그 Agent", "#92400e", "rgba(255,251,235,0.98)", st.session_state.get("latest_log_prompt_input", {}) or {}),
+        ("news_agent", "뉴스 Agent", "#0f766e", "rgba(236,254,255,0.98)", st.session_state.get("latest_news_prompt_input", {}) or {}),
+    ]
+    card_cols = st.columns(2)
+    for column, (agent_key, label, accent, background, prompt_input) in zip(card_cols, agent_specs):
+        info = statuses.get(agent_key, {}) or {}
+        status_code = str(info.get("status") or "pending")
+        status_label, _, _ = get_agent_status_palette(status_code)
+        detail = str(info.get("detail") or "최근 실행 정보가 없습니다.")
+        user_input = str(prompt_input.get("user_input") or "-").strip()
+        context_preview = " ".join(str(prompt_input.get("context") or "-").split())[:220]
+        updated_at = format_status_time(info.get("updated_at"))
+        with column:
+            st.markdown(
+                f"""
+                <div style="padding:18px 20px; border-radius:22px; background:{background}; border:1px solid rgba(148,163,184,0.16); box-shadow:0 14px 30px rgba(15,23,42,0.06); min-height:310px;">
+                    <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:12px;">
+                        <div>
+                            <div style="font-size:18px; font-weight:900; color:#0f172a;">{label}</div>
+                            <div style="font-size:12px; color:#64748b; margin-top:4px;">최근 업데이트 {html.escape(updated_at)}</div>
+                        </div>
+                        <span style="padding:6px 10px; border-radius:999px; font-size:11px; font-weight:800; background:rgba(255,255,255,0.88); color:{accent}; border:1px solid rgba(15,23,42,0.08);">{html.escape(status_label)}</span>
+                    </div>
+                    <div style="font-size:13px; font-weight:800; color:{accent}; margin-bottom:6px;">현재 작업</div>
+                    <div style="font-size:13px; line-height:1.65; color:#334155; white-space:pre-wrap; margin-bottom:14px;">{html.escape(detail)}</div>
+                    <div style="font-size:13px; font-weight:800; color:{accent}; margin-bottom:6px;">마지막 요청 문장</div>
+                    <div style="font-size:13px; line-height:1.65; color:#334155; white-space:pre-wrap; margin-bottom:14px;">{html.escape(user_input[:220] or '-')}</div>
+                    <div style="font-size:13px; font-weight:800; color:{accent}; margin-bottom:6px;">최근 컨텍스트 미리보기</div>
+                    <div style="font-size:13px; line-height:1.65; color:#334155;">{html.escape(context_preview or '-')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("#### 최근 Ollama 실행 타임라인")
+    if not recent_ollama_events:
+        st.info("아직 기록된 Ollama 실행 이벤트가 없습니다.")
+    else:
+        for event in recent_ollama_events[:12]:
+            source = str(event.get("source") or "-")
+            status_code = str(event.get("status") or "pending")
+            status_label, status_color, _ = get_agent_status_palette(status_code)
+            st.markdown(
+                f"""
+                <div style="border-left:4px solid {status_color}; padding:12px 14px; margin-bottom:10px; background:rgba(248,250,252,0.95); border-radius:0 14px 14px 0;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px;">
+                        <div style="font-size:13px; font-weight:800; color:#0f172a;">{html.escape(source)} · {html.escape(status_label)}</div>
+                        <div style="font-size:11px; color:#64748b; font-weight:700;">{html.escape(format_status_time(event.get('timestamp')))}</div>
+                    </div>
+                    <div style="font-size:13px; color:#334155; line-height:1.6;">{html.escape(str(event.get('detail') or ''))}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    prompt_specs = [
+        ("log_agent", "로그 Agent 전체 프롬프트", st.session_state.get("latest_log_prompt_input", {}) or {}),
+        ("news_agent", "뉴스 Agent 전체 프롬프트", st.session_state.get("latest_news_prompt_input", {}) or {}),
+    ]
+    st.markdown("#### 전체 프롬프트 보기")
+    for agent_key, label, prompt_input in prompt_specs:
+        full_prompt = str(prompt_input.get("prompt") or "").strip()
+        with st.expander(label, expanded=runtime_agent == agent_key and bool(full_prompt)):
+            if not full_prompt:
+                st.info("아직 저장된 프롬프트가 없습니다.")
+            else:
+                st.code(full_prompt, language="text")
+
+
+@fragment_decorator(run_every="3s")
+def render_live_ollama_fragment():
+    consume_ws_snapshot_buffer()
+    render_ollama_live_panel()
+
+
+@fragment_decorator(run_every="1s")
+def render_global_ollama_toast_fragment():
+    render_ollama_toast()
 
 
 def render_chart_dashboard():
@@ -5747,10 +8278,16 @@ def render_chart_dashboard():
                             st.markdown(card_html, unsafe_allow_html=True)
 
 
-@fragment_decorator(run_every="3s")
+@fragment_decorator(run_every="1s")
 def render_live_operations_fragment():
     consume_ws_snapshot_buffer()
     render_runtime_dashboard()
+
+
+@fragment_decorator(run_every="1s")
+def render_live_operations_showcase_fragment():
+    consume_ws_snapshot_buffer()
+    render_operations_showcase()
 
 
 def render_sidebar_news_cards():
@@ -6231,6 +8768,55 @@ def render_faiss_tab():
 
     st.markdown("---")
 
+    st.subheader("뉴스 Signal 실제 적재 상세")
+    try:
+        news_store_resp = get_backend_client().get_faiss_entries(limit=1000, store_name=FAISS_STORE_NEWS)
+        news_items = news_store_resp.get("items", []) or []
+        signal_items = [item for item in news_items if str(item.get("type") or "").strip().lower() == "signal_news"]
+        if not signal_items:
+            st.info("현재 뉴스 신호 DB에는 signal_news 문서가 없습니다.")
+        else:
+            st.caption(f"현재 signal_news 전체 {len(signal_items)}건을 실시간으로 표시합니다.")
+            for signal_item in signal_items:
+                signal_detail = get_backend_client().get_faiss_entry(str(signal_item.get("id"))).get("item") or {}
+                signal_meta = signal_detail.get("metadata", {}) or {}
+                signal_features = signal_meta.get("features", {}) or {}
+                signal_raw_content = signal_meta.get("raw_content", "")
+                signal_page_content = signal_detail.get("page_content", "")
+                signal_title = str(signal_item.get("name") or signal_item.get("title") or signal_item.get("id") or "signal_news")
+
+                with st.expander(f"{signal_title[:72]} · {str(signal_item.get('id') or '')[:8]}", expanded=False):
+                    detail_col_a, detail_col_b = st.columns([1.1, 1])
+                    with detail_col_a:
+                        st.markdown(
+                            """
+                            <div style="padding:16px 18px; border-radius:20px; background:linear-gradient(135deg, rgba(15,23,42,0.98), rgba(17,94,89,0.96)); color:white; box-shadow:0 16px 34px rgba(15,23,42,0.16); margin-bottom:12px;">
+                                <div style="font-size:12px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.72; margin-bottom:8px;">page_content</div>
+                                <div style="font-size:13px; line-height:1.7; white-space:pre-wrap;">FAISS 임베딩에 직접 들어가는 문자열입니다.</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.code(signal_page_content[:3000], language="text")
+                    with detail_col_b:
+                        st.markdown(
+                            """
+                            <div style="padding:16px 18px; border-radius:20px; background:linear-gradient(135deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98)); border:1px solid rgba(148,163,184,0.18); box-shadow:0 12px 28px rgba(15,23,42,0.06); margin-bottom:12px;">
+                                <div style="font-size:13px; font-weight:900; color:#0f172a; margin-bottom:8px;">metadata.features</div>
+                                <div style="font-size:13px; line-height:1.65; color:#475569;">검색 필터링과 후속 설명에 쓰이는 구조화 필드입니다.</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.json(signal_features)
+
+                    with st.expander("raw_content 보기", expanded=False):
+                        st.code(str(signal_raw_content)[:4000], language="json")
+    except Exception as error:
+        st.warning(f"signal_news 상세 조회 실패: {error}")
+
+    st.markdown("---")
+
     st.subheader("최근 벡터 이벤트")
     events = status.get("vector_events") or []
     if not events:
@@ -6421,7 +9007,7 @@ def render_live_log_prompt_fragment():
     consume_ws_snapshot_buffer()
     render_agent_prompt_panel(
         "log",
-        "📄 로그 에이전트 프롬프트 입력값",
+        "📄 대출상품 Dashboard",
         "#92400e",
         "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))",
     )
@@ -6531,50 +9117,56 @@ if "initial_analysis_failed" not in st.session_state:
     st.session_state.initial_analysis_failed = False
 
 if "initial_analysis_autorun_disabled" not in st.session_state:
-    st.session_state.initial_analysis_autorun_disabled = True
+    st.session_state.initial_analysis_autorun_disabled = False
+
+if "initial_loading_reason" not in st.session_state:
+    st.session_state.initial_loading_reason = None
+
+if HAS_FRAGMENT_REFRESH:
+    monitor_backend_bootstrap_fragment()
 
 if not st.session_state.initial_analysis_done:
-    startup_header = st.empty()
-    startup_header.subheader("⏳ 초기 데이터 준비")
-    startup_status = st.empty()
-    startup_status.info("기존 백엔드 상태와 저장된 FAISS를 먼저 확인합니다.")
-
     try:
-        get_backend_client().start_worker(interval_seconds=10)
+        get_backend_client().start_worker(interval_seconds=1)
     except Exception:
         pass
 
+    status_payload = {}
     try:
         status_payload = get_backend_client().get_status()
         sync_session_from_backend(status_payload)
-        if status_payload.get("results") or status_payload.get("news") or status_payload.get("vector_count"):
-            st.session_state.initial_analysis_done = True
-            startup_header.empty()
-            startup_status.empty()
+        _sync_backend_bootstrap_state(status_payload)
     except Exception:
-        pass
+        _sync_backend_bootstrap_state(None)
 
     if not st.session_state.initial_analysis_done:
-        st.session_state.initial_analysis_started = False
-        st.session_state.initial_analysis_failed = False
-        startup_status.info(
-            "자동 전체 분석은 비활성화되어 있습니다. 기존 데이터가 없으면 수동으로 전체 분석을 실행하세요."
-        )
+        with _background_lock:
+            initial_task = dict(_background_results.get("initial_analysis") or {})
+        if not st.session_state.initial_analysis_started and initial_task.get("status") != "running":
+            launched = _start_initial_analysis_background(log_dir="data/logs")
+            st.session_state.initial_analysis_started = launched or st.session_state.initial_analysis_started
+        if HAS_FRAGMENT_REFRESH:
+            render_live_initial_loading_fragment()
+        else:
+            render_initial_loading_screen()
 
     with _background_lock:
-        initial_task = _background_results.get("initial_analysis")
+        initial_task = dict(_background_results.get("initial_analysis") or {})
     if initial_task:
         if initial_task.get("status") == "completed":
             sync_session_from_backend(initial_task.get("result") or {})
-            st.session_state.initial_analysis_done = True
+            st.session_state.initial_analysis_done = _is_initial_dashboard_ready(
+                initial_task.get("result") or {}
+            )
             st.session_state.initial_analysis_failed = False
-            startup_header.empty()
-            startup_status.empty()
             with _background_lock:
                 _background_results.pop("initial_analysis", None)
         elif initial_task.get("status") == "failed":
             st.session_state.initial_analysis_failed = True
-            startup_status.warning("초기 분석이 지연되고 있습니다. 화면은 계속 사용할 수 있습니다.")
+            st.warning("초기 분석이 지연되고 있습니다. 백엔드 상태를 확인하세요.")
+
+    if not st.session_state.initial_analysis_done:
+        st.stop()
 
 
 # -------------------------------
@@ -6601,6 +9193,11 @@ with col_left:
 # 🧠 MAIN
 # -------------------------------
 with col_main:
+    if HAS_FRAGMENT_REFRESH:
+        render_global_ollama_toast_fragment()
+    else:
+        render_ollama_toast()
+
     if not HAS_FRAGMENT_REFRESH:
         # fragment 미지원 환경에서는 왼쪽 뉴스 패널이 상태 동기화만 사용하므로 메인에서 한 번 가져옵니다.
         if "last_news_time" not in st.session_state:
@@ -6622,13 +9219,12 @@ with col_main:
 
     main_sections = [
         "🤖 운영 현황",
-        "💬 AI 심사 전략",
-        "📰 뉴스 에이전트 입력",
-        "📄 로그 에이전트 입력",
+        "💬 AI 카드론 토론실",
+        "📄 대출상품 Dashboard",
         "🧠 Vector DB",
     ]
     if "main_dashboard_section" not in st.session_state:
-        st.session_state.main_dashboard_section = main_sections[0]
+        st.session_state.main_dashboard_section = main_sections[1]
     render_main_section_status_styles()
 
     if hasattr(st, "segmented_control"):
@@ -6636,7 +9232,6 @@ with col_main:
             "메인 섹션",
             options=main_sections,
             selection_mode="single",
-            default=st.session_state.main_dashboard_section,
             key="main_dashboard_section",
             label_visibility="collapsed",
         )
@@ -6651,8 +9246,7 @@ with col_main:
 
     if selected_section == "🤖 운영 현황":
         if HAS_FRAGMENT_REFRESH:
-            consume_ws_snapshot_buffer()
-            render_operations_showcase()
+            render_live_operations_showcase_fragment()
         else:
             render_operations_showcase()
 
@@ -6662,31 +9256,16 @@ with col_main:
             else:
                 render_runtime_dashboard()
 
-    elif selected_section == "💬 AI 심사 전략":
+    elif selected_section == "💬 AI 카드론 토론실":
         render_role_based_strategy_tab()
 
-    elif selected_section == "📰 뉴스 에이전트 입력":
-        if HAS_FRAGMENT_REFRESH:
-            render_live_news_prompt_fragment()
-        else:
-            render_agent_prompt_panel(
-                "news",
-                "📰 뉴스 에이전트 프롬프트 입력값",
-                "#0f766e",
-                "linear-gradient(135deg, rgba(236,254,255,0.98), rgba(240,249,255,0.98))",
-            )
-
-        st.info(
-            "규제 문서 업로드는 왼쪽 사이드바 '실시간 뉴스 더보기' 아래로 이동했습니다."
-        )
-
-    elif selected_section == "📄 로그 에이전트 입력":
+    elif selected_section == "📄 대출상품 Dashboard":
         if HAS_FRAGMENT_REFRESH:
             render_live_log_prompt_fragment()
         else:
             render_agent_prompt_panel(
                 "log",
-                "📄 로그 에이전트 프롬프트 입력값",
+                "📄 대출상품 Dashboard",
                 "#92400e",
                 "linear-gradient(135deg, rgba(255,251,235,0.98), rgba(254,243,199,0.98))",
             )

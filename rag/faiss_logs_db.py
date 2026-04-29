@@ -24,9 +24,30 @@ PRODUCT_RATE_FIELD_CODES = {
     "C12": "R0004",
 }
 
+DECISION_AMOUNT_FIELD_CODES = {
+    "C9": "R0002",
+    "C6": "R0020",
+    "C11": "R0008",
+    "C12": "R0002",
+}
+
+DSR_FIELD_CODES = {
+    "C9": "R0101",
+    "C11": "R0047",
+}
+
+RECOGNIZED_INCOME_FIELD_CODES = {
+    "C9": "R0050",
+    "C6": "R0060",
+    "C11": "R0048",
+    "C12": "R0044",
+}
+
 
 IN_FIELD_SPECS = [
     ("소득", [("소득",), ("연소득",), ("최종연소득",), ("income",)]),
+    ("연령", [("연령",), ("나이",), ("age",)]),
+    ("외국인여부", [("외국인",), ("외국인", "여부"), ("국적",), ("foreigner",)]),
     ("건강보험가입자구분", [("건강보험", "구분")]),
     ("접수번호", [("접수번호",), ("신청서접수번호",), ("req",)]),
     ("채널구분", [("채널구분",)]),
@@ -46,10 +67,59 @@ OUT_FIELD_SPECS = [
 ]
 
 
+def _stringify_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _compose_structured_log_payload(record: PreparedLogRecord) -> tuple[str, dict[str, Any]]:
+    features = record.get("features") or {}
+    mapped_out = record.get("mapped_out") or {}
+    product_name = str(record.get("product_display") or record.get("product") or "대출상품").strip()
+    decision = str(mapped_out.get("승인 여부") or features.get("decision") or "심사판단미상").strip()
+    knockout_reasons = [
+        str(item.get("description") or item.get("code") or "").strip()
+            for item in (record.get("reject_reason_details") or [])
+            if str(item.get("description") or item.get("code") or "").strip()
+        ]
+    if not knockout_reasons:
+        knockout_reasons = [
+            str(item).strip()
+            for item in (record.get("reject_reason_codes") or [])
+            if str(item).strip()
+        ]
+    primary_reason = knockout_reasons[0] if knockout_reasons else (decision or "사유미상")
+
+    metadata = {
+        "인정소득": _stringify_value(features.get("recognized_income") or features.get("annual_income") or ""),
+        "금리": _stringify_value(features.get("applied_rate") or mapped_out.get("산출금리") or ""),
+        "KCB점수": _stringify_value(features.get("kcb_score") or features.get("credit_score") or ""),
+        "NICE점수": _stringify_value(features.get("nice_score") or ""),
+        "연령": _stringify_value(features.get("age") or ""),
+        "외국인여부": _stringify_value(features.get("foreigner") or ""),
+        "dti": _stringify_value(features.get("dti") or ""),
+        "dsr비율": _stringify_value(features.get("dsr_ratio") or mapped_out.get("DSR") or ""),
+        "심사결과": decision,
+        "KNOCK-OUT 사유": knockout_reasons,
+    }
+    text = (
+        f"[대출심사][{decision or '심사판단미상'}][{primary_reason}] 고객은 {product_name} 심사시 "
+        f"연소득 {metadata['인정소득'] or '-'}원, 신용점수 KCB {metadata['KCB점수'] or '-'} / NICE {metadata['NICE점수'] or '-'}, "
+        f"DTI {metadata['dti'] or '-'}%, DSR {metadata['dsr비율'] or '-'}로 대출 심사에서 {decision or '심사판단미상'}됨. "
+        f"금리 {metadata['금리'] or '-'} 수준으로 검토되었고, {primary_reason} 상태이다. "
+        f"이 사례는 {primary_reason}로 {decision or '심사판단미상'}된 사례이다. 요약: {product_name} 상품의 {primary_reason} 케이스."
+    )
+    return text, metadata
+
+
 def prepare_log_records(
     logs: list[dict[str, Any]],
     logger,
     *,
+    show_progress: bool = False,
     should_skip_log: Callable[[dict[str, Any]], bool],
     sanitize_fields: Callable[[dict[str, Any], set[str] | None], dict[str, Any]],
     sanitize_mapping: Callable[[dict[str, Any]], dict[str, Any]],
@@ -78,6 +148,21 @@ def prepare_log_records(
             if _match_tokens(label, token_groups) or _match_tokens(key, token_groups):
                 return clean_text(value)
         return ""
+
+    def _pick_value_by_field_code(
+        fields: dict[str, Any],
+        field_code: str | None,
+        normalizer: Callable[[Any], str] | None = None,
+    ) -> str:
+        code = clean_text(field_code).upper()
+        if not code:
+            return ""
+        value = fields.get(code)
+        if value in (None, ""):
+            return ""
+        if normalizer is not None:
+            return normalizer(value)
+        return clean_text(value)
 
     def _normalize_dsr_value(value: Any) -> str:
         text = clean_text(value)
@@ -137,11 +222,19 @@ def prepare_log_records(
         return _normalize_rate_value(feature_rate)
 
     def _pick_curated_dsr_value(
+        product_code: Any,
         out_fields: dict[str, Any],
         out_mapping: dict[str, Any],
         in_fields: dict[str, Any],
         in_mapping: dict[str, Any],
     ) -> str:
+        exact_code_value = _pick_value_by_field_code(
+            out_fields,
+            DSR_FIELD_CODES.get(clean_text(product_code).upper()),
+            _normalize_dsr_value,
+        )
+        if exact_code_value:
+            return exact_code_value
         for fields, mapping in ((out_fields, out_mapping), (in_fields, in_mapping)):
             for key, value in fields.items():
                 label = mapping.get(key, key)
@@ -151,43 +244,70 @@ def prepare_log_records(
                         return normalized
         return ""
 
+    def _pick_recognized_income_value(
+        product_code: Any,
+        out_fields: dict[str, Any],
+        in_fields: dict[str, Any],
+    ) -> str:
+        code = RECOGNIZED_INCOME_FIELD_CODES.get(clean_text(product_code).upper())
+        for fields in (out_fields, in_fields):
+            exact_code_value = _pick_value_by_field_code(fields, code)
+            if exact_code_value:
+                return exact_code_value
+        return ""
+
+    def _extract_decision_flag(
+        raw_out_data: str,
+        raw_in_data: str,
+        out_fields: dict[str, Any],
+        in_fields: dict[str, Any],
+    ) -> str:
+        for source_fields in (out_fields, in_fields):
+            for value in source_fields.values():
+                normalized = clean_text(value).upper().replace(" ", "")
+                if normalized == "DR":
+                    return "DR"
+                if normalized == "AA":
+                    return "AA"
+
+        raw_combined = f"{clean_text(raw_out_data)} {clean_text(raw_in_data)}".upper()
+        for pattern, flag in (
+            (r"(?<![A-Z])DR(?![A-Z])", "DR"),
+            (r"(?<![A-Z])AA(?![A-Z])", "AA"),
+        ):
+            if re.search(pattern, raw_combined):
+                return flag
+        return ""
+
     def _extract_decision_value(
+        product_code: Any,
         in_fields: dict[str, Any],
         out_fields: dict[str, Any],
         reject_reason_text: str,
         raw_out_data: str = "",
         raw_in_data: str = "",
     ) -> str:
-        raw_combined = f"{clean_text(raw_out_data)} {clean_text(raw_in_data)}".strip()
-        raw_upper = raw_combined.upper()
-        raw_lower = raw_combined.lower()
+        exact_amount_code = DECISION_AMOUNT_FIELD_CODES.get(clean_text(product_code).upper())
+        exact_amount_value = _pick_value_by_field_code(
+            out_fields,
+            exact_amount_code,
+            clean_text,
+        )
+        if exact_amount_value:
+            amount_number = _parse_number(exact_amount_value)
+            if amount_number is not None:
+                return "거절" if float(amount_number) == 0 else "승인"
 
-        if "decline" in raw_lower or "reject" in raw_lower or "denied" in raw_lower:
+        decision_flag = _extract_decision_flag(
+            raw_out_data,
+            raw_in_data,
+            out_fields,
+            in_fields,
+        )
+        if decision_flag == "DR":
             return "거절"
-        if "accept" in raw_lower or "approved" in raw_lower or "approve" in raw_lower:
+        if decision_flag == "AA":
             return "승인"
-        if re.search(r"R\d{4}DR(?=\s|[A-Z]\d{4}|$)", raw_upper):
-            return "거절"
-        if re.search(r"R\d{4}AA(?=\s|[A-Z]\d{4}|$)", raw_upper):
-            return "승인"
-
-        for source_fields in (out_fields, in_fields):
-            for value in source_fields.values():
-                cleaned = clean_text(value)
-                text = cleaned.lower()
-                normalized_code = re.sub(r"\s+", "", cleaned).upper()
-                if not text:
-                    continue
-                if normalized_code == "DR":
-                    return "거절"
-                if normalized_code == "AA":
-                    return "승인"
-                if any(token in text for token in ("거절", "불가", "reject", "denied", "불허")):
-                    return "거절"
-                if any(token in text for token in ("승인", "approve", "approved", "ok")):
-                    return "승인"
-        if reject_reason_text:
-            return "거절"
         return ""
 
     def _build_curated_fields(
@@ -207,6 +327,10 @@ def prepare_log_records(
         for display_name, token_groups in IN_FIELD_SPECS:
             value = _pick_curated_value(in_fields, in_mapping, token_groups)
             if not value and display_name == "소득":
+                recognized_income = features.get("recognized_income")
+                if recognized_income not in (None, ""):
+                    value = clean_text(recognized_income)
+            if not value and display_name == "소득":
                 annual_income = features.get("annual_income")
                 if annual_income not in (None, ""):
                     value = clean_text(annual_income)
@@ -221,6 +345,7 @@ def prepare_log_records(
             value = _pick_curated_value(out_fields, out_mapping, token_groups)
             if display_name == "승인 여부":
                 value = _extract_decision_value(
+                    product_code,
                     in_fields,
                     out_fields,
                     reject_reason_text,
@@ -238,6 +363,7 @@ def prepare_log_records(
                 )
             elif display_name == "DSR":
                 value = _pick_curated_dsr_value(
+                    product_code,
                     out_fields,
                     out_mapping,
                     in_fields,
@@ -285,10 +411,17 @@ def prepare_log_records(
             "loan_term_raw": None,
             "credit_grade": None,
             "credit_score": None,
+            "kcb_score": None,
+            "nice_score": None,
+            "age": None,
+            "foreigner": None,
             "annual_income": None,
+            "recognized_income": None,
             "purpose": None,
             "collateral": None,
             "interest_type": None,
+            "dti": None,
+            "dsr_ratio": None,
         }
 
         in_fields = log_item.get("in_fields", {}) or {}
@@ -297,6 +430,7 @@ def prepare_log_records(
         out_mapping = log_item.get("out_mapping", {}) or {}
 
         scan_fields = []
+        product_code = clean_text(features.get("product_code")).upper()
         for source_fields, mapping in ((in_fields, in_mapping), (out_fields, out_mapping)):
             for key, value in source_fields.items():
                 label = str(mapping.get(key, key))
@@ -314,6 +448,11 @@ def prepare_log_records(
             value_text = "" if value is None else str(value)
             label_lower = label.lower()
             value_lower = value_text.lower()
+
+            if features["available_amount"] is None and clean_text(key).upper() == DECISION_AMOUNT_FIELD_CODES.get(product_code, ""):
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["available_amount"] = int(float(number))
 
             if features["available_amount"] is None and (
                 any(token in label_lower for token in ("대출", "한도", "금액", "limit", "available"))
@@ -363,6 +502,13 @@ def prepare_log_records(
                     else:
                         features["credit_grade"] = grade_value.upper()
 
+            if features["recognized_income"] is None and clean_text(key).upper() == RECOGNIZED_INCOME_FIELD_CODES.get(product_code, ""):
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["recognized_income"] = int(float(number))
+                    if features["annual_income"] is None:
+                        features["annual_income"] = int(float(number))
+
             if features["annual_income"] is None and any(token in label_lower for token in ("소득", "연소득", "income", "salary")):
                 number = _parse_number(value_text)
                 if number is not None:
@@ -372,6 +518,49 @@ def prepare_log_records(
                     elif "억" in value_lower:
                         multiplier = 100000000
                     features["annual_income"] = int(float(number) * multiplier)
+
+            if features["recognized_income"] is None and any(token in label_lower for token in ("인정소득", "스크래핑소득", "최종연소득")):
+                number = _parse_number(value_text)
+                if number is not None:
+                    multiplier = 1
+                    if "만원" in value_lower or ("만" in value_lower and re.search(r"\d+만", value_lower)):
+                        multiplier = 10000
+                    elif "억" in value_lower:
+                        multiplier = 100000000
+                    features["recognized_income"] = int(float(number) * multiplier)
+
+            if features["age"] is None and any(token in label_lower for token in ("연령", "나이", "age")):
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["age"] = int(number)
+
+            if features["foreigner"] is None and any(token in label_lower for token in ("외국인", "국적", "내외국인", "foreigner")):
+                features["foreigner"] = value_text
+
+            if features["kcb_score"] is None and "kcb" in label_lower:
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["kcb_score"] = int(number)
+
+            if features["nice_score"] is None and "nice" in label_lower:
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["nice_score"] = int(number)
+
+            if features["dti"] is None and "dti" in label_lower:
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["dti"] = number
+
+            if features["dsr_ratio"] is None and clean_text(key).upper() == DSR_FIELD_CODES.get(product_code, ""):
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["dsr_ratio"] = number
+
+            if features["dsr_ratio"] is None and "dsr" in label_lower:
+                number = _parse_number(value_text)
+                if number is not None:
+                    features["dsr_ratio"] = number
 
             if features["purpose"] is None and any(token in label_lower for token in ("용도", "purpose")):
                 features["purpose"] = value_text
@@ -405,7 +594,8 @@ def prepare_log_records(
             )
             continue
 
-        print(f"로그 처리 중... {index + 1}/{len(logs)}")
+        if show_progress:
+            print(f"로그 처리 중... {index + 1}/{len(logs)}")
 
         in_fields = sanitize_fields(log.get("in_fields", {}) or {}, globally_ignorable_in_keys)
         out_fields = sanitize_fields(log.get("out_fields", {}) or {}, globally_ignorable_out_keys)
@@ -423,11 +613,11 @@ def prepare_log_records(
         out_text = apply_mapping(out_fields, out_mapping)
         reject_reason_text = ", ".join(
             clean_text(
-                f"{item.get('code') or ''} {item.get('description') or ''}".strip()
+                str(item.get('description') or item.get('code') or '').strip()
             )
             for item in reject_reason_details
             if clean_text(
-                f"{item.get('code') or ''} {item.get('description') or ''}".strip()
+                str(item.get('description') or item.get('code') or '').strip()
             )
         )
         features = _extract_features(sanitized_log)
@@ -473,7 +663,13 @@ def prepare_log_records(
                 "mapped_in": mapped_in,
                 "mapped_out": mapped_out,
                 "reject_reason_codes": log.get("reject_reason_codes") or [],
-                "reject_reason_details": reject_reason_details,
+                "reject_reason_details": [
+                    {
+                        **item,
+                        "description": clean_text(item.get("description") or item.get("code") or ""),
+                    }
+                    for item in reject_reason_details
+                ],
                 "features": {
                     **features,
                     "ko_codes": list(
@@ -490,23 +686,92 @@ def prepare_log_records(
 
 
 def build_log_documents(records: list[PreparedLogRecord], store_name: str) -> list[Document]:
-    return [
-        Document(
-            page_content=record["full_text"],
-            metadata={
-                "type": "log",
-                "store": store_name,
-                "product": record.get("product"),
-                "product_name": record.get("product_display") or record.get("product"),
-                "in_fields": record.get("mapped_in") or {},
-                "out_fields": record.get("mapped_out") or {},
-                "reject_reason_codes": record.get("reject_reason_codes") or [],
-                "reject_reason_details": record.get("reject_reason_details") or [],
-                "features": record.get("features") or {},
-            },
+    documents: list[Document] = []
+    for record in records:
+        page_content, template_metadata = _compose_structured_log_payload(record)
+        documents.append(
+            Document(
+                page_content=page_content,
+                metadata={
+                    "type": "log",
+                    "store": store_name,
+                    "product": record.get("product"),
+                    "product_name": record.get("product_display") or record.get("product"),
+                    "name": f"structured log: {record.get('product_display') or record.get('product') or 'case'}",
+                    "in_fields": {},
+                    "out_fields": {},
+                    "reject_reason_codes": record.get("reject_reason_codes") or [],
+                    "reject_reason_details": record.get("reject_reason_details") or [],
+                    "features": template_metadata,
+                },
+            )
         )
-        for record in records
-    ]
+    return documents
+
+
+def build_log_ingest_preview(
+    records: list[PreparedLogRecord],
+    store_name: str,
+    *,
+    preview_limit: int = 5,
+) -> dict[str, Any]:
+    documents = build_log_documents(records, store_name)
+    preview_items: list[dict[str, Any]] = []
+    context_blocks: list[str] = []
+
+    for index, (record, document) in enumerate(
+        zip(records[:preview_limit], documents[:preview_limit]), start=1
+    ):
+        product_code = str(record.get("product") or "").strip().upper()
+        product_name = str(
+            record.get("product_display") or product_code or f"case-{index}"
+        ).strip()
+        doc_metadata = getattr(document, "metadata", {}) or {}
+        features = doc_metadata.get("features") or {}
+        page_content = str(getattr(document, "page_content", "") or "").strip()
+        context_blocks.append(
+            "\n".join(
+                part
+                for part in [
+                    f"[케이스 {index}]",
+                    f"[상품] {product_code or '-'} {product_name}",
+                    page_content,
+                ]
+                if part
+            )
+        )
+        preview_items.append(
+            {
+                "product": product_code,
+                "product_name": product_name,
+                "page_content": page_content,
+                "features": features,
+                "reject_reason_codes": record.get("reject_reason_codes") or [],
+            }
+        )
+
+    payload = {
+        "store": store_name,
+        "record_count": len(records),
+        "document_count": len(documents),
+        "preview_limit": preview_limit,
+        "preview_documents": preview_items,
+    }
+    context_text = "\n\n".join(block for block in context_blocks if block).strip()
+
+    return {
+        "source": "faiss_logs_db.py structured ingest",
+        "mode": "faiss_ingest",
+        "user_input": (
+            f"실제 심사로그 {len(records)}건을 OLLAMA 호출 없이 정제하여 "
+            f"{store_name} FAISS store에 적재"
+        ),
+        "context": context_text or "관련 데이터가 없습니다.",
+        "prompt": json.dumps(payload, ensure_ascii=False, indent=2),
+        "record_count": len(records),
+        "document_count": len(documents),
+        "preview_documents": preview_items,
+    }
 
 
 def format_log_search_results(
@@ -518,7 +783,17 @@ def format_log_search_results(
         meta = getattr(doc, "metadata", {}) or {}
         in_fields = meta.get("in_fields") or {}
         out_fields = meta.get("out_fields") or {}
-        in_text = apply_mapping(in_fields, {})
-        out_text = apply_mapping(out_fields, {})
-        formatted.append(f"[상품] {meta.get('product_name') or meta.get('product')} [IN] {in_text} [OUT] {out_text}")
+        features = meta.get("features") or {}
+        if in_fields or out_fields:
+            in_text = apply_mapping(in_fields, {})
+            out_text = apply_mapping(out_fields, {})
+            formatted.append(f"[상품] {meta.get('product_name') or meta.get('product')} [IN] {in_text} [OUT] {out_text}")
+            continue
+        formatted.append(
+            f"[상품] {meta.get('product_name') or meta.get('product')} "
+            f"[심사결과] {features.get('심사결과') or '-'} "
+            f"[DTI] {features.get('dti') or '-'} "
+            f"[DSR] {features.get('dsr비율') or '-'} "
+            f"[KO] {', '.join(features.get('KNOCK-OUT 사유') or []) or '-'}"
+        )
     return formatted

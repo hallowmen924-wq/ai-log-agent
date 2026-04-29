@@ -35,6 +35,21 @@ class SearchRequest(BaseModel):
 
 class StrategyChatRequest(BaseModel):
     question: str
+    news_prompt_template: str | None = None
+    log_prompt_template: str | None = None
+
+
+class CardloanDebateRequest(BaseModel):
+    question: str
+    reviewer_prompts: dict[str, str] = Field(default_factory=dict)
+
+
+class NewsPromptTemplateRequest(BaseModel):
+    template: str | None = None
+
+
+class LogPromptTemplateRequest(BaseModel):
+    template: str | None = None
 
 
 class StrategyChatResponse(BaseModel):
@@ -46,8 +61,18 @@ class StrategyChatResponse(BaseModel):
     vector_update: dict[str, int] = Field(default_factory=dict)
 
 
+class CardloanDebateResponse(BaseModel):
+    status: str = "completed"
+    question: str | None = None
+    summary: str = ""
+    round_results: list[dict[str, Any]] = Field(default_factory=list)
+    current_stage: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
 class WorkerConfigRequest(BaseModel):
-    interval_seconds: int = 10
+    interval_seconds: int = 1
 
 
 class FullAnalysisResponse(BaseModel):
@@ -68,14 +93,18 @@ class FullAnalysisResponse(BaseModel):
     last_log_briefing_time: str | None = None
     latest_log_prompt_input: dict[str, Any] = Field(default_factory=dict)
     last_log_prompt_input_time: str | None = None
+    log_prompt_template_override: str | None = None
     latest_news_briefing: str | None = None
     last_news_briefing_time: str | None = None
     latest_news_prompt_input: dict[str, Any] = Field(default_factory=dict)
     last_news_prompt_input_time: str | None = None
+    news_prompt_template_override: str | None = None
     agent_statuses: dict[str, dict[str, Any]] = Field(default_factory=dict)
     agent_activity_log: list[dict[str, Any]] = Field(default_factory=list)
     vector_events: list[dict[str, Any]] = Field(default_factory=list)
     last_faiss_time: str | None = None
+    ollama_runtime: dict[str, Any] = Field(default_factory=dict)
+    cardloan_debate: dict[str, Any] = Field(default_factory=dict)
     backend_diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 

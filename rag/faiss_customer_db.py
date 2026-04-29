@@ -7,9 +7,10 @@ from langchain_core.documents import Document
 
 CUSTOMER_SEARCH_TYPES = {
     "customer_pattern",
+    "product_pattern_summary",
     "sales_strategy",
-    "agent_report_decision",
-    "agent_report_customer",
+    "generated_decision",
+    "generated_customer",
 }
 
 

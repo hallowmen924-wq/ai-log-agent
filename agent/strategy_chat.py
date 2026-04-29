@@ -1,27 +1,75 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import threading
 from typing import Any, Callable
 
 import requests
 
 from mapper.reject_code_mapper import format_reject_reason_details
 from rag.product_pattern_summary import (
+    DEFAULT_SUMMARY_PATH,
     format_product_pattern_summary_for_prompt,
     load_product_pattern_summary,
 )
 from rag.vector_db import (
     get_vector_count,
-    save_agent_reports,
+    save_generated_documents,
     search_news_context,
     search_similar_logs,
 )
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_LIGHTWEIGHT_MODEL = os.environ.get("OLLAMA_LIGHTWEIGHT_MODEL", "mistral")
+OLLAMA_EXECUTION_LOCK = threading.RLock()
+
+DEFAULT_LOG_AGENT_PROMPT_TEMPLATE = """당신은 금융 심사 로그 분석가입니다.
+
+[상품별 승인/거절 패턴 요약]
+{product_pattern_summary}
+
+출력 형식:
+1) 심사시스템 상태: 정상/과부하/지연/오류 등
+2) 이상 징후: 한도/금리/승인 여부 중심으로 1~2문장
+3) 조치: 1~2개
+""".strip()
+
+DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE = """너는 금융 뉴스 분석 AI다.
+
+다음 뉴스에서 "대출 심사 영향 신호"를 추출하라.
+
+[규칙]
+- 반드시 JSON만 출력
+- 설명 금지
+- 항목 수 제한 준수
+
+[출력 형식]
+{
+  "태그": [],
+  "요약": "",
+  "위험신호": [],
+  "검색텍스트": "",
+  "영향점수": 0,        // 1~5 (심사 영향도)
+  "긴급점수": 0,       // 1~5 (심사시스템 단기 영향 여부)
+  "비즈니스점수": 0       // 1~5 (신상품 기회 또는 수익 영향)
+}
+
+[평가 기준]
+- 영향점수: 심사 기준 변화 가능성
+- 긴급점수: 심사시스템 단기 영향 여부
+- 비즈니스점수: 신상품 기회 또는 수익 영향
+
+뉴스:
+{news_text}""".strip()
 
 
 class OllamaUnavailableError(RuntimeError):
     pass
+
+
+OllamaProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
 def _build_ollama_unavailable_message() -> str:
@@ -32,22 +80,116 @@ def _build_ollama_unavailable_message() -> str:
     )
 
 
-def mistral_generate(prompt: str) -> str:
-    try:
-        response = requests.post(
-            OLLAMA_URL,
-            json={"model": "mistral", "prompt": prompt, "stream": False},
-            timeout=180,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except requests.RequestException as error:
-        raise OllamaUnavailableError(_build_ollama_unavailable_message()) from error
+def _ollama_generate(
+    model: str,
+    prompt: str,
+    *,
+    options: dict[str, Any] | None = None,
+    progress_callback: OllamaProgressCallback | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": True,
+    }
+    if options:
+        payload["options"] = options
 
-    answer = str(payload.get("response", "")).strip()
+    if progress_callback is not None:
+        progress_callback("start", {"model": model, "prompt": prompt})
+
+    parts: list[str] = []
+    try:
+        with OLLAMA_EXECUTION_LOCK:
+            with requests.post(
+                OLLAMA_URL,
+                json=payload,
+                timeout=180,
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                for raw_line in response.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    try:
+                        chunk_payload = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    error_message = str(chunk_payload.get("error") or "").strip()
+                    if error_message:
+                        raise RuntimeError(error_message)
+
+                    chunk_text = str(chunk_payload.get("response") or "")
+                    if chunk_text:
+                        parts.append(chunk_text)
+                        if progress_callback is not None:
+                            progress_callback(
+                                "chunk",
+                                {
+                                    "model": model,
+                                    "chunk": chunk_text,
+                                    "text": "".join(parts),
+                                },
+                            )
+
+                    if chunk_payload.get("done"):
+                        break
+    except requests.RequestException as error:
+        if progress_callback is not None:
+            progress_callback(
+                "failed",
+                {"model": model, "error": _build_ollama_unavailable_message()},
+            )
+        raise OllamaUnavailableError(_build_ollama_unavailable_message()) from error
+    except Exception as error:
+        if progress_callback is not None:
+            progress_callback(
+                "failed",
+                {"model": model, "error": str(error)},
+            )
+        raise
+
+    answer = "".join(parts).strip()
     if not answer:
+        if progress_callback is not None:
+            progress_callback(
+                "failed",
+                {"model": model, "error": "Ollama 응답 본문이 비어 있습니다."},
+            )
         raise RuntimeError("Ollama 응답 본문이 비어 있습니다.")
+
+    if progress_callback is not None:
+        progress_callback("completed", {"model": model, "text": answer})
     return answer
+
+
+def mistral_generate(
+    prompt: str,
+    progress_callback: OllamaProgressCallback | None = None,
+) -> str:
+    return _ollama_generate(
+        "mistral",
+        prompt,
+        progress_callback=progress_callback,
+    )
+
+
+def lightweight_ollama_generate(
+    prompt: str,
+    progress_callback: OllamaProgressCallback | None = None,
+) -> str:
+    return _ollama_generate(
+        OLLAMA_LIGHTWEIGHT_MODEL,
+        prompt,
+        options={
+            "num_gpu": 0,
+            "num_ctx": 1024,
+            "num_predict": 220,
+            "temperature": 0.1,
+        },
+        progress_callback=progress_callback,
+    )
 
 
 def emit_agent_event(
@@ -219,18 +361,25 @@ def trim_news_items(news_items: list[dict[str, Any]], limit: int = 1) -> str:
         return "관련 데이터가 없습니다."
 
     crawled_items = [
-        item for item in news_items if str(item.get("content", "")).strip()
+        item
+        for item in news_items
+        if str(item.get("content", "")).strip()
+        or str(item.get("summary", "")).strip()
+        or str(item.get("title", "")).strip()
     ]
     selected_items = crawled_items[:limit]
 
     if not selected_items:
-        return "관련 데이터가 없습니다. 아직 본문 크롤링이 완료되지 않았습니다."
+        return "관련 데이터가 없습니다. 아직 기사 요약이 준비되지 않았습니다."
 
     snippets = []
     for item in selected_items:
         title = str(item.get("title", "")).strip()
+        summary = str(item.get("summary", "")).strip()
         content = str(item.get("content", "")).strip()
-        snippets.append(f"제목: {title}\n본문: {content}")
+        body = summary or content
+        compact_body = " ".join(body.split())[:280]
+        snippets.append(f"제목: {title}\n요약: {compact_body}")
     return "\n\n".join(snippets)
 
 
@@ -386,7 +535,7 @@ def extract_product_codes_from_log_context(log_context: str) -> list[str]:
 
 
 def build_product_pattern_context(log_context: str) -> str:
-    summary = load_product_pattern_summary()
+    summary = load_product_pattern_summary(DEFAULT_SUMMARY_PATH)
     product_codes = extract_product_codes_from_log_context(log_context)
     return format_product_pattern_summary_for_prompt(
         summary,
@@ -394,52 +543,38 @@ def build_product_pattern_context(log_context: str) -> str:
     )
 
 
-def build_log_agent_prompt(log_context: str, user_input: str) -> str:
-    product_pattern_context = build_product_pattern_context(log_context)
-    return f"""
-당신은 금융 심사 로그 분석가입니다.
-
-[참고] 상품 코드 의미: C6=신용대출, C9=카드론, C11=개인사업자대출, C12=대환대출
-
-[요청]
-사용자 질문: {user_input}
-
-[상품별 승인/거절 패턴 요약]
-{product_pattern_context}
-
-[로그(상품별로 묶여있음)]
-{log_context}
-
-답변 시 반드시 아래 항목에 집중하세요: '한도(대출 가능 금액)', '금리(적용 금리)', '승인 여부(승인/거절/조건부)', '거절 사유 코드와 설명'
-
-출력 형식(한국어):
-1) 요약 판단 (승인/조건부 승인/거절)
-2) 핵심 근거 (한도/금리/승인 여부 관련 근거를 중심으로 최대 3개)
-3) 위험 패턴 및 우려 사항
-4) 즉각 권장 조치(우선순위별로 3개 이내)
-
-간결하고 실무적으로 작성하세요.
-""".strip()
+def build_log_agent_prompt(
+    log_context: str,
+    user_input: str,
+    prompt_template: str | None = None,
+    similar_cases_text: str | None = None,
+    product_pattern_context: str | None = None,
+) -> str:
+    summary_context = str(
+        product_pattern_context
+        if product_pattern_context is not None
+        else build_product_pattern_context(log_context)
+    ).strip()
+    template = str(prompt_template or DEFAULT_LOG_AGENT_PROMPT_TEMPLATE).strip()
+    prompt = template.replace("{user_input}", user_input)
+    prompt = prompt.replace("{product_pattern_summary}", summary_context)
+    prompt = prompt.replace("{log_text}", log_context)
+    prompt = prompt.replace(
+        "{similar_cases}",
+        str(similar_cases_text or "(유사 사례는 실행 시점에 자동 주입됩니다.)"),
+    )
+    return prompt.strip()
 
 
-def build_news_agent_prompt(news_context: str, user_input: str) -> str:
-    return f"""
-당신은 금융 시장 분석가입니다.
-
-[사용자 질문]
-{user_input}
-
-[뉴스]
-{news_context}
-
-반드시 아래 형식으로 답하세요.
-1. 현재 금융 리스크 수준
-2. 대출 시장 영향
-3. 규제 강화 가능성
-4. 시장 리스크 점수: LOW, MEDIUM, HIGH 중 하나
-
-간결하지만 근거 중심으로 작성하세요.
-""".strip()
+def build_news_agent_prompt(
+    news_context: str,
+    user_input: str,
+    prompt_template: str | None = None,
+) -> str:
+    template = str(prompt_template or DEFAULT_NEWS_AGENT_PROMPT_TEMPLATE).strip()
+    prompt = template.replace("{news_text}", news_context)
+    prompt = prompt.replace("{user_input}", user_input)
+    return prompt.strip()
 
 
 def build_news_fallback_briefing(news_items: list[dict[str, Any]]) -> str:
@@ -451,25 +586,39 @@ def build_news_fallback_briefing(news_items: list[dict[str, Any]]) -> str:
 
     headline_text = ", ".join(headlines) if headlines else "수집된 주요 기사 제목 없음"
     return (
-        "1. 현재 금융 리스크 수준\n"
-        "Ollama 연결 실패로 정밀 요약은 생략했습니다. 현재 뉴스 원문은 수집되어 있으며 운영자 확인이 필요합니다.\n\n"
-        "2. 대출 시장 영향\n"
-        f"주요 기사: {headline_text}\n"
-        "시장 변동성과 규제 이슈 가능성을 수동 검토하세요.\n\n"
-        "3. 규제 강화 가능성\n"
-        "자동 해석 불가 상태입니다. 규제 키워드 포함 기사부터 우선 검토가 필요합니다.\n\n"
-        "4. 시장 리스크 점수\n"
-        "MEDIUM"
+        "{\n"
+        '  "tags": ["뉴스수집", "수동검토"],\n'
+        '  "signal_summary": "Ollama 연결 실패로 자동 신호 추출을 완료하지 못했습니다.",\n'
+        '  "risk_signal": ["자동 뉴스 신호 추출 실패", "수동 검토 필요"],\n'
+        '  "opportunity_signal": ["수집된 기사 제목 기반으로 수동 태깅 가능"],\n'
+        '  "linked_decision": ["규제/금리/대출 키워드 포함 기사 우선 검토"],\n'
+        f'  "search_text": "[뉴스수집][수동검토] 주요 기사 {headline_text} 자동 신호 추출 실패로 수동 검토가 필요합니다."\n'
+        "}"
     )
 
 
 def build_agent_prompt_input(
-    agent: str, context_text: str, user_input: str, source: str
+    agent: str,
+    context_text: str,
+    user_input: str,
+    source: str,
+    news_prompt_template: str | None = None,
+    log_prompt_template: str | None = None,
+    log_product_pattern_summary: str | None = None,
 ) -> dict[str, str]:
     prompt = (
-        build_log_agent_prompt(context_text, user_input)
+        build_log_agent_prompt(
+            context_text,
+            user_input,
+            prompt_template=log_prompt_template,
+            product_pattern_context=log_product_pattern_summary,
+        )
         if agent == "log_agent"
-        else build_news_agent_prompt(context_text, user_input)
+        else build_news_agent_prompt(
+            context_text,
+            user_input,
+            prompt_template=news_prompt_template,
+        )
     )
     return {
         "agent": agent,
@@ -477,21 +626,39 @@ def build_agent_prompt_input(
         "user_input": user_input,
         "context": context_text,
         "prompt": prompt,
+        "template_mode": (
+            "custom"
+            if agent == "log_agent" and str(log_prompt_template or "").strip()
+            else (
+                "custom"
+                if agent == "news_agent" and str(news_prompt_template or "").strip()
+                else "default"
+            )
+        ),
     }
 
 
-def log_agent(log_context: str, user_input: str) -> str:
-    # 사례 기반 검색 + LLM 추론으로 원인과 조치 도출
-    try:
-        return case_based_log_inference(user_input, extra_context=log_context, k=5)
-    except Exception:
-        # 폴백: 기존 방식
-        prompt = build_log_agent_prompt(log_context, user_input)
-        return mistral_generate(prompt)
+def log_agent(
+    log_context: str,
+    user_input: str,
+    prompt_template: str | None = None,
+    product_pattern_context: str | None = None,
+    progress_callback: OllamaProgressCallback | None = None,
+) -> str:
+    prompt = build_log_agent_prompt(
+        log_context,
+        user_input,
+        prompt_template=prompt_template,
+        product_pattern_context=product_pattern_context,
+    )
+    return lightweight_ollama_generate(prompt, progress_callback=progress_callback)
 
 
 def case_based_log_inference(
-    query: str, extra_context: str | None = None, k: int = 5
+    query: str,
+    extra_context: str | None = None,
+    k: int = 5,
+    prompt_template: str | None = None,
 ) -> str:
     """Search similar cases in the Vector DB and call Ollama to infer cause and remediation.
 
@@ -535,34 +702,126 @@ def case_based_log_inference(
     cases_block = "\n\n".join(case_texts) if case_texts else "(유사 사례 없음)"
     product_pattern_context = build_product_pattern_context(extra_context or "")
 
-    prompt = f"""
-당신은 금융 로그 분석 전문가입니다.
-
-[질문]
-{query}
-
-[상품별 승인/거절 패턴 요약]
-{product_pattern_context}
-
-[추가 로그 컨텍스트]
-{extra_context or '(없음)'}
-
-[유사 사례]
-{cases_block}
-
-요구사항:
-1) 원인(간결하게 3개 내외)
-2) 조치(우선순위가 높은 것부터 3개 내외, 실행 가능한 단계로 작성)
-
-각 항목을 번호매겨서 한국어로 작성하세요. 근거가 되는 유사사례 번호를 괄호로 표기하세요.
-""".strip()
+    prompt = build_log_agent_prompt(
+        extra_context or "(없음)",
+        query,
+        prompt_template=prompt_template,
+        similar_cases_text=cases_block,
+    )
 
     return mistral_generate(prompt)
 
 
-def news_agent(news_context: str, user_input: str) -> str:
-    prompt = build_news_agent_prompt(news_context, user_input)
-    return mistral_generate(prompt)
+def build_log_generated_payload(
+    analysis: str,
+    title: str,
+    product_name: str | None,
+    features: dict[str, Any] | None,
+) -> dict[str, Any]:
+    feature_map = features or {}
+    decision = str(
+        feature_map.get("심사결과")
+        or feature_map.get("decision")
+        or "심사판단미상"
+    ).strip()
+    knockout_reasons = feature_map.get("KNOCK-OUT 사유") or []
+    if not isinstance(knockout_reasons, list):
+        knockout_reasons = [str(knockout_reasons)] if knockout_reasons else []
+    primary_reason = str(knockout_reasons[0]).strip() if knockout_reasons else "사유미상"
+    product_label = str(product_name or title or "대출상품").strip()
+    recognized_income = str(feature_map.get("인정소득") or "").strip()
+    applied_rate = str(feature_map.get("금리") or "").strip()
+    kcb_score = str(feature_map.get("KCB점수") or "").strip()
+    nice_score = str(feature_map.get("NICE점수") or "").strip()
+    dti_ratio = str(feature_map.get("dti") or "").strip()
+    dsr_ratio = str(feature_map.get("dsr비율") or "").strip()
+    summary = " ".join(str(analysis or "").split())[:220]
+    text = (
+        f"[대출심사][{decision}][{primary_reason}] 고객은 {product_label} 심사시 "
+        f"연소득 {recognized_income or '-'}원, 신용점수 KCB {kcb_score or '-'} / NICE {nice_score or '-'}, "
+        f"DTI {dti_ratio or '-'}%, DSR {dsr_ratio or '-'}로 대출 심사에서 {decision}됨. "
+        f"금리 {applied_rate or '-'} 수준으로 검토되었고, 주요 사유는 {primary_reason}이다. "
+        f"요약: {summary or '로그 에이전트 분석 결과.'}"
+    )
+    return {
+        "text": text,
+        "metadata": {
+            "인정소득": recognized_income,
+            "금리": applied_rate,
+            "KCB점수": kcb_score,
+            "NICE점수": nice_score,
+            "dti": dti_ratio,
+            "dsr비율": dsr_ratio,
+            "심사결과": decision,
+            "KNOCK-OUT 사유": knockout_reasons,
+        },
+    }
+
+
+def news_agent(
+    news_context: str,
+    user_input: str,
+    prompt_template: str | None = None,
+    progress_callback: OllamaProgressCallback | None = None,
+) -> str:
+    prompt = build_news_agent_prompt(
+        news_context,
+        user_input,
+        prompt_template=prompt_template,
+    )
+    return lightweight_ollama_generate(prompt, progress_callback=progress_callback)
+
+
+def extract_product_codes_from_log_items(log_items: list[dict[str, Any]]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in log_items:
+        product_code = str(item.get("product") or item.get("product_code") or "").strip().upper()
+        if not product_code or product_code in seen:
+            continue
+        seen.add(product_code)
+        ordered.append(product_code)
+    return ordered
+
+
+def build_product_pattern_context_from_log_items(log_items: list[dict[str, Any]]) -> str:
+    summary = load_product_pattern_summary(DEFAULT_SUMMARY_PATH)
+    product_codes = extract_product_codes_from_log_items(log_items)
+    return format_product_pattern_summary_for_prompt(
+        summary,
+        product_codes=product_codes,
+    )
+
+
+def parse_news_signal_payload(news_result: str) -> dict[str, Any]:
+    text = str(news_result or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def format_news_signal_for_decision(news_result: str) -> str:
+    payload = parse_news_signal_payload(news_result)
+    if not payload:
+        return str(news_result or "").strip() or "뉴스 신호 데이터가 없습니다."
+
+    tags = ", ".join(str(item).strip() for item in payload.get("tags") or [] if str(item).strip()) or "-"
+    risk_signal = "; ".join(str(item).strip() for item in payload.get("risk_signal") or [] if str(item).strip()) or "-"
+    opportunity_signal = "; ".join(str(item).strip() for item in payload.get("opportunity_signal") or [] if str(item).strip()) or "-"
+    linked_decision = "; ".join(str(item).strip() for item in payload.get("linked_decision") or [] if str(item).strip()) or "-"
+    signal_summary = str(payload.get("signal_summary") or "").strip() or "-"
+
+    return (
+        f"- 핵심 변화: {signal_summary}\n"
+        f"- 검색 태그: {tags}\n"
+        f"- 리스크 신호: {risk_signal}\n"
+        f"- 기회 신호: {opportunity_signal}\n"
+        f"- 심사/상품 연결 판단: {linked_decision}"
+    )
 
 
 def regulation_agent(rule_context: str, log_context: str, user_input: str) -> str:
@@ -587,32 +846,43 @@ def regulation_agent(rule_context: str, log_context: str, user_input: str) -> st
     return mistral_generate(prompt)
 
 
-def decision_agent(
-    log_result: str, news_result: str, rule_result: str, user_input: str
-) -> str:
-    prompt = f"""
-당신은 대출 심사 책임자입니다.
+def _pick_primary_sentence(text: str, fallback: str) -> str:
+    normalized = " ".join(str(text or "").split())
+    if not normalized:
+        return fallback
 
-[사용자 질문]
-{user_input}
+    parts = re.split(r"(?<=[.!?])\s+|\n+", normalized)
+    for part in parts:
+        candidate = str(part).strip()
+        if candidate:
+            return candidate[:180]
+    return fallback
 
-[로그 분석]
-{log_result}
 
-[뉴스 영향]
-{news_result}
+def synthesize_final_decision(log_result: str, news_result: str, rule_result: str) -> str:
+    combined = "\n".join([str(log_result or ""), str(news_result or ""), str(rule_result or "")])
+    verdict = "판단 보류"
+    if "거절" in combined:
+        verdict = "거절"
+    elif "조건부 승인" in combined:
+        verdict = "조건부 승인"
+    elif "승인" in combined:
+        verdict = "승인"
 
-[규제 분석]
-{rule_result}
+    log_summary = _pick_primary_sentence(log_result, "로그 분석 요약이 없습니다.")
+    news_summary = _pick_primary_sentence(
+        format_news_signal_for_decision(news_result),
+        "뉴스 영향 요약이 없습니다.",
+    )
+    rule_summary = _pick_primary_sentence(rule_result, "규제 판단 요약이 없습니다.")
 
-반드시 아래 형식으로 답하세요.
-1. 최종 판단: 승인 / 조건부 승인 / 거절 중 하나
-2. 이유
-3. 리스크 요약
-4. 대응 전략
-5. 추가 확인 필요 항목
-"""
-    return mistral_generate(prompt)
+    return (
+        f"1. 최종 판단: {verdict}\n"
+        f"2. 이유: 로그 분석은 '{log_summary}'로 요약됩니다.\n"
+        f"3. 리스크 요약: 뉴스/외부 환경은 '{news_summary}' 입니다.\n"
+        f"4. 대응 전략: 규제 판단 기준 '{rule_summary}'를 우선 반영합니다.\n"
+        "5. 추가 확인 필요 항목: 최종 승인 전 한도, 규제 적용 대상, 최신 수집 로그를 재확인하세요."
+    )
 
 
 def render_report(
@@ -643,6 +913,10 @@ def strategy_chat(
     user_input: str,
     event_callback: Callable[[str, str, str], None] | None = None,
     vector_callback: Callable[[str, str, int, int, str], None] | None = None,
+    prompt_input_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ollama_progress_callback: Callable[[str, str, dict[str, Any]], None] | None = None,
+    news_prompt_template: str | None = None,
+    log_prompt_template: str | None = None,
 ) -> dict[str, Any]:
 
     # 질문과 가장 가까운 로그, 뉴스, 규제 문맥을 나눠서 가져옵니다.
@@ -652,9 +926,10 @@ def strategy_chat(
         "running",
         "RAG에서 관련 로그, 뉴스, 규제를 검색 중입니다.",
     )
+    similar_log_docs = search_similar_logs(user_input, k=3)
     logs = [
         (getattr(doc, "page_content", "") or "")[:500]
-        for doc in search_similar_logs(user_input, k=3)
+        for doc in similar_log_docs
     ]
     news, rules = search_news_context(user_input, k=6)
     emit_agent_event(
@@ -670,12 +945,23 @@ def strategy_chat(
     rules_text = trim_context(rules)
     prompt_inputs = {
         "log_agent": build_agent_prompt_input(
-            "log_agent", logs_text, user_input, "strategy_chat"
+            "log_agent",
+            logs_text,
+            user_input,
+            "strategy_chat",
+            log_prompt_template=log_prompt_template,
         ),
         "news_agent": build_agent_prompt_input(
-            "news_agent", news_text, user_input, "strategy_chat"
+            "news_agent",
+            news_text,
+            user_input,
+            "strategy_chat",
+            news_prompt_template=news_prompt_template,
         ),
     }
+    if prompt_input_callback is not None:
+        for agent_name, prompt_input in prompt_inputs.items():
+            prompt_input_callback(agent_name, prompt_input)
 
     emit_agent_event(
         event_callback,
@@ -683,7 +969,18 @@ def strategy_chat(
         "running",
         "로그 패턴과 승인 가능성을 분석 중입니다.",
     )
-    log_result = log_agent(logs_text, user_input)
+    log_result = log_agent(
+        logs_text,
+        user_input,
+        prompt_template=log_prompt_template,
+        progress_callback=(
+            None
+            if ollama_progress_callback is None
+            else lambda event, payload: ollama_progress_callback(
+                "log_agent", event, payload
+            )
+        ),
+    )
     emit_agent_event(
         event_callback, "log_agent", "completed", "로그 분석 결과를 생성했습니다."
     )
@@ -694,38 +991,25 @@ def strategy_chat(
         "running",
         "시장 뉴스와 외부 리스크를 분석 중입니다.",
     )
-    news_result = news_agent(news_text, user_input)
+    news_result = news_agent(
+        news_text,
+        user_input,
+        prompt_template=news_prompt_template,
+        progress_callback=(
+            None
+            if ollama_progress_callback is None
+            else lambda event, payload: ollama_progress_callback(
+                "news_agent", event, payload
+            )
+        ),
+    )
     emit_agent_event(
         event_callback, "news_agent", "completed", "뉴스 영향 분석 결과를 생성했습니다."
     )
 
-    emit_agent_event(
-        event_callback,
-        "regulation_agent",
-        "running",
-        "규제 위반 가능성과 보완 항목을 분석 중입니다.",
-    )
-    rule_result = regulation_agent(rules_text, logs_text, user_input)
-    emit_agent_event(
-        event_callback,
-        "regulation_agent",
-        "completed",
-        "규제 판단 결과를 생성했습니다.",
-    )
+    rule_result = rules_text or "업로드된 규제 문서가 없거나 검색된 규제 문맥이 없습니다."
 
-    emit_agent_event(
-        event_callback,
-        "decision_agent",
-        "running",
-        "세 결과를 종합해 최종 심사 판단을 생성 중입니다.",
-    )
-    final_result = decision_agent(log_result, news_result, rule_result, user_input)
-    emit_agent_event(
-        event_callback,
-        "decision_agent",
-        "completed",
-        "최종 심사 결론과 대응 전략을 생성했습니다.",
-    )
+    final_result = synthesize_final_decision(log_result, news_result, rule_result)
 
     answer = render_report(
         user_input, log_result, news_result, rule_result, final_result
@@ -736,6 +1020,18 @@ def strategy_chat(
         "added_count": 0,
     }
 
+    top_log_meta = (
+        getattr(similar_log_docs[0], "metadata", {}) or {}
+        if similar_log_docs
+        else {}
+    )
+    generated_log_payload = build_log_generated_payload(
+        log_result,
+        f"log analysis: {user_input}",
+        str(top_log_meta.get("product_name") or top_log_meta.get("product") or "").strip() or None,
+        top_log_meta.get("features") or {},
+    )
+
     # 에이전트 산출물을 다시 저장해서 이후 질의에서도 재사용할 수 있게 합니다.
     try:
         emit_agent_event(
@@ -745,27 +1041,20 @@ def strategy_chat(
             "에이전트 결과를 벡터 DB에 추가하고 있습니다.",
         )
         before_count = get_vector_count()
-        after_count = save_agent_reports(
+        after_count = save_generated_documents(
             [
                 {
                     "agent": "log",
+                    "type": "generated_log",
                     "title": f"log analysis: {user_input}",
                     "content": log_result,
+                    "structured_payload": generated_log_payload,
                 },
                 {
                     "agent": "news",
-                    "title": f"news analysis: {user_input}",
+                    "type": "signal_news",
+                    "title": f"news signal: {user_input}",
                     "content": news_result,
-                },
-                {
-                    "agent": "regulation",
-                    "title": f"regulation analysis: {user_input}",
-                    "content": rule_result,
-                },
-                {
-                    "agent": "decision",
-                    "title": f"decision: {user_input}",
-                    "content": final_result,
                 },
             ]
         )
@@ -780,7 +1069,7 @@ def strategy_chat(
             "append",
             before_count,
             after_count,
-            "에이전트 결과 4건을 벡터 DB에 추가 저장했습니다.",
+            "에이전트 결과 2건을 벡터 DB에 추가 저장했습니다.",
         )
         emit_agent_event(
             event_callback,
@@ -820,6 +1109,9 @@ def run_periodic_news_agent(
     should_persist: bool = True,
     event_callback: Callable[[str, str, str], None] | None = None,
     vector_callback: Callable[[str, str, int, int, str], None] | None = None,
+    prompt_input_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ollama_progress_callback: Callable[[str, str, dict[str, Any]], None] | None = None,
+    news_prompt_template: str | None = None,
 ) -> dict[str, Any]:
     emit_agent_event(
         event_callback,
@@ -828,17 +1120,34 @@ def run_periodic_news_agent(
         "백그라운드 뉴스 에이전트가 최신 뉴스를 분석 중입니다.",
     )
     news_context = trim_news_items(news_items)
-    user_input = "최신 금융 뉴스 기준으로 대출 시장 리스크 브리핑을 작성하라"
+    user_input = "최신 금융 뉴스를 RAG 검색용 구조화 신호로 변환하라"
     prompt_input = build_agent_prompt_input(
-        "news_agent", news_context, user_input, "background_news_cycle"
+        "news_agent",
+        news_context,
+        user_input,
+        "background_news_cycle",
+        news_prompt_template=news_prompt_template,
     )
+    if prompt_input_callback is not None:
+        prompt_input_callback("news_agent", prompt_input)
     try:
-        analysis = news_agent(news_context, user_input)
+        analysis = news_agent(
+            news_context,
+            user_input,
+            prompt_template=news_prompt_template,
+            progress_callback=(
+                None
+                if ollama_progress_callback is None
+                else lambda event, payload: ollama_progress_callback(
+                    "news_agent", event, payload
+                )
+            ),
+        )
         emit_agent_event(
             event_callback,
             "news_agent",
             "completed",
-            "백그라운드 뉴스 브리핑을 생성했습니다.",
+            "백그라운드 뉴스 신호를 생성했습니다.",
         )
     except OllamaUnavailableError as error:
         analysis = build_news_fallback_briefing(news_items)
@@ -875,11 +1184,12 @@ def run_periodic_news_agent(
                 "뉴스 에이전트 결과를 벡터 DB에 저장 중입니다.",
             )
             before_count = get_vector_count()
-            after_count = save_agent_reports(
+            after_count = save_generated_documents(
                 [
                     {
                         "agent": "news",
-                        "title": "periodic news briefing",
+                        "type": "signal_news",
+                        "title": "periodic news signal",
                         "content": analysis,
                     }
                 ]
@@ -895,20 +1205,20 @@ def run_periodic_news_agent(
                 "append",
                 before_count,
                 after_count,
-                "주기 실행 뉴스 에이전트 브리핑 1건을 벡터 DB에 저장했습니다.",
+                "주기 실행 뉴스 신호 1건을 벡터 DB에 저장했습니다.",
             )
             emit_agent_event(
                 event_callback,
                 "vector_store",
                 "completed",
-                f"뉴스 브리핑 저장 완료. 총 {after_count}건",
+                f"뉴스 신호 저장 완료. 총 {after_count}건",
             )
         except Exception as error:
             emit_agent_event(
                 event_callback,
                 "vector_store",
                 "failed",
-                f"뉴스 브리핑 저장 실패: {error}",
+                f"뉴스 신호 저장 실패: {error}",
             )
 
     return {
@@ -923,6 +1233,9 @@ def run_periodic_log_agent(
     should_persist: bool = True,
     event_callback: Callable[[str, str, str], None] | None = None,
     vector_callback: Callable[[str, str, int, int, str], None] | None = None,
+    prompt_input_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    ollama_progress_callback: Callable[[str, str, dict[str, Any]], None] | None = None,
+    log_prompt_template: str | None = None,
 ) -> dict[str, Any]:
     emit_agent_event(
         event_callback,
@@ -930,12 +1243,32 @@ def run_periodic_log_agent(
         "running",
         "백그라운드 로그 에이전트가 신규 로그를 분석 중입니다.",
     )
-    log_context = trim_log_results(log_items)
+    log_context = "product_pattern_summary만 참조하는 경량 로그 에이전트"
+    product_pattern_context = build_product_pattern_context_from_log_items(log_items)
     user_input = "최신 유입 로그 기준으로 승인 가능성과 위험 패턴을 요약하라"
     prompt_input = build_agent_prompt_input(
-        "log_agent", log_context, user_input, "background_log_cycle"
+        "log_agent",
+        log_context,
+        user_input,
+        "background_log_cycle",
+        log_prompt_template=log_prompt_template,
+        log_product_pattern_summary=product_pattern_context,
     )
-    analysis = log_agent(log_context, user_input)
+    if prompt_input_callback is not None:
+        prompt_input_callback("log_agent", prompt_input)
+    analysis = log_agent(
+        log_context,
+        user_input,
+        prompt_template=log_prompt_template,
+        product_pattern_context=product_pattern_context,
+        progress_callback=(
+            None
+            if ollama_progress_callback is None
+            else lambda event, payload: ollama_progress_callback(
+                "log_agent", event, payload
+            )
+        ),
+    )
     emit_agent_event(
         event_callback,
         "log_agent",
@@ -958,12 +1291,31 @@ def run_periodic_log_agent(
                 "로그 에이전트 결과를 벡터 DB에 저장 중입니다.",
             )
             before_count = get_vector_count()
-            after_count = save_agent_reports(
+            top_result = log_items[0] if log_items else {}
+            top_features = top_result.get("features") or {}
+            generated_log_payload = build_log_generated_payload(
+                analysis,
+                "periodic log briefing",
+                top_result.get("product") or top_result.get("product_name"),
+                {
+                    "인정소득": top_features.get("annual_income") or top_features.get("recognized_income") or "",
+                    "금리": top_features.get("applied_rate") or "",
+                    "KCB점수": top_features.get("kcb_score") or top_features.get("credit_score") or "",
+                    "NICE점수": top_features.get("nice_score") or "",
+                    "dti": top_features.get("dti") or "",
+                    "dsr비율": top_features.get("dsr_ratio") or "",
+                    "심사결과": top_result.get("out_fields", {}).get("승인 여부") or top_features.get("decision") or "",
+                    "KNOCK-OUT 사유": top_result.get("reject_reason_codes") or [],
+                },
+            )
+            after_count = save_generated_documents(
                 [
                     {
                         "agent": "log",
+                        "type": "generated_log",
                         "title": "periodic log briefing",
                         "content": analysis,
+                        "structured_payload": generated_log_payload,
                     }
                 ]
             )

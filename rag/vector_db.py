@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import threading
 import warnings
 
 warnings.filterwarnings(
@@ -30,11 +31,12 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rag.faiss_customer_db import (
     CUSTOMER_SEARCH_TYPES,
-    build_customer_documents,
     format_customer_search_results,
 )
+from rag.product_pattern_summary import build_product_pattern_summary_documents
 from rag.faiss_logs_db import (
     build_log_documents,
+    build_log_ingest_preview,
     format_log_search_results,
     prepare_log_records,
 )
@@ -49,12 +51,25 @@ import io
 import json
 import re
 import shutil
-from typing import Any
+from typing import Any, Iterable
 
 _embeddings = None
+_embeddings_lock = threading.Lock()
+_embeddings_warmed = False
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+_LOCAL_EMBEDDING_MODEL_DIR = os.environ.get(
+    "LOCAL_EMBEDDING_MODEL_DIR",
+    os.path.join(
+        _PROJECT_ROOT,
+        "models",
+        "sentence-transformers",
+        "all-MiniLM-L6-v2",
+    ),
+)
 
 # 모듈 수준 파일 로거 설정 (RAG ingest 로그 저장)
-_LOG_DIR = os.path.join("logs")
+_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
 try:
     os.makedirs(_LOG_DIR, exist_ok=True)
 except Exception:
@@ -70,32 +85,77 @@ if not ingest_logger.handlers:
     ingest_logger.setLevel(logging.INFO)
 
 
+def get_local_embedding_model_path() -> str:
+    model_path = os.path.abspath(_LOCAL_EMBEDDING_MODEL_DIR)
+    if os.path.isdir(model_path):
+        return model_path
+    raise FileNotFoundError(
+        "로컬 임베딩 모델을 찾을 수 없습니다. "
+        f"모델 경로를 준비하세요: {model_path}"
+    )
+
+
 def get_embeddings():
     global _embeddings
     if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
+        with _embeddings_lock:
+            if _embeddings is None:
+                model_path = get_local_embedding_model_path()
+                _embeddings = HuggingFaceEmbeddings(
+                    model_name=model_path,
+                    model_kwargs={
+                        "local_files_only": True,
+                    },
+                )
     return _embeddings
+
+
+def warmup_embeddings() -> dict[str, int]:
+    global _embeddings_warmed
+
+    load_started_at = time.perf_counter()
+    embeddings = get_embeddings()
+    load_elapsed_ms = int((time.perf_counter() - load_started_at) * 1000)
+
+    warmup_elapsed_ms = 0
+    if not _embeddings_warmed:
+        with _embeddings_lock:
+            if not _embeddings_warmed:
+                warmup_started_at = time.perf_counter()
+                try:
+                    embeddings.embed_query("faiss warmup")
+                except Exception:
+                    embeddings.embed_documents(["faiss warmup"])
+                warmup_elapsed_ms = int((time.perf_counter() - warmup_started_at) * 1000)
+                _embeddings_warmed = True
+
+    return {
+        "load_ms": load_elapsed_ms,
+        "warmup_ms": warmup_elapsed_ms,
+        "total_ms": load_elapsed_ms + warmup_elapsed_ms,
+    }
 
 
 FAISS_STORE_LOGS = "logs"
 FAISS_STORE_NEWS = "news"
 FAISS_STORE_CUSTOMER = "customer"
+FAISS_STORE_DOCUMENT = "document"
 
 FAISS_STORE_PATHS = {
-    FAISS_STORE_LOGS: "faiss_logs",
-    FAISS_STORE_NEWS: "faiss_news",
-    FAISS_STORE_CUSTOMER: "faiss_customer",
+    FAISS_STORE_LOGS: os.path.join(_PROJECT_ROOT, "faiss_logs"),
+    FAISS_STORE_NEWS: os.path.join(_PROJECT_ROOT, "faiss_news"),
+    FAISS_STORE_CUSTOMER: os.path.join(_PROJECT_ROOT, "faiss_customer"),
+    FAISS_STORE_DOCUMENT: os.path.join(_PROJECT_ROOT, "faiss_document"),
 }
 
-LEGACY_FAISS_PATH = "faiss_db"
+LEGACY_FAISS_PATH = os.path.join(_PROJECT_ROOT, "faiss_db")
 EMPTY_STORE_MARKER = ".empty_store"
 
 _db_registry: dict[str, FAISS | None] = {
     FAISS_STORE_LOGS: None,
     FAISS_STORE_NEWS: None,
     FAISS_STORE_CUSTOMER: None,
+    FAISS_STORE_DOCUMENT: None,
 }
 
 
@@ -119,18 +179,20 @@ def infer_store_from_metadata(metadata: dict[str, Any] | None) -> str:
     doc_type = str(meta.get("type") or "").strip().lower()
     agent_name = str(meta.get("agent") or "").strip().lower()
 
-    if doc_type == "log":
+    if doc_type in {"log", "generated_log"}:
         return FAISS_STORE_LOGS
-    if doc_type in {"news", "regulation", "rule"}:
+    if doc_type in {"news", "signal_news", "generated_news"}:
         return FAISS_STORE_NEWS
-    if doc_type in {"customer_pattern", "sales_strategy"}:
+    if doc_type in {"regulation", "rule", "generated_regulation", "document"}:
+        return FAISS_STORE_DOCUMENT
+    if doc_type in {"customer_pattern", "product_pattern_summary", "sales_strategy", "generated_decision", "generated_customer"}:
         return FAISS_STORE_CUSTOMER
-    if doc_type.startswith("agent_report"):
-        if agent_name in {"log", "log_agent"}:
-            return FAISS_STORE_LOGS
-        if agent_name in {"news", "news_agent", "regulation", "regulation_agent"}:
-            return FAISS_STORE_NEWS
-        return FAISS_STORE_CUSTOMER
+    if agent_name in {"log", "log_agent"}:
+        return FAISS_STORE_LOGS
+    if agent_name in {"news", "news_agent"}:
+        return FAISS_STORE_NEWS
+    if agent_name in {"regulation", "regulation_agent", "document"}:
+        return FAISS_STORE_DOCUMENT
     return FAISS_STORE_CUSTOMER
 
 
@@ -139,10 +201,10 @@ def infer_store_from_doc_type(doc_type: str | None) -> str:
     return infer_store_from_metadata(dummy_meta)
 
 
-def infer_store_from_report(report: dict[str, Any]) -> str:
+def infer_store_from_generated_item(report: dict[str, Any]) -> str:
     return infer_store_from_metadata(
         {
-            "type": "agent_report",
+            "type": report.get("type"),
             "agent": report.get("agent"),
             "store": report.get("store"),
         }
@@ -173,7 +235,7 @@ def _iter_docstore_documents(local_db: FAISS | None):
     return list(doc_map.values())
 
 
-def load_existing_agent_report_docs(store_name: str):
+def load_existing_generated_docs(store_name: str):
     normalized_store = normalize_store_name(store_name)
     target_db = _load_local_db(get_store_path(normalized_store))
     source_db = target_db
@@ -187,12 +249,72 @@ def load_existing_agent_report_docs(store_name: str):
         return [
             doc
             for doc in _iter_docstore_documents(source_db)
-            if getattr(doc, "metadata", {}).get("type", "").startswith("agent_report")
+            if _is_generated_doc_type(getattr(doc, "metadata", {}).get("type", ""))
             and infer_store_from_metadata(getattr(doc, "metadata", {}) or {})
             == normalized_store
         ]
     except Exception:
         return []
+
+
+def _is_generated_doc_type(doc_type: str | None) -> bool:
+    normalized = str(doc_type or "").strip().lower()
+    return normalized.startswith("generated_") or normalized == "signal_news"
+
+
+def _parse_signal_news_payload(content: str) -> dict[str, Any]:
+    text = str(content or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_generated_doc_payload(report: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    title = str(report.get("title", "generated document")).strip()
+    content = str(report.get("content", "")).strip()
+    agent_name = str(report.get("agent", "agent")).strip()
+    doc_type = str(report.get("type") or f"generated_{agent_name}").strip().lower()
+
+    metadata: dict[str, Any] = {
+        "type": doc_type,
+        "agent": agent_name,
+    }
+    if doc_type == "generated_log":
+        structured_payload = report.get("structured_payload") or {}
+        if isinstance(structured_payload, dict):
+            structured_text = str(structured_payload.get("text") or "").strip()
+            structured_metadata = structured_payload.get("metadata") or {}
+            if structured_text:
+                metadata["features"] = (
+                    structured_metadata if isinstance(structured_metadata, dict) else {}
+                )
+                metadata["raw_content"] = content
+                return structured_text, metadata
+    if doc_type == "signal_news":
+        payload = _parse_signal_news_payload(content)
+        tags = [str(item).strip() for item in payload.get("tags") or [] if str(item).strip()]
+        signal_summary = str(payload.get("signal_summary") or "").strip()
+        search_text = str(payload.get("search_text") or "").strip()
+        risk_signal = [str(item).strip() for item in payload.get("risk_signal") or [] if str(item).strip()]
+        opportunity_signal = [str(item).strip() for item in payload.get("opportunity_signal") or [] if str(item).strip()]
+        linked_decision = [str(item).strip() for item in payload.get("linked_decision") or [] if str(item).strip()]
+
+        optimized_text = search_text or content
+        metadata["features"] = {
+            "tags": tags,
+            "signal_summary": signal_summary,
+            "risk_signal": risk_signal,
+            "opportunity_signal": opportunity_signal,
+            "linked_decision": linked_decision,
+        }
+        metadata["raw_content"] = content
+        return f"제목: {title}\n내용: {optimized_text}", metadata
+
+    return f"제목: {title}\n내용: {content}", metadata
 
 
 def should_preserve_existing_doc(store_name: str, metadata: dict[str, Any] | None) -> bool:
@@ -201,14 +323,20 @@ def should_preserve_existing_doc(store_name: str, metadata: dict[str, Any] | Non
     source = str(meta.get("source") or "").strip().lower()
 
     if store_name == FAISS_STORE_LOGS:
-        return doc_type.startswith("agent_report")
+        return False
     if store_name == FAISS_STORE_NEWS:
-        return doc_type.startswith("agent_report") or source == "upload" or doc_type in {
+        return source == "upload" or doc_type in {
+            "news",
+            "signal_news",
+        }
+    if store_name == FAISS_STORE_DOCUMENT:
+        return source == "upload" or doc_type in {
             "regulation",
             "rule",
+            "generated_regulation",
         }
     if store_name == FAISS_STORE_CUSTOMER:
-        return doc_type.startswith("agent_report") or doc_type == "sales_strategy"
+        return doc_type == "sales_strategy"
     return False
 
 
@@ -426,20 +554,122 @@ def should_skip_faiss_log(log_item: dict) -> bool:
     return False
 
 
-def build_vector_db(logs, news):
-    start = time.time()
+def build_vector_db(
+    logs,
+    news,
+    rebuild_stores: Iterable[str] | None = None,
+):
+    start = time.perf_counter()
     print("벡터 생성 시작")
+
+    requested_stores = {
+        normalize_store_name(store_name)
+        for store_name in (rebuild_stores or FAISS_STORE_PATHS.keys())
+    }
+    if not requested_stores:
+        return get_vector_count()
+
+    warmup_timing = warmup_embeddings()
 
     log_documents = []
     news_documents = []
     customer_documents = []
+    document_documents = []
 
-    log_documents.extend(load_preserved_store_docs(FAISS_STORE_LOGS))
-    news_documents.extend(load_preserved_store_docs(FAISS_STORE_NEWS))
-    customer_documents.extend(load_preserved_store_docs(FAISS_STORE_CUSTOMER))
+    if FAISS_STORE_LOGS in requested_stores:
+        log_documents.extend(load_preserved_store_docs(FAISS_STORE_LOGS))
+    if FAISS_STORE_NEWS in requested_stores:
+        news_documents.extend(load_preserved_store_docs(FAISS_STORE_NEWS))
+    if FAISS_STORE_CUSTOMER in requested_stores:
+        customer_documents.extend(load_preserved_store_docs(FAISS_STORE_CUSTOMER))
+    if FAISS_STORE_DOCUMENT in requested_stores:
+        document_documents.extend(load_preserved_store_docs(FAISS_STORE_DOCUMENT))
+
+    needs_prepared_logs = bool({FAISS_STORE_LOGS, FAISS_STORE_CUSTOMER} & requested_stores)
+    prepared_logs = []
+    if needs_prepared_logs:
+        prepared_logs = prepare_log_records(
+            logs,
+            ingest_logger,
+            show_progress=True,
+            should_skip_log=should_skip_faiss_log,
+            sanitize_fields=sanitize_faiss_fields,
+            sanitize_mapping=sanitize_faiss_mapping,
+            find_ignorable_keys=find_globally_ignorable_field_keys,
+            apply_mapping=apply_mapping,
+            map_fields=map_fields,
+            clean_text=clean_faiss_text,
+        )
+
+    if FAISS_STORE_LOGS in requested_stores:
+        log_documents.extend(build_log_documents(prepared_logs, FAISS_STORE_LOGS))
+    if FAISS_STORE_NEWS in requested_stores:
+        news_documents.extend(
+            build_news_documents(
+                news,
+                ingest_logger,
+                clean_text=clean_faiss_text,
+                store_name=FAISS_STORE_NEWS,
+            )
+        )
+    if FAISS_STORE_CUSTOMER in requested_stores:
+        customer_documents.extend(
+            build_product_pattern_summary_documents(
+                logs,
+                clean_text=clean_faiss_text,
+                store_name=FAISS_STORE_CUSTOMER,
+            )
+        )
+
+    store_documents = {
+        FAISS_STORE_LOGS: log_documents,
+        FAISS_STORE_NEWS: news_documents,
+        FAISS_STORE_CUSTOMER: customer_documents,
+        FAISS_STORE_DOCUMENT: document_documents,
+    }
+    store_timings: dict[str, dict[str, int]] = {}
+    for store_name in requested_stores:
+        store_timings[store_name] = _rebuild_store(store_name, store_documents[store_name])
+
+    counts = {
+        current_store: get_vector_count(current_store) for current_store in FAISS_STORE_PATHS
+    }
+    total_count = sum(counts.values())
+
+    try:
+        ingest_logger.info(
+            "FAISS stores saved: logs=%d news=%d customer=%d document=%d total=%d warmup_ms=%d stores=%s",
+            counts[FAISS_STORE_LOGS],
+            counts[FAISS_STORE_NEWS],
+            counts[FAISS_STORE_CUSTOMER],
+            counts[FAISS_STORE_DOCUMENT],
+            total_count,
+            warmup_timing.get("total_ms", 0),
+            json.dumps(store_timings, ensure_ascii=False),
+        )
+    except Exception:
+        ingest_logger.info("FAISS stores saved: total=%d", total_count)
+
+    print(
+        "FAISS warmup load "
+        f"{warmup_timing.get('load_ms', 0)}ms / query {warmup_timing.get('warmup_ms', 0)}ms"
+    )
+    for store_name in requested_stores:
+        timing = store_timings.get(store_name, {})
+        print(
+            f"{store_name} split {timing.get('split_ms', 0)}ms / "
+            f"embed+index {timing.get('build_ms', 0)}ms / save {timing.get('save_ms', 0)}ms / "
+            f"total {timing.get('total_ms', 0)}ms"
+        )
+    print(f"완료: {time.perf_counter() - start:.2f}초")
+    return total_count
+
+
+def prepare_log_ingest_preview(logs) -> dict[str, Any]:
     prepared_logs = prepare_log_records(
         logs,
         ingest_logger,
+        show_progress=False,
         should_skip_log=should_skip_faiss_log,
         sanitize_fields=sanitize_faiss_fields,
         sanitize_mapping=sanitize_faiss_mapping,
@@ -448,43 +678,7 @@ def build_vector_db(logs, news):
         map_fields=map_fields,
         clean_text=clean_faiss_text,
     )
-    log_documents.extend(build_log_documents(prepared_logs, FAISS_STORE_LOGS))
-    news_documents.extend(
-        build_news_documents(
-            news,
-            ingest_logger,
-            clean_text=clean_faiss_text,
-            store_name=FAISS_STORE_NEWS,
-        )
-    )
-    customer_documents.extend(
-        build_customer_documents(
-            prepared_logs,
-            clean_text=clean_faiss_text,
-            store_name=FAISS_STORE_CUSTOMER,
-        )
-    )
-
-    counts = {
-        FAISS_STORE_LOGS: _rebuild_store(FAISS_STORE_LOGS, log_documents),
-        FAISS_STORE_NEWS: _rebuild_store(FAISS_STORE_NEWS, news_documents),
-        FAISS_STORE_CUSTOMER: _rebuild_store(FAISS_STORE_CUSTOMER, customer_documents),
-    }
-    total_count = sum(counts.values())
-
-    try:
-        ingest_logger.info(
-            "FAISS stores saved: logs=%d news=%d customer=%d total=%d",
-            counts[FAISS_STORE_LOGS],
-            counts[FAISS_STORE_NEWS],
-            counts[FAISS_STORE_CUSTOMER],
-            total_count,
-        )
-    except Exception:
-        ingest_logger.info("FAISS stores saved: total=%d", total_count)
-
-    print(f"완료: {time.time() - start:.2f}초")
-    return total_count
+    return build_log_ingest_preview(prepared_logs, FAISS_STORE_LOGS)
 
 
 def _clear_store(store_name: str) -> None:
@@ -513,20 +707,56 @@ def _split_documents(documents: list[Document]) -> list[Document]:
     return split_docs
 
 
-def _rebuild_store(store_name: str, documents: list[Document]) -> int:
+def _rebuild_store(store_name: str, documents: list[Document]) -> dict[str, int]:
     normalized_store = normalize_store_name(store_name)
+    started_at = time.perf_counter()
     split_docs = _split_documents(documents)
+    split_elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     print(f"{normalized_store} document 개수: {len(documents)} / chunk 수: {len(split_docs)}")
 
     if not split_docs:
         _clear_store(normalized_store)
         _ensure_empty_store(normalized_store)
-        return 0
+        total_elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        return {
+            "document_count": len(documents),
+            "chunk_count": 0,
+            "split_ms": split_elapsed_ms,
+            "build_ms": 0,
+            "save_ms": 0,
+            "total_ms": total_elapsed_ms,
+            "vector_count": 0,
+        }
 
+    build_started_at = time.perf_counter()
     local_db = FAISS.from_documents(split_docs, get_embeddings())
+    build_elapsed_ms = int((time.perf_counter() - build_started_at) * 1000)
+
+    save_started_at = time.perf_counter()
     local_db.save_local(get_store_path(normalized_store))
+    save_elapsed_ms = int((time.perf_counter() - save_started_at) * 1000)
     _db_registry[normalized_store] = local_db
-    return len(getattr(local_db, "index_to_docstore_id", []) or [])
+    vector_count = len(getattr(local_db, "index_to_docstore_id", []) or [])
+    total_elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    ingest_logger.info(
+        "FAISS rebuild store=%s docs=%d chunks=%d split_ms=%d embed_index_ms=%d save_ms=%d total_ms=%d",
+        normalized_store,
+        len(documents),
+        len(split_docs),
+        split_elapsed_ms,
+        build_elapsed_ms,
+        save_elapsed_ms,
+        total_elapsed_ms,
+    )
+    return {
+        "document_count": len(documents),
+        "chunk_count": len(split_docs),
+        "split_ms": split_elapsed_ms,
+        "build_ms": build_elapsed_ms,
+        "save_ms": save_elapsed_ms,
+        "total_ms": total_elapsed_ms,
+        "vector_count": vector_count,
+    }
 
 
 def load_db(store_name: str | None = None):
@@ -588,24 +818,40 @@ def search_context(query, k=5):
         apply_mapping,
     )
 
-    news, rules = split_news_search_results(_similarity_search(
+    news_docs = _similarity_search(
         FAISS_STORE_NEWS,
         query,
         k,
-        NEWS_LIKE_TYPES | RULE_LIKE_TYPES,
-    ))
+        NEWS_LIKE_TYPES,
+    )
+    rule_docs = _similarity_search(
+        FAISS_STORE_DOCUMENT,
+        query,
+        k,
+        RULE_LIKE_TYPES,
+    )
+    news, _ = split_news_search_results(news_docs)
+    _, rules = split_news_search_results(rule_docs)
 
     return logs, news, rules
 
 
 def search_news_context(query: str, k: int = 5) -> tuple[list[str], list[str]]:
-    docs = _similarity_search(
+    news_docs = _similarity_search(
         FAISS_STORE_NEWS,
         query,
         k,
-        NEWS_LIKE_TYPES | RULE_LIKE_TYPES,
+        NEWS_LIKE_TYPES,
     )
-    return split_news_search_results(docs)
+    rule_docs = _similarity_search(
+        FAISS_STORE_DOCUMENT,
+        query,
+        k,
+        RULE_LIKE_TYPES,
+    )
+    news, _ = split_news_search_results(news_docs)
+    _, rules = split_news_search_results(rule_docs)
+    return news, rules
 
 
 def search_customer_context(query: str, k: int = 5) -> list[str]:
@@ -627,55 +873,121 @@ def get_vector_count(store_name: str | None = None):
     return len(getattr(local_db, "index_to_docstore_id", []) or [])
 
 
+def get_store_document_count(
+    store_name: str,
+    allowed_types: set[str] | None = None,
+) -> int:
+    local_db = _get_loaded_db(store_name)
+    if local_db is None:
+        return 0
+
+    normalized_types = {
+        str(doc_type or "").strip().lower() for doc_type in (allowed_types or set())
+    }
+    count = 0
+    for doc in _iter_docstore_documents(local_db):
+        doc_type = str((getattr(doc, "metadata", {}) or {}).get("type") or "").strip().lower()
+        if normalized_types and doc_type not in normalized_types:
+            continue
+        count += 1
+    return count
+
+
+def get_store_news_keys(store_name: str = FAISS_STORE_NEWS) -> set[tuple[str, str]]:
+    local_db = _get_loaded_db(store_name)
+    if local_db is None:
+        return set()
+
+    news_keys: set[tuple[str, str]] = set()
+    for doc in _iter_docstore_documents(local_db):
+        metadata = getattr(doc, "metadata", {}) or {}
+        doc_type = str(metadata.get("type") or "").strip().lower()
+        if doc_type != "news":
+            continue
+        title = str(metadata.get("title") or "").strip()
+        link = str(metadata.get("link") or "").strip()
+        news_keys.add((title, link))
+    return news_keys
+
+
 def _append_documents_to_store(store_name: str, documents: list[Document]) -> int:
     normalized_store = normalize_store_name(store_name)
-    if not documents:
+    split_docs = _split_documents(documents)
+    if not split_docs:
         return get_vector_count(normalized_store)
 
     local_db = _get_loaded_db(normalized_store)
     if local_db is None:
-        local_db = FAISS.from_documents(documents, get_embeddings())
+        local_db = FAISS.from_documents(split_docs, get_embeddings())
     else:
-        local_db.add_documents(documents)
+        local_db.add_documents(split_docs)
 
     local_db.save_local(get_store_path(normalized_store))
     _db_registry[normalized_store] = local_db
     return len(getattr(local_db, "index_to_docstore_id", []) or [])
 
 
-def save_agent_reports(reports, store_name: str | None = None):
-    if not reports:
+def append_structured_log_documents(logs: list[dict[str, Any]]) -> tuple[int, int]:
+    if not logs:
+        return 0, get_vector_count(FAISS_STORE_LOGS)
+
+    prepared_logs = prepare_log_records(
+        logs,
+        ingest_logger,
+        show_progress=False,
+        should_skip_log=should_skip_faiss_log,
+        sanitize_fields=sanitize_faiss_fields,
+        sanitize_mapping=sanitize_faiss_mapping,
+        find_ignorable_keys=find_globally_ignorable_field_keys,
+        apply_mapping=apply_mapping,
+        map_fields=map_fields,
+        clean_text=clean_faiss_text,
+    )
+    documents = build_log_documents(prepared_logs, FAISS_STORE_LOGS)
+    return len(documents), _append_documents_to_store(FAISS_STORE_LOGS, documents)
+
+
+def append_news_documents(news_items: list[dict[str, Any]]) -> tuple[int, int]:
+    if not news_items:
+        return 0, get_vector_count(FAISS_STORE_NEWS)
+
+    documents = build_news_documents(
+        news_items,
+        ingest_logger,
+        clean_text=clean_faiss_text,
+        store_name=FAISS_STORE_NEWS,
+    )
+    return len(documents), _append_documents_to_store(FAISS_STORE_NEWS, documents)
+
+
+def save_generated_documents(items, store_name: str | None = None):
+    if not items:
         return get_vector_count()
 
     documents_by_store: dict[str, list[Document]] = {
         FAISS_STORE_LOGS: [],
         FAISS_STORE_NEWS: [],
         FAISS_STORE_CUSTOMER: [],
+        FAISS_STORE_DOCUMENT: [],
     }
-    for report in reports:
+    for report in items:
         try:
             ingest_logger.info(
-                "---- RAG INGEST: agent report ----\n%s",
+                "---- RAG INGEST: generated document ----\n%s",
                 json.dumps(report, ensure_ascii=False, indent=2),
             )
         except Exception:
-            ingest_logger.info("---- RAG INGEST: agent report ---- %s", str(report))
+            ingest_logger.info("---- RAG INGEST: generated document ---- %s", str(report))
 
-        title = str(report.get("title", "agent report")).strip()
         content = str(report.get("content", "")).strip()
-        agent_name = str(report.get("agent", "agent")).strip()
         if not content:
             continue
-        target_store = normalize_store_name(store_name) if store_name else infer_store_from_report(report)
-        doc_type = str(report.get("type") or f"agent_report_{agent_name}").strip().lower()
+        target_store = normalize_store_name(store_name) if store_name else infer_store_from_generated_item(report)
+        page_content, metadata = _build_generated_doc_payload(report)
         documents_by_store[target_store].append(
             Document(
-                page_content=f"제목: {title}\n내용: {content}",
-                metadata={
-                    "type": doc_type,
-                    "agent": agent_name,
-                    "store": target_store,
-                },
+                page_content=page_content,
+                metadata={**metadata, "store": target_store},
             )
         )
 
@@ -688,14 +1000,15 @@ def save_agent_reports(reports, store_name: str | None = None):
     }
     try:
         ingest_logger.info(
-            "FAISS saved (agent_report): logs=%d news=%d customer=%d total=%d",
+            "FAISS saved (generated_docs): logs=%d news=%d customer=%d document=%d total=%d",
             counts[FAISS_STORE_LOGS],
             counts[FAISS_STORE_NEWS],
             counts[FAISS_STORE_CUSTOMER],
+            counts[FAISS_STORE_DOCUMENT],
             get_vector_count(),
         )
     except Exception:
-        ingest_logger.info("FAISS saved (agent_report): total=%d", get_vector_count())
+        ingest_logger.info("FAISS saved (generated_docs): total=%d", get_vector_count())
     return get_vector_count()
 
 

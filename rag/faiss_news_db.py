@@ -6,8 +6,8 @@ from typing import Any, Callable
 from langchain_core.documents import Document
 
 
-NEWS_LIKE_TYPES = {"news", "agent_report_news"}
-RULE_LIKE_TYPES = {"regulation", "rule", "agent_report_regulation"}
+NEWS_LIKE_TYPES = {"news", "signal_news", "generated_news"}
+RULE_LIKE_TYPES = {"regulation", "rule", "generated_regulation"}
 
 
 def build_news_documents(
@@ -34,7 +34,12 @@ def build_news_documents(
         documents.append(
             Document(
                 page_content=text,
-                metadata={"type": "news", "store": store_name},
+                metadata={
+                    "type": "news",
+                    "store": store_name,
+                    "title": str(title).strip(),
+                    "link": str(news_item.get("link", "")).strip(),
+                },
             )
         )
     return documents

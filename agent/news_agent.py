@@ -27,6 +27,17 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_NEWS_SEARCH_QUERIES = [
+    "금리 대출",
+    "대출 규제",
+    "카드론",
+    "신용대출",
+    "DSR",
+    "연체",
+    "사업자대출",
+    "저축은행 대출",
+]
+
 _BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -271,6 +282,8 @@ def collect_news_from_naver_search(query: str = "카드론 대출", limit: int =
                 "link": href,
                 "published": "",
                 "content": "",
+                "query": query,
+                "collector": "naver_search",
             }
         )
 
@@ -290,7 +303,17 @@ def collect_news_from_naver_search(query: str = "카드론 대출", limit: int =
     return items
 
 
-def collect_news():
+def _normalize_news_key(item: dict[str, str]) -> tuple[str, str]:
+    title = _clean_text(item.get("title", "")).lower()
+    link = str(item.get("link", "")).strip().lower()
+    return title, link
+
+
+def collect_news(
+    queries: list[str] | None = None,
+    per_query_limit: int = 12,
+    max_items: int = 80,
+):
     """Collect news candidates using direct article links first.
 
     Primary source: Naver news search HTML (gives article URLs directly).
@@ -298,12 +321,26 @@ def collect_news():
     reliably yield article bodies during downstream crawling.
     Actual article content is fetched separately in the background.
     """
-    news = collect_news_from_naver_search(query="카드론 대출", limit=40)
-    return news
+    effective_queries = [q for q in (queries or DEFAULT_NEWS_SEARCH_QUERIES) if str(q).strip()]
+    collected: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for query in effective_queries:
+        query_items = collect_news_from_naver_search(query=query, limit=per_query_limit)
+        for item in query_items:
+            key = _normalize_news_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            collected.append(item)
+            if len(collected) >= max_items:
+                return collected
+
+    return collected
 
 
 def analyze_news(news):
-    keywords = ["연체", "금리", "규제", "DSR", "카드론", "신용대출"]
+    keywords = ["연체", "금리", "규제", "DSR", "카드론", "신용대출", "사업자대출", "대출", "저축은행"]
 
     issues = []
 

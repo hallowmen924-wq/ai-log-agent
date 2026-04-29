@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from langchain_core.documents import Document
+
 from rag.faiss_logs_db import PRODUCT_DISPLAY_NAMES
 
 
@@ -354,10 +356,147 @@ def write_product_pattern_summary(
     return path
 
 
+def build_product_pattern_summary_documents(
+    logs: list[dict[str, Any]],
+    *,
+    clean_text,
+    store_name: str,
+) -> list[Document]:
+    summary = build_product_pattern_summary(logs)
+    products = (summary.get("products") or {})
+    documents: list[Document] = []
+
+    for product_code in sorted(products.keys()):
+        item = products.get(product_code) or {}
+        product_name = str(item.get("product_name") or product_code).strip()
+        totals = item.get("totals") or {}
+        approval_patterns = item.get("approval_patterns") or []
+        rejection_patterns = item.get("rejection_patterns") or []
+        top_reject_codes = item.get("top_reject_reason_codes") or []
+
+        payload = {
+            "generated_at": summary.get("generated_at"),
+            "source": summary.get("source") or {},
+            "product_code": product_code,
+            "product_name": product_name,
+            "totals": totals,
+            "approval_patterns": approval_patterns,
+            "rejection_patterns": rejection_patterns,
+            "top_reject_reason_codes": top_reject_codes,
+        }
+
+        page_content = clean_text(
+            "\n".join(
+                [
+                    f"[상품: {product_code}] {product_name}",
+                    (
+                        "- 결정 분포: 승인 "
+                        f"{totals.get('approval_rate_percent', 0):.1f}% "
+                        f"({totals.get('approval_cases', 0)}/{totals.get('decision_known_cases', 0)}), "
+                        "거절 "
+                        f"{totals.get('rejection_rate_percent', 0):.1f}% "
+                        f"({totals.get('rejection_cases', 0)}/{totals.get('decision_known_cases', 0)})"
+                    ),
+                    "- 승인 패턴: "
+                    + (
+                        "; ".join(
+                            _format_pattern_line(pattern, "승인")
+                            for pattern in approval_patterns[:3]
+                        )
+                        if approval_patterns
+                        else "뚜렷한 패턴 없음"
+                    ),
+                    "- 거절 패턴: "
+                    + (
+                        "; ".join(
+                            _format_pattern_line(pattern, "거절")
+                            for pattern in rejection_patterns[:3]
+                        )
+                        if rejection_patterns
+                        else "뚜렷한 패턴 없음"
+                    ),
+                    "- 주요 거절사유: "
+                    + (
+                        "; ".join(
+                            (
+                                f"{str(code_item.get('description') or code_item.get('code') or '').strip()} "
+                                f"{code_item.get('share_of_rejections_percent', 0):.1f}%"
+                            ).strip()
+                            for code_item in top_reject_codes[:3]
+                        )
+                        if top_reject_codes
+                        else "데이터 없음"
+                    ),
+                ]
+            )
+        )[:4000]
+
+        documents.append(
+            Document(
+                page_content=page_content,
+                metadata={
+                    "type": "product_pattern_summary",
+                    "store": store_name,
+                    "product": product_code,
+                    "name": f"product pattern summary: {product_name}",
+                    "source": "structured_log_summary",
+                    "features": payload,
+                },
+            )
+        )
+
+    return documents
+
+
 def load_product_pattern_summary(
     input_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    path = Path(input_path) if input_path else DEFAULT_SUMMARY_PATH
+    if input_path is not None:
+        path = Path(input_path)
+        if not path.exists():
+            return {"products": {}}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"products": {}}
+
+    try:
+        from rag.vector_db import FAISS_STORE_CUSTOMER, list_vectors
+
+        items = list_vectors(limit=1000, store_name=FAISS_STORE_CUSTOMER)
+    except Exception:
+        items = []
+
+    products: dict[str, Any] = {}
+    generated_at = None
+    source: dict[str, Any] = {}
+    for item in items:
+        if str(item.get("type") or "").strip().lower() != "product_pattern_summary":
+            continue
+        features = item.get("features") or {}
+        product_code = str(
+            features.get("product_code") or item.get("product") or ""
+        ).strip().upper()
+        if not product_code:
+            continue
+        generated_at = generated_at or features.get("generated_at")
+        source = source or (features.get("source") or {})
+        products[product_code] = {
+            "product_name": features.get("product_name") or product_code,
+            "totals": features.get("totals") or {},
+            "approval_patterns": features.get("approval_patterns") or [],
+            "rejection_patterns": features.get("rejection_patterns") or [],
+            "top_reject_reason_codes": features.get("top_reject_reason_codes") or [],
+        }
+
+    if products:
+        return {
+            "generated_at": generated_at,
+            "source": source,
+            "products": products,
+        }
+
+    path = DEFAULT_SUMMARY_PATH
     if not path.exists():
         return {"products": {}}
     try:

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-26T22:30:01",
+  "generated_at": "2026-04-27T00:00:00",
   "source": {
     "log_dir": "data\\logs",
     "file_count": 2,
@@ -10,7 +10,7 @@
     "observed_unique_codes": 26,
     "mapped_unique_codes": 26,
     "unmapped_unique_codes": 0,
-    "mapping_catalog_size": 77
+    "mapping_catalog_size": 79
   },
   "mapped_codes": [
     {
@@ -92,7 +92,7 @@
       "products": [
         "C6"
       ],
-      "description": "레벨1~5 제외 미해지 대출기관수 3건 이상(대부정보 반영)",
+      "description": "레벨1-5 제외 미해지 대출기관수 3건 이상(대부정보 반영)",
       "risk_level": ""
     },
     {
@@ -146,7 +146,7 @@
       "products": [
         "C6"
       ],
-      "description": "진행등급 하위",
+      "description": "신청등급 하위",
       "risk_level": ""
     },
     {
@@ -191,7 +191,7 @@
       "products": [
         "C6"
       ],
-      "description": "나이스 리빙 ML5등급 하위",
+      "description": "니어프라임ML등급 하위",
       "risk_level": ""
     },
     {
@@ -247,7 +247,7 @@
         "C6",
         "C9"
       ],
-      "description": "내부 정책 기준 미충족 고객",
+      "description": "가계부채 관리대상 연소득 초과 취급 감액",
       "risk_level": ""
     }
   ],
