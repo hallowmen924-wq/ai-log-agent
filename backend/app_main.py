@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import datetime
 import pathlib
 import sys
 import time
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -25,6 +26,8 @@ from backend.schemas import (
     LogAnalyzeResponse,
     NewsPromptTemplateRequest,
     NewsCollectResponse,
+    ProductSummaryResponse,
+    RegulationUploadResponse,
     SearchRequest,
     StrategyChatRequest,
     StrategyChatResponse,
@@ -40,6 +43,8 @@ from backend.services import (
     enrich_results,
     get_chart_payloads,
     hydrate_state_from_existing_artifacts,
+    record_activity_event,
+    record_vector_event,
     run_full_analysis,
     search_faiss,
     state,
@@ -48,6 +53,9 @@ from backend.worker import worker
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
 import asyncio
+from agent.strategy_chat import regulation_agent
+from rag.product_pattern_summary import DEFAULT_SUMMARY_PATH, load_product_pattern_summary
+from rag.vector_db import ingest_files, search_context, get_vector_count
 
 try:
     from websockets.exceptions import ConnectionClosed
@@ -88,6 +96,8 @@ def build_ws_snapshot(snapshot: dict) -> dict:
         "latest_log_prompt_input": snapshot.get("latest_log_prompt_input", {}),
         "last_log_prompt_input_time": snapshot.get("last_log_prompt_input_time"),
         "log_prompt_template_override": snapshot.get("log_prompt_template_override"),
+        "latest_regulation_analysis": snapshot.get("latest_regulation_analysis"),
+        "last_regulation_analysis_time": snapshot.get("last_regulation_analysis_time"),
         "latest_news_briefing": snapshot.get("latest_news_briefing"),
         "last_news_briefing_time": snapshot.get("last_news_briefing_time"),
         "latest_log_briefing": snapshot.get("latest_log_briefing"),
@@ -551,6 +561,108 @@ def faiss_search_features(type: str | None = None, feature_key: str | None = Non
         return {"status": "ok", "count": len(results), "store_name": store_name, "items": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/product-pattern-summary", response_model=ProductSummaryResponse)
+def product_pattern_summary() -> ProductSummaryResponse:
+    payload = load_product_pattern_summary(DEFAULT_SUMMARY_PATH)
+    if not isinstance(payload, dict):
+        payload = {}
+    return ProductSummaryResponse(status="ok", payload=payload)
+
+
+@app.post("/regulation/upload", response_model=RegulationUploadResponse)
+async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="no files uploaded")
+
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    with state.lock:
+        statuses = dict(state.agent_statuses or {})
+        statuses["regulation_agent"] = {
+            "status": "running",
+            "detail": "규제 문서 분석 실행 중...",
+            "updated_at": started_at,
+        }
+        state.agent_statuses = statuses
+    record_activity_event(
+        "regulation_agent",
+        "running",
+        f"규제 문서 업로드 시작: {len(files)}건",
+        update_status=True,
+    )
+
+    files_data: list[tuple[str, bytes]] = []
+    file_names: list[str] = []
+    for upload in files:
+        raw_bytes = await upload.read()
+        file_name = str(upload.filename or "unknown").strip() or "unknown"
+        files_data.append((file_name, raw_bytes))
+        file_names.append(file_name)
+
+    try:
+        before_count = int(get_vector_count() or 0)
+        after_count = ingest_files(files_data, doc_type="regulation")
+        added_count = max(0, after_count - before_count)
+        _, _, rules_found = search_context("규제", k=6)
+        rule_context = "\n\n".join(rules_found)
+        summary = regulation_agent(
+            rule_context,
+            "",
+            "업로드된 규제 문서 분석 및 요약을 작성하라",
+        )
+        updated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        with state.lock:
+            statuses = dict(state.agent_statuses or {})
+            statuses["regulation_agent"] = {
+                "status": "completed",
+                "detail": f"문서 {len(file_names)}건 분석 완료 · 벡터 {added_count}건 추가",
+                "updated_at": updated_at,
+            }
+            state.agent_statuses = statuses
+            state.latest_regulation_analysis = summary
+            state.last_regulation_analysis_time = datetime.datetime.fromisoformat(updated_at)
+
+        record_vector_event(
+            "regulation_agent",
+            "upload",
+            before_count,
+            after_count,
+            f"규제 문서 {len(file_names)}건 벡터 적재",
+        )
+        record_activity_event(
+            "regulation_agent",
+            "completed",
+            f"규제 문서 {len(file_names)}건 분석 완료",
+            update_status=True,
+        )
+        return RegulationUploadResponse(
+            status="ok",
+            detail="규제 문서 분석 완료",
+            vector_count=after_count,
+            added_count=added_count,
+            summary=summary,
+            updated_at=updated_at,
+            files=file_names,
+        )
+    except Exception as error:
+        failed_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with state.lock:
+            statuses = dict(state.agent_statuses or {})
+            statuses["regulation_agent"] = {
+                "status": "failed",
+                "detail": str(error),
+                "updated_at": failed_at,
+            }
+            state.agent_statuses = statuses
+        record_activity_event(
+            "regulation_agent",
+            "failed",
+            f"규제 문서 업로드 실패: {error}",
+            update_status=True,
+        )
+        raise HTTPException(status_code=500, detail=str(error)) from error
 
 
 @app.websocket("/ws/faiss")

@@ -75,6 +75,21 @@ class WorkerConfigRequest(BaseModel):
     interval_seconds: int = 1
 
 
+class RegulationUploadResponse(BaseModel):
+    status: str = "ok"
+    detail: str | None = None
+    vector_count: int = 0
+    added_count: int = 0
+    summary: str = ""
+    updated_at: str | None = None
+    files: list[str] = Field(default_factory=list)
+
+
+class ProductSummaryResponse(BaseModel):
+    status: str = "ok"
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class FullAnalysisResponse(BaseModel):
     running: bool
     file_count: int
@@ -99,6 +114,8 @@ class FullAnalysisResponse(BaseModel):
     latest_news_prompt_input: dict[str, Any] = Field(default_factory=dict)
     last_news_prompt_input_time: str | None = None
     news_prompt_template_override: str | None = None
+    latest_regulation_analysis: str | None = None
+    last_regulation_analysis_time: str | None = None
     agent_statuses: dict[str, dict[str, Any]] = Field(default_factory=dict)
     agent_activity_log: list[dict[str, Any]] = Field(default_factory=list)
     vector_events: list[dict[str, Any]] = Field(default_factory=list)

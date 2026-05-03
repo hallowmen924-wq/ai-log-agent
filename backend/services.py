@@ -73,6 +73,8 @@ class BackendState:
         self.latest_news_prompt_input: dict[str, Any] | None = None
         self.last_news_prompt_input_time: datetime.datetime | None = None
         self.news_prompt_template_override: str | None = None
+        self.latest_regulation_analysis: str | None = None
+        self.last_regulation_analysis_time: datetime.datetime | None = None
         self.agent_statuses: dict[str, dict[str, Any]] = {}
         self.agent_activity_log: list[dict[str, Any]] = []
         self.vector_events: list[dict[str, Any]] = []
@@ -201,6 +203,12 @@ class BackendState:
                     else None
                 ),
                 "news_prompt_template_override": self.news_prompt_template_override,
+                "latest_regulation_analysis": self.latest_regulation_analysis,
+                "last_regulation_analysis_time": (
+                    self.last_regulation_analysis_time.isoformat()
+                    if self.last_regulation_analysis_time
+                    else None
+                ),
                 "agent_statuses": safe_serialize(self.agent_statuses),
                 "agent_activity_log": safe_serialize(self.agent_activity_log),
                 "vector_events": safe_serialize(self.vector_events),

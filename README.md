@@ -1,6 +1,7 @@
 # AI Log Agent
 
 현재 구조는 기존 분석 코드 위에 FastAPI + Worker 레이어를 추가한 형태입니다. Streamlit은 직접 모듈 호출 대신 HTTP API로 바로 붙일 수 있습니다.
+React 프런트엔드도 같은 백엔드를 사용하도록 추가되어, Streamlit과 병행해서 실행할 수 있습니다.
 
 구성
 - backend/app_main.py: FastAPI 엔트리포인트
@@ -8,6 +9,7 @@
 - backend/worker.py: 10초 주기 뉴스 수집 + 벡터 빌드 워커
 - backend/streamlit_client.py: Streamlit 연동용 API 클라이언트
 - app.py: 기존 Streamlit 대시보드
+- frontend/: React + Vite 프런트엔드
 
 빠른 시작
 
@@ -24,12 +26,32 @@ cd backend
 C:/Python314/python.exe -m uvicorn main:app --host 127.0.0.1 --port 18000
 ```
 
-3. Streamlit 실행
+3. React 프런트엔드 실행
+
+```powershell
+cd ..\frontend
+npm install
+npm run dev
+```
+
+- 개발 서버 기본 주소: http://127.0.0.1:3000
+- 개발 중에는 Vite 프록시가 /api, /ws 요청을 127.0.0.1:18000 백엔드로 전달합니다.
+
+4. Streamlit 실행
 
 ```powershell
 cd ..
 streamlit run app.py
 ```
+
+5. React 프로덕션 빌드
+
+```powershell
+cd frontend
+npm run build
+```
+
+- 빌드 결과물은 frontend/dist 에 생성됩니다.
 
 지원 API
 - GET /health
@@ -38,10 +60,14 @@ streamlit run app.py
 - POST /faiss/build
 - POST /faiss/search
 - POST /chat/strategy
+- POST /chat/cardloan-debate
 - POST /analysis/run
 - GET /analysis/status
+- GET /product-pattern-summary
+- POST /regulation/upload
 - POST /worker/start
 - POST /worker/stop
+- WS /ws/faiss
 
 Streamlit 연동 예시
 
@@ -58,6 +84,16 @@ chat = client.strategy_chat("승인율을 높이려면?")
 - app.py: Streamlit 메인 화면
 - backend/main.py: FastAPI 엔트리포인트
 - backend/worker.py: 백그라운드 뉴스/FAISS 워커
+- frontend/src/App.jsx: React 메인 화면
+
+React 프런트엔드 메모
+
+- 기존 Streamlit 정보 구조를 그대로 유지하는 것을 우선 목표로 했습니다.
+- 좌측 패널은 실시간 뉴스와 규제 문서 업로드를 담당합니다.
+- 메인 섹션은 운영 현황, AI 카드론 토론실, 대출상품 Dashboard, Vector DB 4개로 구성됩니다.
+- React만으로 동작하도록 브라우저에서 직접 호출 가능한 API를 추가했습니다.
+	- GET /product-pattern-summary
+	- POST /regulation/upload
 
 보관 파일
 - 파일명 앞에 `~`가 붙은 파이썬 파일은 예제, 구버전, 실험용 코드입니다.

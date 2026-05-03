@@ -158,3 +158,23 @@ class BackendClient:
             json={"template": template},
             timeout=30,
         ).json()
+
+    def get_product_summary(self) -> dict[str, Any]:
+        return requests.get(
+            f"{self.base_url}/product-pattern-summary",
+            timeout=30,
+        ).json()
+
+    def upload_regulation_files(
+        self,
+        files: list[tuple[str, bytes]],
+    ) -> dict[str, Any]:
+        multipart_files = [
+            ("files", (name, raw_bytes, "application/octet-stream"))
+            for name, raw_bytes in files
+        ]
+        return requests.post(
+            f"{self.base_url}/regulation/upload",
+            files=multipart_files,
+            timeout=600,
+        ).json()
