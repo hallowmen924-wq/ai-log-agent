@@ -52,6 +52,18 @@ export function fetchProductSummary() {
   return request('/product-pattern-summary');
 }
 
+export function fetchOntologyState() {
+  return request('/ontology/state');
+}
+
+export function saveOntologyState(payload) {
+  return request('/ontology/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function fetchFaissEntries(limit = 120, storeName = '') {
   return request('/faiss/entries', {
     method: 'GET',
@@ -59,8 +71,16 @@ export function fetchFaissEntries(limit = 120, storeName = '') {
   },);
 }
 
-export function fetchFaissEntriesByStore(limit = 120, storeName = '') {
-  return request(buildPath('/faiss/entries', { limit, store_name: storeName }));
+export function fetchFaissEntriesByStore(limit = 120, storeName = '', type = '') {
+  return request(buildPath('/faiss/entries', { limit, store_name: storeName, type }));
+}
+
+export function fetchFaissEntry(docId) {
+  return request(buildPath('/faiss/entry', { doc_id: docId }));
+}
+
+export function fetchSimilarLogVectors(query, limit = 8) {
+  return request(buildPath('/faiss/similar_logs', { query, limit }));
 }
 
 function buildPath(path, query) {
@@ -74,11 +94,19 @@ export function fetchFaissStats() {
   return request('/faiss/stats');
 }
 
-export function startCardloanDebate(question, reviewerPrompts) {
+export function startCardloanDebate(question, reviewerPrompts, reviewerSettings = {}) {
   return request('/chat/cardloan-debate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, reviewer_prompts: reviewerPrompts }),
+    body: JSON.stringify({ question, reviewer_prompts: reviewerPrompts, reviewer_settings: reviewerSettings }),
+  });
+}
+
+export function chatStrategy(question) {
+  return request('/chat/strategy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
   });
 }
 

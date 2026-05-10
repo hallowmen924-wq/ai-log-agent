@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-04-29T23:59:41",
+  "generated_at": "2026-05-10T16:15:32",
   "source": {
-    "analyzed_log_count": 577,
-    "prepared_record_count": 577,
+    "analyzed_log_count": 2439,
+    "prepared_record_count": 2439,
     "min_support": 3,
     "min_rate": 0.6,
     "top_n": 4
@@ -11,47 +11,47 @@
     "C11": {
       "product_name": "개인사업자대출",
       "totals": {
-        "all_cases": 135,
-        "decision_known_cases": 135,
-        "approval_cases": 129,
+        "all_cases": 598,
+        "decision_known_cases": 598,
+        "approval_cases": 592,
         "rejection_cases": 6,
-        "approval_rate": 0.9556,
-        "approval_rate_percent": 95.6,
-        "rejection_rate": 0.0444,
-        "rejection_rate_percent": 4.4
+        "approval_rate": 0.99,
+        "approval_rate_percent": 99.0,
+        "rejection_rate": 0.01,
+        "rejection_rate_percent": 1.0
       },
       "approval_patterns": [
         {
           "feature": "KCB 등급",
           "rule": "KCB 5~6등급",
-          "support": 53,
-          "decision_count": 51,
-          "decision_rate": 0.9623,
-          "decision_rate_percent": 96.2
+          "support": 219,
+          "decision_count": 217,
+          "decision_rate": 0.9909,
+          "decision_rate_percent": 99.1
         },
         {
           "feature": "비대면연계대출등급",
           "rule": "비대면연계대출등급 1~2",
-          "support": 53,
-          "decision_count": 51,
-          "decision_rate": 0.9623,
-          "decision_rate_percent": 96.2
+          "support": 219,
+          "decision_count": 217,
+          "decision_rate": 0.9909,
+          "decision_rate_percent": 99.1
         },
         {
           "feature": "ML스코어 등급",
           "rule": "ML스코어 7등급 이상",
-          "support": 75,
-          "decision_count": 72,
-          "decision_rate": 0.96,
-          "decision_rate_percent": 96.0
+          "support": 322,
+          "decision_count": 319,
+          "decision_rate": 0.9907,
+          "decision_rate_percent": 99.1
         },
         {
-          "feature": "산출금리",
-          "rule": "산출금리 18% 이상",
-          "support": 115,
-          "decision_count": 110,
-          "decision_rate": 0.9565,
-          "decision_rate_percent": 95.7
+          "feature": "DSR",
+          "rule": "DSR 10~20",
+          "support": 103,
+          "decision_count": 102,
+          "decision_rate": 0.9903,
+          "decision_rate_percent": 99.0
         }
       ],
       "rejection_patterns": [],
@@ -60,47 +60,47 @@
     "C12": {
       "product_name": "이지대환대출",
       "totals": {
-        "all_cases": 131,
-        "decision_known_cases": 131,
-        "approval_cases": 129,
+        "all_cases": 594,
+        "decision_known_cases": 594,
+        "approval_cases": 592,
         "rejection_cases": 2,
-        "approval_rate": 0.9847,
-        "approval_rate_percent": 98.5,
-        "rejection_rate": 0.0153,
-        "rejection_rate_percent": 1.5
+        "approval_rate": 0.9966,
+        "approval_rate_percent": 99.7,
+        "rejection_rate": 0.0034,
+        "rejection_rate_percent": 0.3
       },
       "approval_patterns": [
         {
           "feature": "DSR",
           "rule": "DSR 20~40",
-          "support": 68,
-          "decision_count": 67,
-          "decision_rate": 0.9853,
-          "decision_rate_percent": 98.5
+          "support": 306,
+          "decision_count": 305,
+          "decision_rate": 0.9967,
+          "decision_rate_percent": 99.7
         },
         {
           "feature": "KCB 등급",
           "rule": "KCB 5~6등급",
-          "support": 68,
-          "decision_count": 67,
-          "decision_rate": 0.9853,
-          "decision_rate_percent": 98.5
+          "support": 306,
+          "decision_count": 305,
+          "decision_rate": 0.9967,
+          "decision_rate_percent": 99.7
         },
         {
           "feature": "ML스코어 등급",
           "rule": "ML스코어 5~6등급",
-          "support": 68,
-          "decision_count": 67,
-          "decision_rate": 0.9853,
-          "decision_rate_percent": 98.5
+          "support": 306,
+          "decision_count": 305,
+          "decision_rate": 0.9967,
+          "decision_rate_percent": 99.7
         },
         {
           "feature": "비대면연계대출등급",
           "rule": "비대면연계대출등급 3~4",
-          "support": 68,
-          "decision_count": 67,
-          "decision_rate": 0.9853,
-          "decision_rate_percent": 98.5
+          "support": 306,
+          "decision_count": 305,
+          "decision_rate": 0.9967,
+          "decision_rate_percent": 99.7
         }
       ],
       "rejection_patterns": [],
@@ -131,45 +131,45 @@
     "C6": {
       "product_name": "신용대출(이지신용대출)",
       "totals": {
-        "all_cases": 172,
-        "decision_known_cases": 172,
-        "approval_cases": 130,
-        "rejection_cases": 42,
-        "approval_rate": 0.7558,
-        "approval_rate_percent": 75.6,
-        "rejection_rate": 0.2442,
-        "rejection_rate_percent": 24.4
+        "all_cases": 640,
+        "decision_known_cases": 640,
+        "approval_cases": 483,
+        "rejection_cases": 157,
+        "approval_rate": 0.7547,
+        "approval_rate_percent": 75.5,
+        "rejection_rate": 0.2453,
+        "rejection_rate_percent": 24.5
       },
       "approval_patterns": [
         {
-          "feature": "NICE CB등급",
-          "rule": "NICE 1~2등급",
-          "support": 13,
-          "decision_count": 13,
-          "decision_rate": 1.0,
-          "decision_rate_percent": 100.0
-        },
-        {
           "feature": "DSR",
           "rule": "DSR 10 미만",
-          "support": 12,
-          "decision_count": 12,
+          "support": 55,
+          "decision_count": 55,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         },
         {
           "feature": "산출금리",
           "rule": "산출금리 10~15%",
-          "support": 12,
-          "decision_count": 12,
+          "support": 55,
+          "decision_count": 55,
+          "decision_rate": 1.0,
+          "decision_rate_percent": 100.0
+        },
+        {
+          "feature": "NICE CB등급",
+          "rule": "NICE 1~2등급",
+          "support": 51,
+          "decision_count": 51,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         },
         {
           "feature": "ML스코어 등급",
           "rule": "ML스코어 1~2등급",
-          "support": 10,
-          "decision_count": 10,
+          "support": 44,
+          "decision_count": 44,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         }
@@ -179,39 +179,39 @@
         {
           "code": "K354",
           "description": "KCB I-INDEX 등급 하위",
-          "count": 37,
-          "share_of_rejections": 0.881,
-          "share_of_rejections_percent": 88.1
+          "count": 139,
+          "share_of_rejections": 0.8854,
+          "share_of_rejections_percent": 88.5
         },
         {
           "code": "K374",
           "description": "중위등급세분화모형 하위 고위험 차주",
-          "count": 37,
-          "share_of_rejections": 0.881,
-          "share_of_rejections_percent": 88.1
+          "count": 139,
+          "share_of_rejections": 0.8854,
+          "share_of_rejections_percent": 88.5
         },
         {
           "code": "K355",
           "description": "레벨1-5 제외 미해지 대출기관수 3건 이상(대부정보 반영)",
-          "count": 37,
-          "share_of_rejections": 0.881,
-          "share_of_rejections_percent": 88.1
+          "count": 139,
+          "share_of_rejections": 0.8854,
+          "share_of_rejections_percent": 88.5
         },
         {
           "code": "K357",
           "description": "그룹 다중채무 세그먼트 등급 4등급",
-          "count": 37,
-          "share_of_rejections": 0.881,
-          "share_of_rejections_percent": 88.1
+          "count": 139,
+          "share_of_rejections": 0.8854,
+          "share_of_rejections_percent": 88.5
         }
       ]
     },
     "C9": {
       "product_name": "카드론(이지론)",
       "totals": {
-        "all_cases": 139,
-        "decision_known_cases": 139,
-        "approval_cases": 139,
+        "all_cases": 607,
+        "decision_known_cases": 607,
+        "approval_cases": 607,
         "rejection_cases": 0,
         "approval_rate": 1.0,
         "approval_rate_percent": 100.0,
@@ -222,32 +222,32 @@
         {
           "feature": "DSR",
           "rule": "DSR 10 미만",
-          "support": 139,
-          "decision_count": 139,
+          "support": 607,
+          "decision_count": 607,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         },
         {
           "feature": "비대면연계대출등급",
           "rule": "비대면연계대출등급 1~2",
-          "support": 139,
-          "decision_count": 139,
+          "support": 607,
+          "decision_count": 607,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         },
         {
           "feature": "KCB 등급",
           "rule": "KCB 1~2등급",
-          "support": 83,
-          "decision_count": 83,
+          "support": 374,
+          "decision_count": 374,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         },
         {
           "feature": "산출금리",
-          "rule": "산출금리 10~15%",
-          "support": 70,
-          "decision_count": 70,
+          "rule": "산출금리 10% 미만",
+          "support": 310,
+          "decision_count": 310,
           "decision_rate": 1.0,
           "decision_rate_percent": 100.0
         }

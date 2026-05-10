@@ -128,7 +128,7 @@ def _start_faiss_ws():
 
                 time.sleep(3)
         except Exception:
-            return
+            return 
 
     thread = threading.Thread(target=_run_ws, daemon=True)
     thread.start()
