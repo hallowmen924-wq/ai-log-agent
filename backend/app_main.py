@@ -206,6 +206,23 @@ def _openai_chat_completion(
 
 OLLAMA_LIGHTWEIGHT_MODEL = os.environ.get("OLLAMA_LIGHTWEIGHT_MODEL", "mistral")
 
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_int(name: str, default: int, minimum: int | None = None) -> int:
+    try:
+        value = int(str(os.environ.get(name, default)).strip())
+    except Exception:
+        value = default
+    if minimum is not None:
+        return max(minimum, value)
+    return value
+
 try:
     from websockets.exceptions import ConnectionClosed
 except Exception:
@@ -230,7 +247,11 @@ FEATURE_CLUSTER_CACHE_PATH = ROOT / "data" / "feature_customer_clusters.json"
 FEATURE_EMBEDDING_CACHE_PATH = ROOT / "data" / "commonfeature_embeddings.npz"
 FEATURE_CLUSTER_CACHE_VERSION = 9
 FEATURE_EMBEDDING_CACHE_LIMIT = 8
-SEMANTIC_REFRESH_INTERVAL_SECONDS = 120
+SEMANTIC_REFRESH_INTERVAL_SECONDS = _env_int("SEMANTIC_REFRESH_INTERVAL_SECONDS", 120, minimum=30)
+AUTO_START_WORKER = _env_flag("AUTO_START_WORKER", False)
+AUTO_START_SEMANTIC_REFRESH = _env_flag("AUTO_START_SEMANTIC_REFRESH", False)
+WORKER_START_INTERVAL_SECONDS = _env_int("WORKER_START_INTERVAL_SECONDS", 5, minimum=1)
+HEALTH_CHECK_OLLAMA = _env_flag("HEALTH_CHECK_OLLAMA", False)
 WORKBENCH_OLLAMA_TIMEOUT_SECONDS = 8
 REGULATION_STATE_PATH = ROOT / "data" / "regulation_state.json"
 PRODUCT_QUERY_ALIASES = {
@@ -389,10 +410,10 @@ _semantic_refresh_run_lock = threading.Lock()
 _semantic_refresh_stop_event = threading.Event()
 _semantic_refresh_thread: threading.Thread | None = None
 _semantic_refresh_status: dict[str, object] = {
-    "enabled": True,
+    "enabled": AUTO_START_SEMANTIC_REFRESH,
     "interval_seconds": SEMANTIC_REFRESH_INTERVAL_SECONDS,
     "status": "idle",
-    "message": "2분 자동 갱신 대기 중입니다.",
+    "message": "자동 갱신은 기본 비활성화 상태입니다. 필요하면 수동 갱신하거나 AUTO_START_SEMANTIC_REFRESH=1로 켜세요.",
     "last_started_at": "",
     "last_completed_at": "",
     "last_failed_at": "",
@@ -445,11 +466,10 @@ def _run_semantic_refresh_once(trigger: str = "timer") -> dict[str, object]:
         )
 
         # Keep full_text_records in sync with the generated live log before
-        # rebuilding the precomputed semantic layers.
-        from tools.export_log_analyzer_results import main as export_log_analyzer_results
+        # rebuilding the precomputed semantic layers. Avoid the huge
+        # log_analyzer_results.json intermediate during the recurring refresh.
         from tools.export_full_text_records import main as export_full_text_records
 
-        export_log_analyzer_results()
         export_full_text_records()
 
         write_segment_metric_cube(FULL_TEXT_RECORDS_PATH, DEFAULT_SEGMENT_CUBE_PATH)
@@ -505,11 +525,11 @@ def _run_semantic_refresh_once(trigger: str = "timer") -> dict[str, object]:
 
 def _semantic_refresh_loop() -> None:
     while not _semantic_refresh_stop_event.is_set():
+        if _semantic_refresh_stop_event.wait(SEMANTIC_REFRESH_INTERVAL_SECONDS):
+            break
         _run_semantic_refresh_once("timer")
         next_run = datetime.datetime.now() + datetime.timedelta(seconds=SEMANTIC_REFRESH_INTERVAL_SECONDS)
         _update_semantic_refresh_status(next_run_at=next_run.isoformat(timespec="seconds"))
-        if _semantic_refresh_stop_event.wait(SEMANTIC_REFRESH_INTERVAL_SECONDS):
-            break
 
 
 def _start_semantic_refresh_scheduler() -> None:
@@ -517,7 +537,7 @@ def _start_semantic_refresh_scheduler() -> None:
     if _semantic_refresh_thread is not None and _semantic_refresh_thread.is_alive():
         return
     _semantic_refresh_stop_event.clear()
-    next_run = datetime.datetime.now()
+    next_run = datetime.datetime.now() + datetime.timedelta(seconds=SEMANTIC_REFRESH_INTERVAL_SECONDS)
     _update_semantic_refresh_status(
         enabled=True,
         status="idle",
@@ -6724,9 +6744,38 @@ def app_startup() -> None:
                 "updated_at": updated_at or _iso_now(),
             }
             state.agent_statuses = statuses
-    worker.update_interval(1)
-    worker.start()
-    _start_semantic_refresh_scheduler()
+    if AUTO_START_WORKER:
+        worker.update_interval(WORKER_START_INTERVAL_SECONDS)
+        worker.start()
+        record_activity_event(
+            "startup_sequence",
+            "running",
+            f"Background worker auto-start enabled. interval={worker.interval_seconds}s",
+            update_status=True,
+        )
+    else:
+        record_activity_event(
+            "startup_sequence",
+            "completed",
+            "Background worker auto-start skipped. Use /worker/start or AUTO_START_WORKER=1 when needed.",
+            update_status=True,
+        )
+
+    if AUTO_START_SEMANTIC_REFRESH:
+        _start_semantic_refresh_scheduler()
+    else:
+        _update_semantic_refresh_status(
+            enabled=False,
+            status="idle",
+            message="자동 갱신 비활성화 상태입니다. /feature-ontology/semantic-refresh 수동 실행은 가능합니다.",
+            next_run_at="",
+        )
+        record_activity_event(
+            "startup_sequence",
+            "completed",
+            "Semantic refresh scheduler auto-start skipped.",
+            update_status=True,
+        )
 
 
 @app.on_event("shutdown")
@@ -6794,7 +6843,21 @@ def health() -> dict:
         worker_running=worker.running,
         worker_interval_seconds=worker.interval_seconds,
     )
-    snapshot["ollama_health"] = _probe_ollama_health()
+    snapshot["background_startup"] = {
+        "auto_start_worker": AUTO_START_WORKER,
+        "worker_start_interval_seconds": WORKER_START_INTERVAL_SECONDS,
+        "auto_start_semantic_refresh": AUTO_START_SEMANTIC_REFRESH,
+        "semantic_refresh_interval_seconds": SEMANTIC_REFRESH_INTERVAL_SECONDS,
+        "health_check_ollama": HEALTH_CHECK_OLLAMA,
+    }
+    snapshot["ollama_health"] = (
+        _probe_ollama_health()
+        if HEALTH_CHECK_OLLAMA
+        else {
+            "status": "skipped",
+            "detail": "Set HEALTH_CHECK_OLLAMA=1 or call /health/ollama for a live Ollama probe.",
+        }
+    )
     return {"status": "ok", "worker_running": worker.running, **snapshot}
 
 

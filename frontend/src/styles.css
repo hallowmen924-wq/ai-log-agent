@@ -3629,6 +3629,169 @@ textarea {
   background: linear-gradient(135deg, rgba(232, 247, 255, 0.92), rgba(255, 248, 235, 0.72));
 }
 
+.product-debate-room {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(86, 157, 220, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(97, 244, 222, 0.12), transparent 28%),
+    radial-gradient(circle at 82% 8%, rgba(255, 191, 105, 0.14), transparent 26%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(235, 247, 255, 0.78));
+  overflow: hidden;
+}
+
+.product-debate-room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.product-debate-room-head strong {
+  display: block;
+  color: #163d57;
+}
+
+.product-debate-table {
+  position: relative;
+  min-height: 300px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background:
+    linear-gradient(90deg, rgba(82, 134, 175, 0.08) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(82, 134, 175, 0.08) 1px, transparent 1px),
+    rgba(246, 252, 255, 0.72);
+  background-size: 34px 34px;
+}
+
+.product-debate-table-surface {
+  position: relative;
+  z-index: 1;
+  width: min(340px, 46%);
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(73, 139, 190, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(225, 242, 253, 0.94));
+  box-shadow: 0 18px 42px rgba(63, 120, 168, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  text-align: center;
+}
+
+.product-debate-table-surface span {
+  color: #5e8096;
+  font-size: 0.78rem;
+  font-weight: 900;
+  max-width: 92%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-debate-table-surface strong {
+  color: #163d57;
+  font-size: 0.92rem;
+}
+
+.product-debate-equalizer {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  height: 28px;
+  margin-top: 4px;
+}
+
+.product-debate-equalizer i {
+  width: 5px;
+  height: 9px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #61f4de, #69a7ff);
+  animation: productDebateWave 0.9s ease-in-out infinite;
+}
+
+.product-debate-person {
+  position: absolute;
+  z-index: 2;
+  width: 190px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(86, 157, 220, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 14px 28px rgba(63, 120, 168, 0.12);
+}
+
+.product-debate-person.person-1 { top: 18px; left: 9%; }
+.product-debate-person.person-2 { top: 18px; right: 9%; }
+.product-debate-person.person-3 { bottom: 18px; left: 9%; }
+.product-debate-person.person-4 { bottom: 18px; right: 9%; }
+
+.product-debate-person.is-speaking {
+  border-color: rgba(97, 244, 222, 0.5);
+  box-shadow: 0 18px 38px rgba(65, 142, 184, 0.22), 0 0 0 4px rgba(97, 244, 222, 0.12);
+}
+
+.product-debate-avatar {
+  position: relative;
+  width: 46px;
+  height: 52px;
+  flex: 0 0 auto;
+}
+
+.product-debate-avatar span {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50% 50% 44% 44%;
+  background: linear-gradient(180deg, #e8f7ff, #bfe7ff);
+  color: #17425c;
+  font-weight: 900;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.product-debate-avatar i {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 22px;
+  border-radius: 14px 14px 8px 8px;
+  background: linear-gradient(180deg, #69a7ff, #3d79b4);
+}
+
+.product-debate-person.is-risk .product-debate-avatar i { background: linear-gradient(180deg, #7bdcb5, #389a6f); }
+.product-debate-person.is-sales .product-debate-avatar i { background: linear-gradient(180deg, #ffcf7a, #d68a2e); }
+.product-debate-person.is-tech .product-debate-avatar i { background: linear-gradient(180deg, #9aa8ff, #5b66c9); }
+
+.product-debate-person strong {
+  display: block;
+  color: #183d56;
+}
+
+.product-debate-person small {
+  display: block;
+  color: #648399;
+  line-height: 1.35;
+}
+
+.product-debate-live-feed {
+  display: grid;
+  gap: 9px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .product-dev-debate-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3636,6 +3799,8 @@ textarea {
 }
 
 .product-dev-message {
+  display: grid;
+  gap: 7px;
   padding: 13px;
   border: 1px solid rgba(93, 157, 205, 0.18);
   border-radius: 16px;
@@ -3647,14 +3812,43 @@ textarea {
 }
 
 .product-dev-message p {
-  margin: 6px 0 0;
+  margin: 0;
   color: #496d86;
   line-height: 1.55;
 }
 
+.product-dev-message-speaker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-dev-message-speaker span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(219, 242, 255, 0.92);
+  color: #276a96;
+  font-weight: 900;
+  font-size: 0.8rem;
+}
+
+.product-dev-message-speaker small {
+  color: #7892a5;
+  font-size: 0.76rem;
+}
+
+.product-dev-message.is-solution { background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(231, 247, 255, 0.74)); }
 .product-dev-message.is-sales { background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 247, 230, 0.72)); }
 .product-dev-message.is-risk { background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(237, 249, 244, 0.76)); }
 .product-dev-message.is-tech { background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(237, 242, 255, 0.74)); }
+
+@keyframes productDebateWave {
+  0%, 100% { height: 8px; opacity: 0.56; }
+  50% { height: 26px; opacity: 1; }
+}
 
 .product-dev-final-card {
   display: grid;
@@ -4042,6 +4236,34 @@ textarea {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .product-dev-hero {
+    flex-direction: column;
+  }
+
+  .product-dev-stat-strip,
+  .product-dev-agenda-grid,
+  .product-dev-final-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .product-debate-table {
+    min-height: 540px;
+    align-content: center;
+  }
+
+  .product-debate-table-surface {
+    width: min(260px, 72%);
+  }
+
+  .product-debate-person {
+    width: min(230px, 82%);
+  }
+
+  .product-debate-person.person-1 { top: 14px; left: 9%; }
+  .product-debate-person.person-2 { top: 132px; right: 9%; left: auto; }
+  .product-debate-person.person-3 { bottom: 132px; left: 9%; }
+  .product-debate-person.person-4 { bottom: 14px; right: 9%; left: auto; }
 
   .ontology-copilot-main {
     grid-template-columns: minmax(0, 1fr);

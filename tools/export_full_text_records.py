@@ -119,7 +119,8 @@ def _build_normalized_features(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_analyzer_results() -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if ANALYZER_RESULTS_PATH.exists():
+    use_analyzer_cache = os.environ.get("USE_LOG_ANALYZER_RESULTS", "").strip().lower() in {"1", "true", "yes"}
+    if use_analyzer_cache and ANALYZER_RESULTS_PATH.exists():
         with ANALYZER_RESULTS_PATH.open(encoding="utf-8") as file:
             payload = json.load(file)
         return list(payload.get("results") or []), dict(payload.get("source") or {})

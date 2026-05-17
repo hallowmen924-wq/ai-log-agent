@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-17T16:05:31",
+  "generated_at": "2026-05-17T23:29:08",
   "source": {
     "log_dir": "data\\logs",
     "fallback_log_dir": "logs",
@@ -9,8 +9,9 @@
       "logs\\generated_live.log",
       "logs\\stdout.log.20260407.txt"
     ],
-    "result_count": 4705,
-    "prepared_record_count": 4705,
+    "result_count": 4732,
+    "source": "analyze_logs",
+    "prepared_record_count": 4732,
     "export_path": "data\\full_text_records.json"
   },
   "records": [
@@ -110599,6 +110600,601 @@
         "recognized_income": 62000000.0,
         "recognized_income_source": "소득",
         "available_amount": 2800000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 34 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229290815 - 채널구분: 6 - 대출금액: 15000 - 비대면연계대출등급: 6 - 신용대출건수: 3 - ML스코어 등급: 6 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 승인 - 산출금리: 12.8 - DSR: 23 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 34\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229290815\n- 채널구분: 6\n- 대출금액: 15000\n- 비대면연계대출등급: 6\n- 신용대출건수: 3\n- ML스코어 등급: 6\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.8\n- DSR: 23\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 34,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 15000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 34 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229290815 - 채널구분: 6 - 대출금액: 15000 - 비대면연계대출등급: 6 - 신용대출건수: 3 - ML스코어 등급: 6 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 승인 - 산출금리: 12.8 - DSR: 23 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 34\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229290815\n- 채널구분: 6\n- 대출금액: 15000\n- 비대면연계대출등급: 6\n- 신용대출건수: 3\n- ML스코어 등급: 6\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.8\n- DSR: 23\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 34,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 15000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 4125333 - 연령: 29 - 외국인여부: - - 건강보험가입자구분: 5 - 접수번호: 1000229290829 - 채널구분: 6 - 대출금액: 36500000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: 8631875 - NICE CB등급: - - KCB 등급: 4 [심사 결과] - 승인 여부: 승인 - 산출금리: 12.7 - DSR: 0.53 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 4125333\n- 연령: 29\n- 외국인여부: -\n- 건강보험가입자구분: 5\n- 접수번호: 1000229290829\n- 채널구분: 6\n- 대출금액: 36500000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: 8631875\n- NICE CB등급: -\n- KCB 등급: 4",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.7\n- DSR: 0.53\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 29,
+        "annual_income": 4125333,
+        "recognized_income": 4125333.0,
+        "recognized_income_source": "소득",
+        "available_amount": 36500000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 34 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229290815 - 채널구분: 6 - 대출금액: 15000 - 비대면연계대출등급: 6 - 신용대출건수: 3 - ML스코어 등급: 6 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 승인 - 산출금리: 12.8 - DSR: 23 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 34\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229290815\n- 채널구분: 6\n- 대출금액: 15000\n- 비대면연계대출등급: 6\n- 신용대출건수: 3\n- ML스코어 등급: 6\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.8\n- DSR: 23\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 34,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 15000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 4125333 - 연령: 29 - 외국인여부: - - 건강보험가입자구분: 5 - 접수번호: 1000229290829 - 채널구분: 6 - 대출금액: 36500000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: 8631875 - NICE CB등급: - - KCB 등급: 4 [심사 결과] - 승인 여부: 승인 - 산출금리: 12.7 - DSR: 0.53 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 4125333\n- 연령: 29\n- 외국인여부: -\n- 건강보험가입자구분: 5\n- 접수번호: 1000229290829\n- 채널구분: 6\n- 대출금액: 36500000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: 8631875\n- NICE CB등급: -\n- KCB 등급: 4",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.7\n- DSR: 0.53\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 29,
+        "annual_income": 4125333,
+        "recognized_income": 4125333.0,
+        "recognized_income_source": "소득",
+        "available_amount": 36500000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C11",
+      "product_display": "개인사업자대출",
+      "full_text": "[상품] 개인사업자대출 [고객 정보] - 소득: 85000000 - 연령: 38 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 25000229290783 - 채널구분: 1 - 대출금액: 2800 - 비대면연계대출등급: 2 - 신용대출건수: - - ML스코어 등급: 9 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 6 [심사 결과] - 승인 여부: 승인 - 산출금리: 9.8 - DSR: - - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 85000000\n- 연령: 38\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 25000229290783\n- 채널구분: 1\n- 대출금액: 2800\n- 비대면연계대출등급: 2\n- 신용대출건수: -\n- ML스코어 등급: 9\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 6",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 9.8\n- DSR: -\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 38,
+        "annual_income": 85000000,
+        "recognized_income": 85000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 2800000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C12",
+      "product_display": "이지대환대출",
+      "full_text": "[상품] 이지대환대출 [고객 정보] - 소득: 33000 - 연령: 37 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 26000229289027 - 채널구분: 3 - 대출금액: 10839165 - 비대면연계대출등급: 3 - 신용대출건수: 6 - ML스코어 등급: 6 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 6 [심사 결과] - 승인 여부: 승인 - 산출금리: 11.2 - DSR: 23 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 33000\n- 연령: 37\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 26000229289027\n- 채널구분: 3\n- 대출금액: 10839165\n- 비대면연계대출등급: 3\n- 신용대출건수: 6\n- ML스코어 등급: 6\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 6",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 11.2\n- DSR: 23\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 37,
+        "annual_income": 33000,
+        "recognized_income": 33000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 10839165.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 42 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229290822 - 채널구분: 6 - 대출금액: 15000 - 비대면연계대출등급: 6 - 신용대출건수: 3 - ML스코어 등급: 6 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 승인 - 산출금리: 13.7 - DSR: 23 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 42\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229290822\n- 채널구분: 6\n- 대출금액: 15000\n- 비대면연계대출등급: 6\n- 신용대출건수: 3\n- ML스코어 등급: 6\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 13.7\n- DSR: 23\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 42,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 15000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 96236416 - 연령: 41 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 1000229290846 - 채널구분: 3 - 대출금액: 3000000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 1 [심사 결과] - 승인 여부: 승인 - 산출금리: 14.2 - DSR: 1 - 거절사유: 가계부채 관리대상 연소득 초과 취급 감액",
+      "in_text": "[고객 정보]\n- 소득: 96236416\n- 연령: 41\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 1000229290846\n- 채널구분: 3\n- 대출금액: 3000000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 1",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 14.2\n- DSR: 1\n- 거절사유: 가계부채 관리대상 연소득 초과 취급 감액",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액",
+      "reject_reason_codes": [
+        "K707"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 41,
+        "annual_income": 96236416,
+        "recognized_income": 96236416.0,
+        "recognized_income_source": "소득",
+        "available_amount": 3000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C11",
+      "product_display": "개인사업자대출",
+      "full_text": "[상품] 개인사업자대출 [고객 정보] - 소득: 62000000 - 연령: 45 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 25000229289571 - 채널구분: 1 - 대출금액: 2800 - 비대면연계대출등급: 2 - 신용대출건수: - - ML스코어 등급: 9 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 6 [심사 결과] - 승인 여부: 승인 - 산출금리: 11.4 - DSR: - - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 62000000\n- 연령: 45\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 25000229289571\n- 채널구분: 1\n- 대출금액: 2800\n- 비대면연계대출등급: 2\n- 신용대출건수: -\n- ML스코어 등급: 9\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 6",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 11.4\n- DSR: -\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 45,
+        "annual_income": 62000000,
+        "recognized_income": 62000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 2800000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C12",
+      "product_display": "이지대환대출",
+      "full_text": "[상품] 이지대환대출 [고객 정보] - 소득: 2800 - 연령: 46 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 26000229289241 - 채널구분: 6 - 대출금액: 27000000 - 비대면연계대출등급: 2 - 신용대출건수: - - ML스코어 등급: 9 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 2 [심사 결과] - 승인 여부: 승인 - 산출금리: 12.9 - DSR: 1 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 2800\n- 연령: 46\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 26000229289241\n- 채널구분: 6\n- 대출금액: 27000000\n- 비대면연계대출등급: 2\n- 신용대출건수: -\n- ML스코어 등급: 9\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 2",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.9\n- DSR: 1\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 46,
+        "annual_income": 2800,
+        "recognized_income": 2800000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 27000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 31 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229290875 - 채널구분: 6 - 대출금액: 7661 - 비대면연계대출등급: 7 - 신용대출건수: 1 - ML스코어 등급: 11 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 거절 - 산출금리: 17.4 - DSR: 23 - 거절사유: 니어프라임ML등급 하위, 중위등급세분화모형 하위 고위험 차주",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 31\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229290875\n- 채널구분: 6\n- 대출금액: 7661\n- 비대면연계대출등급: 7\n- 신용대출건수: 1\n- ML스코어 등급: 11\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 거절\n- 산출금리: 17.4\n- DSR: 23\n- 거절사유: 니어프라임ML등급 하위, 중위등급세분화모형 하위 고위험 차주",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "니어프라임ML등급 하위, 중위등급세분화모형 하위 고위험 차주",
+      "reject_reason_codes": [
+        "K373",
+        "K374"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 31,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 7661000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 96236416 - 연령: 36 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 1000229290885 - 채널구분: 3 - 대출금액: 3000000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 1 [심사 결과] - 승인 여부: 승인 - 산출금리: 12.3 - DSR: 1 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 96236416\n- 연령: 36\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 1000229290885\n- 채널구분: 3\n- 대출금액: 3000000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 1",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 12.3\n- DSR: 1\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 36,
+        "annual_income": 96236416,
+        "recognized_income": 96236416.0,
+        "recognized_income_source": "소득",
+        "available_amount": 3000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C11",
+      "product_display": "개인사업자대출",
+      "full_text": "[상품] 개인사업자대출 [고객 정보] - 소득: 120000000 - 연령: 33 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 25000229285815 - 채널구분: 6 - 대출금액: 11306 - 비대면연계대출등급: 10 - 신용대출건수: - - ML스코어 등급: 11 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 11 [심사 결과] - 승인 여부: 승인 - 산출금리: 8.9 - DSR: 10.74 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 120000000\n- 연령: 33\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 25000229285815\n- 채널구분: 6\n- 대출금액: 11306\n- 비대면연계대출등급: 10\n- 신용대출건수: -\n- ML스코어 등급: 11\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 11",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 8.9\n- DSR: 10.74\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 33,
+        "annual_income": 120000000,
+        "recognized_income": 120000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 11306000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C12",
+      "product_display": "이지대환대출",
+      "full_text": "[상품] 이지대환대출 [고객 정보] - 소득: 33000 - 연령: 31 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 26000229289027 - 채널구분: 3 - 대출금액: 10839165 - 비대면연계대출등급: 3 - 신용대출건수: 6 - ML스코어 등급: 6 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 6 [심사 결과] - 승인 여부: 승인 - 산출금리: 10.8 - DSR: 23 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 33000\n- 연령: 31\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 26000229289027\n- 채널구분: 3\n- 대출금액: 10839165\n- 비대면연계대출등급: 3\n- 신용대출건수: 6\n- ML스코어 등급: 6\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 6",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 10.8\n- DSR: 23\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 31,
+        "annual_income": 33000,
+        "recognized_income": 33000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 10839165.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 55 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229289045 - 채널구분: 6 - 대출금액: 7661 - 비대면연계대출등급: 7 - 신용대출건수: 1 - ML스코어 등급: 11 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 승인 - 산출금리: 18.1 - DSR: 23 - 거절사유: 신청등급 하위",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 55\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229289045\n- 채널구분: 6\n- 대출금액: 7661\n- 비대면연계대출등급: 7\n- 신용대출건수: 1\n- ML스코어 등급: 11\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 18.1\n- DSR: 23\n- 거절사유: 신청등급 하위",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "신청등급 하위",
+      "reject_reason_codes": [
+        "K364"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 55,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 7661000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 2333333 - 연령: 52 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 1000229290899 - 채널구분: 3 - 대출금액: 9900000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 1 [심사 결과] - 승인 여부: 승인 - 산출금리: 15 - DSR: 2.2 - 거절사유: 가계부채 관리대상 연소득 초과 취급 감액",
+      "in_text": "[고객 정보]\n- 소득: 2333333\n- 연령: 52\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 1000229290899\n- 채널구분: 3\n- 대출금액: 9900000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 1",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 15\n- DSR: 2.2\n- 거절사유: 가계부채 관리대상 연소득 초과 취급 감액",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액",
+      "reject_reason_codes": [
+        "K707"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 52,
+        "annual_income": 2333333,
+        "recognized_income": 2333333.0,
+        "recognized_income_source": "소득",
+        "available_amount": 9900000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C11",
+      "product_display": "개인사업자대출",
+      "full_text": "[상품] 개인사업자대출 [고객 정보] - 소득: 18000000 - 연령: 52 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 25000229285955 - 채널구분: 6 - 대출금액: 42401 - 비대면연계대출등급: 5 - 신용대출건수: - - ML스코어 등급: 3 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 3 [심사 결과] - 승인 여부: 거절 - 산출금리: 16.9 - DSR: 41.06 - 거절사유: KCB 통합 R스코어 6등급 하위",
+      "in_text": "[고객 정보]\n- 소득: 18000000\n- 연령: 52\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 25000229285955\n- 채널구분: 6\n- 대출금액: 42401\n- 비대면연계대출등급: 5\n- 신용대출건수: -\n- ML스코어 등급: 3\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 3",
+      "out_text": "[심사 결과]\n- 승인 여부: 거절\n- 산출금리: 16.9\n- DSR: 41.06\n- 거절사유: KCB 통합 R스코어 6등급 하위",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "KCB 통합 R스코어 6등급 하위",
+      "reject_reason_codes": [
+        "K351"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 52,
+        "annual_income": 18000000,
+        "recognized_income": 18000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 42401000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C12",
+      "product_display": "이지대환대출",
+      "full_text": "[상품] 이지대환대출 [고객 정보] - 소득: 2800 - 연령: 55 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 26000229289241 - 채널구분: 6 - 대출금액: 27000000 - 비대면연계대출등급: 2 - 신용대출건수: - - ML스코어 등급: 9 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 2 [심사 결과] - 승인 여부: 거절 - 산출금리: 18.9 - DSR: 1 - 거절사유: KCB I-INDEX 등급 하위",
+      "in_text": "[고객 정보]\n- 소득: 2800\n- 연령: 55\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 26000229289241\n- 채널구분: 6\n- 대출금액: 27000000\n- 비대면연계대출등급: 2\n- 신용대출건수: -\n- ML스코어 등급: 9\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 2",
+      "out_text": "[심사 결과]\n- 승인 여부: 거절\n- 산출금리: 18.9\n- DSR: 1\n- 거절사유: KCB I-INDEX 등급 하위",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "KCB I-INDEX 등급 하위",
+      "reject_reason_codes": [
+        "K354"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 55,
+        "annual_income": 2800,
+        "recognized_income": 2800000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 27000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 8631875 - 연령: 47 - 외국인여부: 1 - 건강보험가입자구분: 5 - 접수번호: 18000229289082 - 채널구분: 6 - 대출금액: 41068 - 비대면연계대출등급: 5 - 신용대출건수: 5 - ML스코어 등급: 5 - 스크래핑소득: 8631875 - NICE CB등급: 6 - KCB 등급: - [심사 결과] - 승인 여부: 거절 - 산출금리: 18.9 - DSR: 23 - 거절사유: KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+      "in_text": "[고객 정보]\n- 소득: 8631875\n- 연령: 47\n- 외국인여부: 1\n- 건강보험가입자구분: 5\n- 접수번호: 18000229289082\n- 채널구분: 6\n- 대출금액: 41068\n- 비대면연계대출등급: 5\n- 신용대출건수: 5\n- ML스코어 등급: 5\n- 스크래핑소득: 8631875\n- NICE CB등급: 6\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 거절\n- 산출금리: 18.9\n- DSR: 23\n- 거절사유: KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+      "reject_reason_codes": [
+        "K361",
+        "K354"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 47,
+        "annual_income": 8631875,
+        "recognized_income": 8631875.0,
+        "recognized_income_source": "소득",
+        "available_amount": 41068000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 4125333 - 연령: 44 - 외국인여부: - - 건강보험가입자구분: 5 - 접수번호: 1000229289026 - 채널구분: 6 - 대출금액: 40000000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: 3761166 - NICE CB등급: - - KCB 등급: 4 [심사 결과] - 승인 여부: 승인 - 산출금리: 13.8 - DSR: 1.08 - 거절사유: -",
+      "in_text": "[고객 정보]\n- 소득: 4125333\n- 연령: 44\n- 외국인여부: -\n- 건강보험가입자구분: 5\n- 접수번호: 1000229289026\n- 채널구분: 6\n- 대출금액: 40000000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: 3761166\n- NICE CB등급: -\n- KCB 등급: 4",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 13.8\n- DSR: 1.08\n- 거절사유: -",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "",
+      "reject_reason_codes": [],
+      "normalized_features": {
+        "case_id": null,
+        "age": 44,
+        "annual_income": 4125333,
+        "recognized_income": 4125333.0,
+        "recognized_income_source": "소득",
+        "available_amount": 40000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C11",
+      "product_display": "개인사업자대출",
+      "full_text": "[상품] 개인사업자대출 [고객 정보] - 소득: 24000000 - 연령: 60 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 25000229286049 - 채널구분: 6 - 대출금액: 3611 - 비대면연계대출등급: 4 - 신용대출건수: - - ML스코어 등급: 2 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 2 [심사 결과] - 승인 여부: 거절 - 산출금리: 17.8 - DSR: 1.25 - 거절사유: KCB I-INDEX 등급 하위",
+      "in_text": "[고객 정보]\n- 소득: 24000000\n- 연령: 60\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 25000229286049\n- 채널구분: 6\n- 대출금액: 3611\n- 비대면연계대출등급: 4\n- 신용대출건수: -\n- ML스코어 등급: 2\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 2",
+      "out_text": "[심사 결과]\n- 승인 여부: 거절\n- 산출금리: 17.8\n- DSR: 1.25\n- 거절사유: KCB I-INDEX 등급 하위",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "KCB I-INDEX 등급 하위",
+      "reject_reason_codes": [
+        "K354"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 60,
+        "annual_income": 24000000,
+        "recognized_income": 24000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 3611000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C12",
+      "product_display": "이지대환대출",
+      "full_text": "[상품] 이지대환대출 [고객 정보] - 소득: 33000 - 연령: 42 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 26000229289027 - 채널구분: 3 - 대출금액: 10839165 - 비대면연계대출등급: 3 - 신용대출건수: 6 - ML스코어 등급: 6 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 6 [심사 결과] - 승인 여부: 거절 - 산출금리: 17.6 - DSR: 23 - 거절사유: 다중채무자 중 HMDS 하위고객",
+      "in_text": "[고객 정보]\n- 소득: 33000\n- 연령: 42\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 26000229289027\n- 채널구분: 3\n- 대출금액: 10839165\n- 비대면연계대출등급: 3\n- 신용대출건수: 6\n- ML스코어 등급: 6\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 6",
+      "out_text": "[심사 결과]\n- 승인 여부: 거절\n- 산출금리: 17.6\n- DSR: 23\n- 거절사유: 다중채무자 중 HMDS 하위고객",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "다중채무자 중 HMDS 하위고객",
+      "reject_reason_codes": [
+        "K145"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 42,
+        "annual_income": 33000,
+        "recognized_income": 33000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 10839165.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C6",
+      "product_display": "신용대출(이지신용대출)",
+      "full_text": "[상품] 신용대출(이지신용대출) [고객 정보] - 소득: 2800 - 연령: 29 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 18000229289124 - 채널구분: 1 - 대출금액: 2472 - 비대면연계대출등급: 2 - 신용대출건수: - - ML스코어 등급: 9 - 스크래핑소득: - - NICE CB등급: 3 - KCB 등급: - [심사 결과] - 승인 여부: 승인 - 산출금리: 16.8 - DSR: 23 - 거절사유: 비대면연계대출등급 하위",
+      "in_text": "[고객 정보]\n- 소득: 2800\n- 연령: 29\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 18000229289124\n- 채널구분: 1\n- 대출금액: 2472\n- 비대면연계대출등급: 2\n- 신용대출건수: -\n- ML스코어 등급: 9\n- 스크래핑소득: -\n- NICE CB등급: 3\n- KCB 등급: -",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 16.8\n- DSR: 23\n- 거절사유: 비대면연계대출등급 하위",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "비대면연계대출등급 하위",
+      "reject_reason_codes": [
+        "K366"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 29,
+        "annual_income": 2800,
+        "recognized_income": 2800000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 2472000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C9",
+      "product_display": "카드론(이지론)",
+      "full_text": "[상품] 카드론(이지론) [고객 정보] - 소득: 4125333 - 연령: 33 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 1000229289346 - 채널구분: 1 - 대출금액: 40000000 - 비대면연계대출등급: 1 - 신용대출건수: - - ML스코어 등급: - - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 4 [심사 결과] - 승인 여부: 승인 - 산출금리: 16.1 - DSR: 1.08 - 거절사유: 가계부채 관리대상 연소득 초과 취급 감액",
+      "in_text": "[고객 정보]\n- 소득: 4125333\n- 연령: 33\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 1000229289346\n- 채널구분: 1\n- 대출금액: 40000000\n- 비대면연계대출등급: 1\n- 신용대출건수: -\n- ML스코어 등급: -\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 4",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 16.1\n- DSR: 1.08\n- 거절사유: 가계부채 관리대상 연소득 초과 취급 감액",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액",
+      "reject_reason_codes": [
+        "K707"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 33,
+        "annual_income": 4125333,
+        "recognized_income": 4125333.0,
+        "recognized_income_source": "소득",
+        "available_amount": 40000000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C11",
+      "product_display": "개인사업자대출",
+      "full_text": "[상품] 개인사업자대출 [고객 정보] - 소득: 30000000 - 연령: 49 - 외국인여부: 1 - 건강보험가입자구분: - - 접수번호: 25000229286051 - 채널구분: 6 - 대출금액: 42401 - 비대면연계대출등급: 5 - 신용대출건수: - - ML스코어 등급: 3 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 3 [심사 결과] - 승인 여부: 승인 - 산출금리: 18.1 - DSR: 41.06 - 거절사유: KCB 비대면 우수지수 제외대상",
+      "in_text": "[고객 정보]\n- 소득: 30000000\n- 연령: 49\n- 외국인여부: 1\n- 건강보험가입자구분: -\n- 접수번호: 25000229286051\n- 채널구분: 6\n- 대출금액: 42401\n- 비대면연계대출등급: 5\n- 신용대출건수: -\n- ML스코어 등급: 3\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 3",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 18.1\n- DSR: 41.06\n- 거절사유: KCB 비대면 우수지수 제외대상",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "KCB 비대면 우수지수 제외대상",
+      "reject_reason_codes": [
+        "K361"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 49,
+        "annual_income": 30000000,
+        "recognized_income": 30000000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 42401000.0,
+        "available_amount_source": "대출금액"
+      }
+    },
+    {
+      "product": "C12",
+      "product_display": "이지대환대출",
+      "full_text": "[상품] 이지대환대출 [고객 정보] - 소득: 2800 - 연령: 50 - 외국인여부: - - 건강보험가입자구분: - - 접수번호: 26000229289241 - 채널구분: 6 - 대출금액: 27000000 - 비대면연계대출등급: 2 - 신용대출건수: - - ML스코어 등급: 9 - 스크래핑소득: - - NICE CB등급: - - KCB 등급: 2 [심사 결과] - 승인 여부: 승인 - 산출금리: 18.2 - DSR: 1 - 거절사유: 결합등급 하위고객 중 KCB신용평점 하위고객",
+      "in_text": "[고객 정보]\n- 소득: 2800\n- 연령: 50\n- 외국인여부: -\n- 건강보험가입자구분: -\n- 접수번호: 26000229289241\n- 채널구분: 6\n- 대출금액: 27000000\n- 비대면연계대출등급: 2\n- 신용대출건수: -\n- ML스코어 등급: 9\n- 스크래핑소득: -\n- NICE CB등급: -\n- KCB 등급: 2",
+      "out_text": "[심사 결과]\n- 승인 여부: 승인\n- 산출금리: 18.2\n- DSR: 1\n- 거절사유: 결합등급 하위고객 중 KCB신용평점 하위고객",
+      "full_text2": null,
+      "in_text2": null,
+      "out_text2": null,
+      "reject_reason_text": "결합등급 하위고객 중 KCB신용평점 하위고객",
+      "reject_reason_codes": [
+        "K370"
+      ],
+      "normalized_features": {
+        "case_id": null,
+        "age": 50,
+        "annual_income": 2800,
+        "recognized_income": 2800000.0,
+        "recognized_income_source": "소득",
+        "available_amount": 27000000.0,
         "available_amount_source": "대출금액"
       }
     },

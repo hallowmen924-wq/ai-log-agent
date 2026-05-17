@@ -1,9 +1,9 @@
 {
   "meta": {
-    "built_at": "2026-05-17T16:05:34",
+    "built_at": "2026-05-17T23:29:12",
     "cache_version": 9,
-    "source_mtime_ns": 1779001531389644800,
-    "record_count": 4705,
+    "source_mtime_ns": 1779028148778816500,
+    "record_count": 4732,
     "source_path": "data\\full_text_records.json",
     "income_band_thresholds": [
       {
@@ -61,20 +61,20 @@
       "label": "C12 거절 30대 · 고소득 · 중액",
       "product": "C12",
       "decision": "거절",
-      "count": 595,
+      "count": 597,
       "age_band": "30대",
       "income_band": "고소득",
       "amount_band": "중액",
       "avg_income": 33000000.0,
       "avg_amount": 10839165.0,
-      "avg_rate": 18.821,
+      "avg_rate": 18.7948,
       "avg_model_score": 6.0,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
       "avg_income_display": "약 3,300만원",
       "avg_amount_display": "약 1,084만원",
-      "avg_rate_display": "18.82%",
+      "avg_rate_display": "18.79%",
       "avg_model_score_display": "6점",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -110,20 +110,20 @@
       "label": "C9 승인 30대 · 중소득 · 고액",
       "product": "C9",
       "decision": "승인",
-      "count": 453,
+      "count": 454,
       "age_band": "30대",
       "income_band": "중소득",
       "amount_band": "고액",
       "avg_income": 4125333.0,
-      "avg_amount": 38539735.1,
-      "avg_rate": 12.9,
+      "avg_amount": 38542951.54,
+      "avg_rate": 12.907,
       "avg_model_score": null,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
       "avg_income_display": "약 413만원",
       "avg_amount_display": "약 3,854만원",
-      "avg_rate_display": "12.90%",
+      "avg_rate_display": "12.91%",
       "avg_model_score_display": "",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -306,7 +306,7 @@
       "label": "C9 승인 20대 · 초고소득 · 소액",
       "product": "C9",
       "decision": "승인",
-      "count": 331,
+      "count": 330,
       "age_band": "20대",
       "income_band": "초고소득",
       "amount_band": "소액",
@@ -453,19 +453,19 @@
       "label": "C6 거절 30대 · 고소득 · 중액 / 비대면연계대출등급 하위, 신청등급 하위",
       "product": "C6",
       "decision": "거절",
-      "count": 179,
+      "count": 183,
       "age_band": "30대",
       "income_band": "고소득",
       "amount_band": "중액",
       "avg_income": 8631875.0,
-      "avg_amount": 9957000.0,
+      "avg_amount": 10067229.51,
       "avg_rate": 18.9,
-      "avg_model_score": 9.44,
+      "avg_model_score": 9.36,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
       "avg_income_display": "약 863만원",
-      "avg_amount_display": "약 996만원",
+      "avg_amount_display": "약 1,007만원",
       "avg_rate_display": "18.90%",
       "avg_model_score_display": "9점",
       "avg_delinquency_rate_display": "",
@@ -478,15 +478,15 @@
       "top_reject_codes": [
         {
           "code": "K366",
-          "count": 179
+          "count": 183
         },
         {
           "code": "K364",
-          "count": 179
+          "count": 183
         },
         {
           "code": "K373",
-          "count": 179
+          "count": 183
         }
       ],
       "top_reject_descriptions": [
@@ -519,7 +519,7 @@
       "label": "C11 거절 20대 · 고소득 · 중액",
       "product": "C11",
       "decision": "거절",
-      "count": 172,
+      "count": 170,
       "age_band": "20대",
       "income_band": "고소득",
       "amount_band": "중액",
@@ -673,7 +673,7 @@
       "label": "C9 거절 20대 · 초고소득 · 소액 / 가계부채 관리대상 연소득 초과 취급 감액",
       "product": "C9",
       "decision": "거절",
-      "count": 117,
+      "count": 118,
       "age_band": "20대",
       "income_band": "초고소득",
       "amount_band": "소액",
@@ -698,7 +698,7 @@
       "top_reject_codes": [
         {
           "code": "K707",
-          "count": 117
+          "count": 118
         }
       ],
       "top_reject_descriptions": [
@@ -729,20 +729,20 @@
       "label": "C6 승인 30대 · 고소득 · 중액",
       "product": "C6",
       "decision": "승인",
-      "count": 94,
+      "count": 93,
       "age_band": "30대",
       "income_band": "고소득",
       "amount_band": "중액",
       "avg_income": 8631875.0,
       "avg_amount": 15000000.0,
-      "avg_rate": 18.3809,
-      "avg_model_score": 4.85,
+      "avg_rate": 18.1785,
+      "avg_model_score": 4.84,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
       "avg_income_display": "약 863만원",
       "avg_amount_display": "약 1,500만원",
-      "avg_rate_display": "18.38%",
+      "avg_rate_display": "18.18%",
       "avg_model_score_display": "5점",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -1519,20 +1519,20 @@
       "label": "C6 거절 30대 · 고소득 · 중액 / 니어프라임ML등급 하위, 중위등급세분화모형 하위 고위험 차주",
       "product": "C6",
       "decision": "거절",
-      "count": 34,
+      "count": 35,
       "age_band": "30대",
       "income_band": "고소득",
       "amount_band": "중액",
-      "avg_income": 14452169.12,
-      "avg_amount": 11091588.24,
-      "avg_rate": 18.8118,
+      "avg_income": 14285875.0,
+      "avg_amount": 10993571.43,
+      "avg_rate": 18.7714,
       "avg_model_score": 11.0,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
-      "avg_income_display": "약 1,445만원",
-      "avg_amount_display": "약 1,109만원",
-      "avg_rate_display": "18.81%",
+      "avg_income_display": "약 1,429만원",
+      "avg_amount_display": "약 1,099만원",
+      "avg_rate_display": "18.77%",
       "avg_model_score_display": "11점",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -1544,11 +1544,11 @@
       "top_reject_codes": [
         {
           "code": "K373",
-          "count": 34
+          "count": 35
         },
         {
           "code": "K374",
-          "count": 34
+          "count": 35
         },
         {
           "code": "K366",
@@ -2341,60 +2341,11 @@
       ]
     },
     {
-      "cluster_id": "C11|거절|30대|초고소득|소액|사유있음",
-      "label": "C11 거절 30대 · 초고소득 · 소액",
-      "product": "C11",
-      "decision": "거절",
-      "count": 5,
-      "age_band": "30대",
-      "income_band": "초고소득",
-      "amount_band": "소액",
-      "avg_income": 85000000.0,
-      "avg_amount": 2800000.0,
-      "avg_rate": 9.8,
-      "avg_model_score": 9.0,
-      "avg_delinquency_rate": null,
-      "delinquency_proxy_rate": 0.0,
-      "delinquency_signal_count": 0,
-      "avg_income_display": "약 8,500만원",
-      "avg_amount_display": "약 280만원",
-      "avg_rate_display": "9.80%",
-      "avg_model_score_display": "9점",
-      "avg_delinquency_rate_display": "",
-      "delinquency_proxy_rate_display": "0.0%",
-      "top_income_source": "소득",
-      "top_amount_source": "대출금액",
-      "top_rate_source": "산출금리",
-      "top_model_score_source": "ML스코어 등급",
-      "top_delinquency_rate_source": "",
-      "top_reject_codes": [],
-      "top_reject_descriptions": [],
-      "reject_summary": "",
-      "search_text": "c11 거절 30대 · 초고소득 · 소액   거절",
-      "examples": [
-        {
-          "record_id": "25000229290783",
-          "decision": "거절",
-          "reject_reason_text": "-"
-        },
-        {
-          "record_id": "25000229290783",
-          "decision": "거절",
-          "reject_reason_text": "-"
-        },
-        {
-          "record_id": "25000229290783",
-          "decision": "거절",
-          "reject_reason_text": "-"
-        }
-      ]
-    },
-    {
       "cluster_id": "C9|승인|20대|중소득|고액|사유있음",
       "label": "C9 승인 20대 · 중소득 · 고액",
       "product": "C9",
       "decision": "승인",
-      "count": 5,
+      "count": 7,
       "age_band": "20대",
       "income_band": "중소득",
       "amount_band": "고액",
@@ -2439,11 +2390,60 @@
       ]
     },
     {
+      "cluster_id": "C11|거절|30대|초고소득|소액|사유있음",
+      "label": "C11 거절 30대 · 초고소득 · 소액",
+      "product": "C11",
+      "decision": "거절",
+      "count": 6,
+      "age_band": "30대",
+      "income_band": "초고소득",
+      "amount_band": "소액",
+      "avg_income": 85000000.0,
+      "avg_amount": 2800000.0,
+      "avg_rate": 9.8,
+      "avg_model_score": 9.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 8,500만원",
+      "avg_amount_display": "약 280만원",
+      "avg_rate_display": "9.80%",
+      "avg_model_score_display": "9점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [],
+      "top_reject_descriptions": [],
+      "reject_summary": "",
+      "search_text": "c11 거절 30대 · 초고소득 · 소액   거절",
+      "examples": [
+        {
+          "record_id": "25000229290783",
+          "decision": "거절",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "25000229290783",
+          "decision": "거절",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "25000229290783",
+          "decision": "거절",
+          "reject_reason_text": "-"
+        }
+      ]
+    },
+    {
       "cluster_id": "C6|승인|40대|고소득|중액|사유있음",
       "label": "C6 승인 40대 · 고소득 · 중액",
       "product": "C6",
       "decision": "승인",
-      "count": 4,
+      "count": 5,
       "age_band": "40대",
       "income_band": "고소득",
       "amount_band": "중액",
@@ -2492,7 +2492,7 @@
       "label": "C9 승인 40대 · 초고소득 · 소액",
       "product": "C9",
       "decision": "승인",
-      "count": 4,
+      "count": 5,
       "age_band": "40대",
       "income_band": "초고소득",
       "amount_band": "소액",
@@ -2541,7 +2541,7 @@
       "label": "C11 거절 40대 · 초고소득 · 소액",
       "product": "C11",
       "decision": "거절",
-      "count": 3,
+      "count": 4,
       "age_band": "40대",
       "income_band": "초고소득",
       "amount_band": "소액",
@@ -2581,6 +2581,202 @@
         {
           "record_id": "25000229289571",
           "decision": "거절",
+          "reject_reason_text": "-"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C11|승인|20대|고소득|중액|사유있음",
+      "label": "C11 승인 20대 · 고소득 · 중액",
+      "product": "C11",
+      "decision": "승인",
+      "count": 4,
+      "age_band": "20대",
+      "income_band": "고소득",
+      "amount_band": "중액",
+      "avg_income": 26000000.0,
+      "avg_amount": 3611000.0,
+      "avg_rate": 17.3,
+      "avg_model_score": 2.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 2,600만원",
+      "avg_amount_display": "약 361만원",
+      "avg_rate_display": "17.30%",
+      "avg_model_score_display": "2점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [],
+      "top_reject_descriptions": [],
+      "reject_summary": "",
+      "search_text": "c11 승인 20대 · 고소득 · 중액   승인",
+      "examples": [
+        {
+          "record_id": "25000229286049",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "25000229286049",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "25000229286049",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C11|거절|30대|초고소득|중액|사유있음",
+      "label": "C11 거절 30대 · 초고소득 · 중액",
+      "product": "C11",
+      "decision": "거절",
+      "count": 3,
+      "age_band": "30대",
+      "income_band": "초고소득",
+      "amount_band": "중액",
+      "avg_income": 120000000.0,
+      "avg_amount": 11306000.0,
+      "avg_rate": 8.9,
+      "avg_model_score": 11.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 1.2억원",
+      "avg_amount_display": "약 1,131만원",
+      "avg_rate_display": "8.90%",
+      "avg_model_score_display": "11점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [],
+      "top_reject_descriptions": [],
+      "reject_summary": "",
+      "search_text": "c11 거절 30대 · 초고소득 · 중액   거절",
+      "examples": [
+        {
+          "record_id": "25000229285815",
+          "decision": "거절",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "25000229285815",
+          "decision": "거절",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "25000229285815",
+          "decision": "거절",
+          "reject_reason_text": "-"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C12|승인|40대|저소득|중액|사유있음",
+      "label": "C12 승인 40대 · 저소득 · 중액",
+      "product": "C12",
+      "decision": "승인",
+      "count": 3,
+      "age_band": "40대",
+      "income_band": "저소득",
+      "amount_band": "중액",
+      "avg_income": 2800000.0,
+      "avg_amount": 27000000.0,
+      "avg_rate": 12.9,
+      "avg_model_score": 9.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 280만원",
+      "avg_amount_display": "약 2,700만원",
+      "avg_rate_display": "12.90%",
+      "avg_model_score_display": "9점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [],
+      "top_reject_descriptions": [],
+      "reject_summary": "",
+      "search_text": "c12 승인 40대 · 저소득 · 중액   승인",
+      "examples": [
+        {
+          "record_id": "26000229289241",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "26000229289241",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "26000229289241",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C9|승인|30대|초고소득|소액|사유있음",
+      "label": "C9 승인 30대 · 초고소득 · 소액",
+      "product": "C9",
+      "decision": "승인",
+      "count": 3,
+      "age_band": "30대",
+      "income_band": "초고소득",
+      "amount_band": "소액",
+      "avg_income": 96236416.0,
+      "avg_amount": 3000000.0,
+      "avg_rate": 12.3,
+      "avg_model_score": null,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 9,624만원",
+      "avg_amount_display": "약 300만원",
+      "avg_rate_display": "12.30%",
+      "avg_model_score_display": "",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [],
+      "top_reject_descriptions": [],
+      "reject_summary": "",
+      "search_text": "c9 승인 30대 · 초고소득 · 소액   승인",
+      "examples": [
+        {
+          "record_id": "1000229290885",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "1000229290885",
+          "decision": "승인",
+          "reject_reason_text": "-"
+        },
+        {
+          "record_id": "1000229290885",
+          "decision": "승인",
           "reject_reason_text": "-"
         }
       ]
@@ -2630,24 +2826,24 @@
       ]
     },
     {
-      "cluster_id": "C11|거절|30대|초고소득|중액|사유있음",
-      "label": "C11 거절 30대 · 초고소득 · 중액",
-      "product": "C11",
-      "decision": "거절",
+      "cluster_id": "C6|승인|50대|고소득|중액|사유있음",
+      "label": "C6 승인 50대 · 고소득 · 중액",
+      "product": "C6",
+      "decision": "승인",
       "count": 2,
-      "age_band": "30대",
-      "income_band": "초고소득",
+      "age_band": "50대",
+      "income_band": "고소득",
       "amount_band": "중액",
-      "avg_income": 120000000.0,
-      "avg_amount": 11306000.0,
-      "avg_rate": 8.9,
+      "avg_income": 8631875.0,
+      "avg_amount": 7661000.0,
+      "avg_rate": 18.1,
       "avg_model_score": 11.0,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
-      "avg_income_display": "약 1.2억원",
-      "avg_amount_display": "약 1,131만원",
-      "avg_rate_display": "8.90%",
+      "avg_income_display": "약 863만원",
+      "avg_amount_display": "약 766만원",
+      "avg_rate_display": "18.10%",
       "avg_model_score_display": "11점",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -2659,127 +2855,39 @@
       "top_reject_codes": [],
       "top_reject_descriptions": [],
       "reject_summary": "",
-      "search_text": "c11 거절 30대 · 초고소득 · 중액   거절",
+      "search_text": "c6 승인 50대 · 고소득 · 중액   승인",
       "examples": [
         {
-          "record_id": "25000229285815",
-          "decision": "거절",
-          "reject_reason_text": "-"
+          "record_id": "18000229289045",
+          "decision": "승인",
+          "reject_reason_text": "신청등급 하위"
         },
         {
-          "record_id": "25000229285815",
-          "decision": "거절",
-          "reject_reason_text": "-"
+          "record_id": "18000229289045",
+          "decision": "승인",
+          "reject_reason_text": "신청등급 하위"
         }
       ]
     },
     {
-      "cluster_id": "C11|승인|20대|고소득|중액|사유있음",
-      "label": "C11 승인 20대 · 고소득 · 중액",
-      "product": "C11",
-      "decision": "승인",
-      "count": 2,
-      "age_band": "20대",
-      "income_band": "고소득",
-      "amount_band": "중액",
-      "avg_income": 26000000.0,
-      "avg_amount": 3611000.0,
-      "avg_rate": 17.3,
-      "avg_model_score": 2.0,
-      "avg_delinquency_rate": null,
-      "delinquency_proxy_rate": 0.0,
-      "delinquency_signal_count": 0,
-      "avg_income_display": "약 2,600만원",
-      "avg_amount_display": "약 361만원",
-      "avg_rate_display": "17.30%",
-      "avg_model_score_display": "2점",
-      "avg_delinquency_rate_display": "",
-      "delinquency_proxy_rate_display": "0.0%",
-      "top_income_source": "소득",
-      "top_amount_source": "대출금액",
-      "top_rate_source": "산출금리",
-      "top_model_score_source": "ML스코어 등급",
-      "top_delinquency_rate_source": "",
-      "top_reject_codes": [],
-      "top_reject_descriptions": [],
-      "reject_summary": "",
-      "search_text": "c11 승인 20대 · 고소득 · 중액   승인",
-      "examples": [
-        {
-          "record_id": "25000229286049",
-          "decision": "승인",
-          "reject_reason_text": "-"
-        },
-        {
-          "record_id": "25000229286049",
-          "decision": "승인",
-          "reject_reason_text": "-"
-        }
-      ]
-    },
-    {
-      "cluster_id": "C12|승인|40대|저소득|중액|사유있음",
-      "label": "C12 승인 40대 · 저소득 · 중액",
-      "product": "C12",
-      "decision": "승인",
-      "count": 2,
-      "age_band": "40대",
-      "income_band": "저소득",
-      "amount_band": "중액",
-      "avg_income": 2800000.0,
-      "avg_amount": 27000000.0,
-      "avg_rate": 12.9,
-      "avg_model_score": 9.0,
-      "avg_delinquency_rate": null,
-      "delinquency_proxy_rate": 0.0,
-      "delinquency_signal_count": 0,
-      "avg_income_display": "약 280만원",
-      "avg_amount_display": "약 2,700만원",
-      "avg_rate_display": "12.90%",
-      "avg_model_score_display": "9점",
-      "avg_delinquency_rate_display": "",
-      "delinquency_proxy_rate_display": "0.0%",
-      "top_income_source": "소득",
-      "top_amount_source": "대출금액",
-      "top_rate_source": "산출금리",
-      "top_model_score_source": "ML스코어 등급",
-      "top_delinquency_rate_source": "",
-      "top_reject_codes": [],
-      "top_reject_descriptions": [],
-      "reject_summary": "",
-      "search_text": "c12 승인 40대 · 저소득 · 중액   승인",
-      "examples": [
-        {
-          "record_id": "26000229289241",
-          "decision": "승인",
-          "reject_reason_text": "-"
-        },
-        {
-          "record_id": "26000229289241",
-          "decision": "승인",
-          "reject_reason_text": "-"
-        }
-      ]
-    },
-    {
-      "cluster_id": "C9|승인|30대|초고소득|소액|사유있음",
-      "label": "C9 승인 30대 · 초고소득 · 소액",
+      "cluster_id": "C9|승인|50대|저소득|중액|사유있음",
+      "label": "C9 승인 50대 · 저소득 · 중액",
       "product": "C9",
       "decision": "승인",
       "count": 2,
-      "age_band": "30대",
-      "income_band": "초고소득",
-      "amount_band": "소액",
-      "avg_income": 96236416.0,
-      "avg_amount": 3000000.0,
-      "avg_rate": 12.3,
+      "age_band": "50대",
+      "income_band": "저소득",
+      "amount_band": "중액",
+      "avg_income": 2333333.0,
+      "avg_amount": 9900000.0,
+      "avg_rate": 15.0,
       "avg_model_score": null,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
-      "avg_income_display": "약 9,624만원",
-      "avg_amount_display": "약 300만원",
-      "avg_rate_display": "12.30%",
+      "avg_income_display": "약 233만원",
+      "avg_amount_display": "약 990만원",
+      "avg_rate_display": "15.00%",
       "avg_model_score_display": "",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -2791,17 +2899,155 @@
       "top_reject_codes": [],
       "top_reject_descriptions": [],
       "reject_summary": "",
-      "search_text": "c9 승인 30대 · 초고소득 · 소액   승인",
+      "search_text": "c9 승인 50대 · 저소득 · 중액   승인",
       "examples": [
         {
-          "record_id": "1000229290885",
+          "record_id": "1000229290899",
           "decision": "승인",
-          "reject_reason_text": "-"
+          "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액"
         },
         {
-          "record_id": "1000229290885",
+          "record_id": "1000229290899",
           "decision": "승인",
-          "reject_reason_text": "-"
+          "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C11|거절|40대|고소득|초대형|K361",
+      "label": "C11 거절 40대 · 고소득 · 초대형 / KCB 비대면 우수지수 제외대상",
+      "product": "C11",
+      "decision": "거절",
+      "count": 1,
+      "age_band": "40대",
+      "income_band": "고소득",
+      "amount_band": "초대형",
+      "avg_income": 30000000.0,
+      "avg_amount": 42401000.0,
+      "avg_rate": 18.1,
+      "avg_model_score": 3.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 3,000만원",
+      "avg_amount_display": "약 4,240만원",
+      "avg_rate_display": "18.10%",
+      "avg_model_score_display": "3점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K361",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "KCB 비대면 우수지수 제외대상"
+      ],
+      "reject_summary": "KCB 비대면 우수지수 제외대상",
+      "search_text": "c11 거절 40대 · 고소득 · 초대형 / kcb 비대면 우수지수 제외대상 k361 kcb 비대면 우수지수 제외대상 거절",
+      "examples": [
+        {
+          "record_id": "25000229286051",
+          "decision": "거절",
+          "reject_reason_text": "KCB 비대면 우수지수 제외대상"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C11|거절|50대|고소득|초대형|K351",
+      "label": "C11 거절 50대 · 고소득 · 초대형 / KCB 통합 R스코어 6등급 하위",
+      "product": "C11",
+      "decision": "거절",
+      "count": 1,
+      "age_band": "50대",
+      "income_band": "고소득",
+      "amount_band": "초대형",
+      "avg_income": 18000000.0,
+      "avg_amount": 42401000.0,
+      "avg_rate": 16.9,
+      "avg_model_score": 3.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 1,800만원",
+      "avg_amount_display": "약 4,240만원",
+      "avg_rate_display": "16.90%",
+      "avg_model_score_display": "3점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K351",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "KCB 통합 R스코어 6등급 하위"
+      ],
+      "reject_summary": "KCB 통합 R스코어 6등급 하위",
+      "search_text": "c11 거절 50대 · 고소득 · 초대형 / kcb 통합 r스코어 6등급 하위 k351 kcb 통합 r스코어 6등급 하위 거절",
+      "examples": [
+        {
+          "record_id": "25000229285955",
+          "decision": "거절",
+          "reject_reason_text": "KCB 통합 R스코어 6등급 하위"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C11|거절|60대+|고소득|중액|K354",
+      "label": "C11 거절 60대+ · 고소득 · 중액 / KCB I-INDEX 등급 하위",
+      "product": "C11",
+      "decision": "거절",
+      "count": 1,
+      "age_band": "60대+",
+      "income_band": "고소득",
+      "amount_band": "중액",
+      "avg_income": 24000000.0,
+      "avg_amount": 3611000.0,
+      "avg_rate": 17.8,
+      "avg_model_score": 2.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 2,400만원",
+      "avg_amount_display": "약 361만원",
+      "avg_rate_display": "17.80%",
+      "avg_model_score_display": "2점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K354",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "KCB I-INDEX 등급 하위"
+      ],
+      "reject_summary": "KCB I-INDEX 등급 하위",
+      "search_text": "c11 거절 60대+ · 고소득 · 중액 / kcb i-index 등급 하위 k354 kcb i-index 등급 하위 거절",
+      "examples": [
+        {
+          "record_id": "25000229286049",
+          "decision": "거절",
+          "reject_reason_text": "KCB I-INDEX 등급 하위"
         }
       ]
     },
@@ -2908,25 +3154,25 @@
       ]
     },
     {
-      "cluster_id": "C6|승인|50대|고소득|중액|사유있음",
-      "label": "C6 승인 50대 · 고소득 · 중액",
-      "product": "C6",
-      "decision": "승인",
+      "cluster_id": "C12|거절|40대|고소득|중액|K145",
+      "label": "C12 거절 40대 · 고소득 · 중액 / 다중채무자 중 HMDS 하위고객",
+      "product": "C12",
+      "decision": "거절",
       "count": 1,
-      "age_band": "50대",
+      "age_band": "40대",
       "income_band": "고소득",
       "amount_band": "중액",
-      "avg_income": 8631875.0,
-      "avg_amount": 7661000.0,
-      "avg_rate": 18.1,
-      "avg_model_score": 11.0,
+      "avg_income": 33000000.0,
+      "avg_amount": 10839165.0,
+      "avg_rate": 17.6,
+      "avg_model_score": 6.0,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
-      "avg_income_display": "약 863만원",
-      "avg_amount_display": "약 766만원",
-      "avg_rate_display": "18.10%",
-      "avg_model_score_display": "11점",
+      "avg_income_display": "약 3,300만원",
+      "avg_amount_display": "약 1,084만원",
+      "avg_rate_display": "17.60%",
+      "avg_model_score_display": "6점",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
       "top_income_source": "소득",
@@ -2934,37 +3180,233 @@
       "top_rate_source": "산출금리",
       "top_model_score_source": "ML스코어 등급",
       "top_delinquency_rate_source": "",
-      "top_reject_codes": [],
-      "top_reject_descriptions": [],
-      "reject_summary": "",
-      "search_text": "c6 승인 50대 · 고소득 · 중액   승인",
+      "top_reject_codes": [
+        {
+          "code": "K145",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "다중채무자 중 HMDS 하위고객"
+      ],
+      "reject_summary": "다중채무자 중 HMDS 하위고객",
+      "search_text": "c12 거절 40대 · 고소득 · 중액 / 다중채무자 중 hmds 하위고객 k145 다중채무자 중 hmds 하위고객 거절",
       "examples": [
         {
-          "record_id": "18000229289045",
-          "decision": "승인",
-          "reject_reason_text": "신청등급 하위"
+          "record_id": "26000229289027",
+          "decision": "거절",
+          "reject_reason_text": "다중채무자 중 HMDS 하위고객"
         }
       ]
     },
     {
-      "cluster_id": "C9|승인|50대|저소득|중액|사유있음",
-      "label": "C9 승인 50대 · 저소득 · 중액",
-      "product": "C9",
-      "decision": "승인",
+      "cluster_id": "C12|거절|50대|저소득|중액|K354",
+      "label": "C12 거절 50대 · 저소득 · 중액 / KCB I-INDEX 등급 하위",
+      "product": "C12",
+      "decision": "거절",
       "count": 1,
       "age_band": "50대",
       "income_band": "저소득",
       "amount_band": "중액",
-      "avg_income": 2333333.0,
-      "avg_amount": 9900000.0,
-      "avg_rate": 15.0,
+      "avg_income": 2800000.0,
+      "avg_amount": 27000000.0,
+      "avg_rate": 18.9,
+      "avg_model_score": 9.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 280만원",
+      "avg_amount_display": "약 2,700만원",
+      "avg_rate_display": "18.90%",
+      "avg_model_score_display": "9점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K354",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "KCB I-INDEX 등급 하위"
+      ],
+      "reject_summary": "KCB I-INDEX 등급 하위",
+      "search_text": "c12 거절 50대 · 저소득 · 중액 / kcb i-index 등급 하위 k354 kcb i-index 등급 하위 거절",
+      "examples": [
+        {
+          "record_id": "26000229289241",
+          "decision": "거절",
+          "reject_reason_text": "KCB I-INDEX 등급 하위"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C12|거절|50대|저소득|중액|K370",
+      "label": "C12 거절 50대 · 저소득 · 중액 / 결합등급 하위고객 중 KCB신용평점 하위고객",
+      "product": "C12",
+      "decision": "거절",
+      "count": 1,
+      "age_band": "50대",
+      "income_band": "저소득",
+      "amount_band": "중액",
+      "avg_income": 2800000.0,
+      "avg_amount": 27000000.0,
+      "avg_rate": 18.2,
+      "avg_model_score": 9.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 280만원",
+      "avg_amount_display": "약 2,700만원",
+      "avg_rate_display": "18.20%",
+      "avg_model_score_display": "9점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K370",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "결합등급 하위고객 중 KCB신용평점 하위고객"
+      ],
+      "reject_summary": "결합등급 하위고객 중 KCB신용평점 하위고객",
+      "search_text": "c12 거절 50대 · 저소득 · 중액 / 결합등급 하위고객 중 kcb신용평점 하위고객 k370 결합등급 하위고객 중 kcb신용평점 하위고객 거절",
+      "examples": [
+        {
+          "record_id": "26000229289241",
+          "decision": "거절",
+          "reject_reason_text": "결합등급 하위고객 중 KCB신용평점 하위고객"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C6|거절|20대|저소득|소액|K366",
+      "label": "C6 거절 20대 · 저소득 · 소액 / 비대면연계대출등급 하위",
+      "product": "C6",
+      "decision": "거절",
+      "count": 1,
+      "age_band": "20대",
+      "income_band": "저소득",
+      "amount_band": "소액",
+      "avg_income": 2800000.0,
+      "avg_amount": 2472000.0,
+      "avg_rate": 16.8,
+      "avg_model_score": 9.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 280만원",
+      "avg_amount_display": "약 247만원",
+      "avg_rate_display": "16.80%",
+      "avg_model_score_display": "9점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K366",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "비대면연계대출등급 하위"
+      ],
+      "reject_summary": "비대면연계대출등급 하위",
+      "search_text": "c6 거절 20대 · 저소득 · 소액 / 비대면연계대출등급 하위 k366 비대면연계대출등급 하위 거절",
+      "examples": [
+        {
+          "record_id": "18000229289124",
+          "decision": "거절",
+          "reject_reason_text": "비대면연계대출등급 하위"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C6|거절|40대|고소득|초대형|K361",
+      "label": "C6 거절 40대 · 고소득 · 초대형 / KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+      "product": "C6",
+      "decision": "거절",
+      "count": 1,
+      "age_band": "40대",
+      "income_band": "고소득",
+      "amount_band": "초대형",
+      "avg_income": 8631875.0,
+      "avg_amount": 41068000.0,
+      "avg_rate": 18.9,
+      "avg_model_score": 5.0,
+      "avg_delinquency_rate": null,
+      "delinquency_proxy_rate": 0.0,
+      "delinquency_signal_count": 0,
+      "avg_income_display": "약 863만원",
+      "avg_amount_display": "약 4,107만원",
+      "avg_rate_display": "18.90%",
+      "avg_model_score_display": "5점",
+      "avg_delinquency_rate_display": "",
+      "delinquency_proxy_rate_display": "0.0%",
+      "top_income_source": "소득",
+      "top_amount_source": "대출금액",
+      "top_rate_source": "산출금리",
+      "top_model_score_source": "ML스코어 등급",
+      "top_delinquency_rate_source": "",
+      "top_reject_codes": [
+        {
+          "code": "K361",
+          "count": 1
+        },
+        {
+          "code": "K354",
+          "count": 1
+        }
+      ],
+      "top_reject_descriptions": [
+        "KCB 비대면 우수지수 제외대상",
+        "KCB I-INDEX 등급 하위"
+      ],
+      "reject_summary": "KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+      "search_text": "c6 거절 40대 · 고소득 · 초대형 / kcb 비대면 우수지수 제외대상, kcb i-index 등급 하위 k361 k354 kcb 비대면 우수지수 제외대상 kcb i-index 등급 하위 거절",
+      "examples": [
+        {
+          "record_id": "18000229289082",
+          "decision": "거절",
+          "reject_reason_text": "KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위"
+        }
+      ]
+    },
+    {
+      "cluster_id": "C9|승인|40대|중소득|고액|사유있음",
+      "label": "C9 승인 40대 · 중소득 · 고액",
+      "product": "C9",
+      "decision": "승인",
+      "count": 1,
+      "age_band": "40대",
+      "income_band": "중소득",
+      "amount_band": "고액",
+      "avg_income": 4125333.0,
+      "avg_amount": 40000000.0,
+      "avg_rate": 13.8,
       "avg_model_score": null,
       "avg_delinquency_rate": null,
       "delinquency_proxy_rate": 0.0,
       "delinquency_signal_count": 0,
-      "avg_income_display": "약 233만원",
-      "avg_amount_display": "약 990만원",
-      "avg_rate_display": "15.00%",
+      "avg_income_display": "약 413만원",
+      "avg_amount_display": "약 4,000만원",
+      "avg_rate_display": "13.80%",
       "avg_model_score_display": "",
       "avg_delinquency_rate_display": "",
       "delinquency_proxy_rate_display": "0.0%",
@@ -2976,12 +3418,12 @@
       "top_reject_codes": [],
       "top_reject_descriptions": [],
       "reject_summary": "",
-      "search_text": "c9 승인 50대 · 저소득 · 중액   승인",
+      "search_text": "c9 승인 40대 · 중소득 · 고액   승인",
       "examples": [
         {
-          "record_id": "1000229290899",
+          "record_id": "1000229289026",
           "decision": "승인",
-          "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액"
+          "reject_reason_text": "-"
         }
       ]
     }
@@ -2993,20 +3435,20 @@
         "label": "C12 거절 30대 · 고소득 · 중액",
         "product": "C12",
         "decision": "거절",
-        "count": 595,
+        "count": 597,
         "age_band": "30대",
         "income_band": "고소득",
         "amount_band": "중액",
         "avg_income": 33000000.0,
         "avg_amount": 10839165.0,
-        "avg_rate": 18.821,
+        "avg_rate": 18.7948,
         "avg_model_score": 6.0,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
         "avg_income_display": "약 3,300만원",
         "avg_amount_display": "약 1,084만원",
-        "avg_rate_display": "18.82%",
+        "avg_rate_display": "18.79%",
         "avg_model_score_display": "6점",
         "avg_delinquency_rate_display": "",
         "delinquency_proxy_rate_display": "0.0%",
@@ -3140,7 +3582,7 @@
         "label": "C12 승인 40대 · 저소득 · 중액",
         "product": "C12",
         "decision": "승인",
-        "count": 2,
+        "count": 3,
         "age_band": "40대",
         "income_band": "저소득",
         "amount_band": "중액",
@@ -3167,6 +3609,11 @@
         "reject_summary": "",
         "search_text": "c12 승인 40대 · 저소득 · 중액   승인",
         "examples": [
+          {
+            "record_id": "26000229289241",
+            "decision": "승인",
+            "reject_reason_text": "-"
+          },
           {
             "record_id": "26000229289241",
             "decision": "승인",
@@ -3280,6 +3727,144 @@
             "reject_reason_text": "KCB I-INDEX 등급 하위"
           }
         ]
+      },
+      {
+        "cluster_id": "C12|거절|40대|고소득|중액|K145",
+        "label": "C12 거절 40대 · 고소득 · 중액 / 다중채무자 중 HMDS 하위고객",
+        "product": "C12",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "40대",
+        "income_band": "고소득",
+        "amount_band": "중액",
+        "avg_income": 33000000.0,
+        "avg_amount": 10839165.0,
+        "avg_rate": 17.6,
+        "avg_model_score": 6.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 3,300만원",
+        "avg_amount_display": "약 1,084만원",
+        "avg_rate_display": "17.60%",
+        "avg_model_score_display": "6점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [
+          {
+            "code": "K145",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "다중채무자 중 HMDS 하위고객"
+        ],
+        "reject_summary": "다중채무자 중 HMDS 하위고객",
+        "search_text": "c12 거절 40대 · 고소득 · 중액 / 다중채무자 중 hmds 하위고객 k145 다중채무자 중 hmds 하위고객 거절",
+        "examples": [
+          {
+            "record_id": "26000229289027",
+            "decision": "거절",
+            "reject_reason_text": "다중채무자 중 HMDS 하위고객"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C12|거절|50대|저소득|중액|K354",
+        "label": "C12 거절 50대 · 저소득 · 중액 / KCB I-INDEX 등급 하위",
+        "product": "C12",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "50대",
+        "income_band": "저소득",
+        "amount_band": "중액",
+        "avg_income": 2800000.0,
+        "avg_amount": 27000000.0,
+        "avg_rate": 18.9,
+        "avg_model_score": 9.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 280만원",
+        "avg_amount_display": "약 2,700만원",
+        "avg_rate_display": "18.90%",
+        "avg_model_score_display": "9점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [
+          {
+            "code": "K354",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "KCB I-INDEX 등급 하위"
+        ],
+        "reject_summary": "KCB I-INDEX 등급 하위",
+        "search_text": "c12 거절 50대 · 저소득 · 중액 / kcb i-index 등급 하위 k354 kcb i-index 등급 하위 거절",
+        "examples": [
+          {
+            "record_id": "26000229289241",
+            "decision": "거절",
+            "reject_reason_text": "KCB I-INDEX 등급 하위"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C12|거절|50대|저소득|중액|K370",
+        "label": "C12 거절 50대 · 저소득 · 중액 / 결합등급 하위고객 중 KCB신용평점 하위고객",
+        "product": "C12",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "50대",
+        "income_band": "저소득",
+        "amount_band": "중액",
+        "avg_income": 2800000.0,
+        "avg_amount": 27000000.0,
+        "avg_rate": 18.2,
+        "avg_model_score": 9.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 280만원",
+        "avg_amount_display": "약 2,700만원",
+        "avg_rate_display": "18.20%",
+        "avg_model_score_display": "9점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [
+          {
+            "code": "K370",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "결합등급 하위고객 중 KCB신용평점 하위고객"
+        ],
+        "reject_summary": "결합등급 하위고객 중 KCB신용평점 하위고객",
+        "search_text": "c12 거절 50대 · 저소득 · 중액 / 결합등급 하위고객 중 kcb신용평점 하위고객 k370 결합등급 하위고객 중 kcb신용평점 하위고객 거절",
+        "examples": [
+          {
+            "record_id": "26000229289241",
+            "decision": "거절",
+            "reject_reason_text": "결합등급 하위고객 중 KCB신용평점 하위고객"
+          }
+        ]
       }
     ],
     "C6": [
@@ -3288,19 +3873,19 @@
         "label": "C6 거절 30대 · 고소득 · 중액 / 비대면연계대출등급 하위, 신청등급 하위",
         "product": "C6",
         "decision": "거절",
-        "count": 179,
+        "count": 183,
         "age_band": "30대",
         "income_band": "고소득",
         "amount_band": "중액",
         "avg_income": 8631875.0,
-        "avg_amount": 9957000.0,
+        "avg_amount": 10067229.51,
         "avg_rate": 18.9,
-        "avg_model_score": 9.44,
+        "avg_model_score": 9.36,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
         "avg_income_display": "약 863만원",
-        "avg_amount_display": "약 996만원",
+        "avg_amount_display": "약 1,007만원",
         "avg_rate_display": "18.90%",
         "avg_model_score_display": "9점",
         "avg_delinquency_rate_display": "",
@@ -3313,15 +3898,15 @@
         "top_reject_codes": [
           {
             "code": "K366",
-            "count": 179
+            "count": 183
           },
           {
             "code": "K364",
-            "count": 179
+            "count": 183
           },
           {
             "code": "K373",
-            "count": 179
+            "count": 183
           }
         ],
         "top_reject_descriptions": [
@@ -3354,20 +3939,20 @@
         "label": "C6 승인 30대 · 고소득 · 중액",
         "product": "C6",
         "decision": "승인",
-        "count": 94,
+        "count": 93,
         "age_band": "30대",
         "income_band": "고소득",
         "amount_band": "중액",
         "avg_income": 8631875.0,
         "avg_amount": 15000000.0,
-        "avg_rate": 18.3809,
-        "avg_model_score": 4.85,
+        "avg_rate": 18.1785,
+        "avg_model_score": 4.84,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
         "avg_income_display": "약 863만원",
         "avg_amount_display": "약 1,500만원",
-        "avg_rate_display": "18.38%",
+        "avg_rate_display": "18.18%",
         "avg_model_score_display": "5점",
         "avg_delinquency_rate_display": "",
         "delinquency_proxy_rate_display": "0.0%",
@@ -4144,20 +4729,20 @@
         "label": "C6 거절 30대 · 고소득 · 중액 / 니어프라임ML등급 하위, 중위등급세분화모형 하위 고위험 차주",
         "product": "C6",
         "decision": "거절",
-        "count": 34,
+        "count": 35,
         "age_band": "30대",
         "income_band": "고소득",
         "amount_band": "중액",
-        "avg_income": 14452169.12,
-        "avg_amount": 11091588.24,
-        "avg_rate": 18.8118,
+        "avg_income": 14285875.0,
+        "avg_amount": 10993571.43,
+        "avg_rate": 18.7714,
         "avg_model_score": 11.0,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
-        "avg_income_display": "약 1,445만원",
-        "avg_amount_display": "약 1,109만원",
-        "avg_rate_display": "18.81%",
+        "avg_income_display": "약 1,429만원",
+        "avg_amount_display": "약 1,099만원",
+        "avg_rate_display": "18.77%",
         "avg_model_score_display": "11점",
         "avg_delinquency_rate_display": "",
         "delinquency_proxy_rate_display": "0.0%",
@@ -4169,11 +4754,11 @@
         "top_reject_codes": [
           {
             "code": "K373",
-            "count": 34
+            "count": 35
           },
           {
             "code": "K374",
-            "count": 34
+            "count": 35
           },
           {
             "code": "K366",
@@ -4970,7 +5555,7 @@
         "label": "C6 승인 40대 · 고소득 · 중액",
         "product": "C6",
         "decision": "승인",
-        "count": 4,
+        "count": 5,
         "age_band": "40대",
         "income_band": "고소득",
         "amount_band": "중액",
@@ -5019,7 +5604,7 @@
         "label": "C6 승인 50대 · 고소득 · 중액",
         "product": "C6",
         "decision": "승인",
-        "count": 1,
+        "count": 2,
         "age_band": "50대",
         "income_band": "고소득",
         "amount_band": "중액",
@@ -5050,6 +5635,108 @@
             "record_id": "18000229289045",
             "decision": "승인",
             "reject_reason_text": "신청등급 하위"
+          },
+          {
+            "record_id": "18000229289045",
+            "decision": "승인",
+            "reject_reason_text": "신청등급 하위"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C6|거절|20대|저소득|소액|K366",
+        "label": "C6 거절 20대 · 저소득 · 소액 / 비대면연계대출등급 하위",
+        "product": "C6",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "20대",
+        "income_band": "저소득",
+        "amount_band": "소액",
+        "avg_income": 2800000.0,
+        "avg_amount": 2472000.0,
+        "avg_rate": 16.8,
+        "avg_model_score": 9.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 280만원",
+        "avg_amount_display": "약 247만원",
+        "avg_rate_display": "16.80%",
+        "avg_model_score_display": "9점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [
+          {
+            "code": "K366",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "비대면연계대출등급 하위"
+        ],
+        "reject_summary": "비대면연계대출등급 하위",
+        "search_text": "c6 거절 20대 · 저소득 · 소액 / 비대면연계대출등급 하위 k366 비대면연계대출등급 하위 거절",
+        "examples": [
+          {
+            "record_id": "18000229289124",
+            "decision": "거절",
+            "reject_reason_text": "비대면연계대출등급 하위"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C6|거절|40대|고소득|초대형|K361",
+        "label": "C6 거절 40대 · 고소득 · 초대형 / KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+        "product": "C6",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "40대",
+        "income_band": "고소득",
+        "amount_band": "초대형",
+        "avg_income": 8631875.0,
+        "avg_amount": 41068000.0,
+        "avg_rate": 18.9,
+        "avg_model_score": 5.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 863만원",
+        "avg_amount_display": "약 4,107만원",
+        "avg_rate_display": "18.90%",
+        "avg_model_score_display": "5점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [
+          {
+            "code": "K361",
+            "count": 1
+          },
+          {
+            "code": "K354",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "KCB 비대면 우수지수 제외대상",
+          "KCB I-INDEX 등급 하위"
+        ],
+        "reject_summary": "KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위",
+        "search_text": "c6 거절 40대 · 고소득 · 초대형 / kcb 비대면 우수지수 제외대상, kcb i-index 등급 하위 k361 k354 kcb 비대면 우수지수 제외대상 kcb i-index 등급 하위 거절",
+        "examples": [
+          {
+            "record_id": "18000229289082",
+            "decision": "거절",
+            "reject_reason_text": "KCB 비대면 우수지수 제외대상, KCB I-INDEX 등급 하위"
           }
         ]
       }
@@ -5060,20 +5747,20 @@
         "label": "C9 승인 30대 · 중소득 · 고액",
         "product": "C9",
         "decision": "승인",
-        "count": 453,
+        "count": 454,
         "age_band": "30대",
         "income_band": "중소득",
         "amount_band": "고액",
         "avg_income": 4125333.0,
-        "avg_amount": 38539735.1,
-        "avg_rate": 12.9,
+        "avg_amount": 38542951.54,
+        "avg_rate": 12.907,
         "avg_model_score": null,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
         "avg_income_display": "약 413만원",
         "avg_amount_display": "약 3,854만원",
-        "avg_rate_display": "12.90%",
+        "avg_rate_display": "12.91%",
         "avg_model_score_display": "",
         "avg_delinquency_rate_display": "",
         "delinquency_proxy_rate_display": "0.0%",
@@ -5109,7 +5796,7 @@
         "label": "C9 승인 20대 · 초고소득 · 소액",
         "product": "C9",
         "decision": "승인",
-        "count": 331,
+        "count": 330,
         "age_band": "20대",
         "income_band": "초고소득",
         "amount_band": "소액",
@@ -5263,7 +5950,7 @@
         "label": "C9 거절 20대 · 초고소득 · 소액 / 가계부채 관리대상 연소득 초과 취급 감액",
         "product": "C9",
         "decision": "거절",
-        "count": 117,
+        "count": 118,
         "age_band": "20대",
         "income_band": "초고소득",
         "amount_band": "소액",
@@ -5288,7 +5975,7 @@
         "top_reject_codes": [
           {
             "code": "K707",
-            "count": 117
+            "count": 118
           }
         ],
         "top_reject_descriptions": [
@@ -5319,7 +6006,7 @@
         "label": "C9 승인 20대 · 중소득 · 고액",
         "product": "C9",
         "decision": "승인",
-        "count": 5,
+        "count": 7,
         "age_band": "20대",
         "income_band": "중소득",
         "amount_band": "고액",
@@ -5368,7 +6055,7 @@
         "label": "C9 승인 40대 · 초고소득 · 소액",
         "product": "C9",
         "decision": "승인",
-        "count": 4,
+        "count": 5,
         "age_band": "40대",
         "income_band": "초고소득",
         "amount_band": "소액",
@@ -5417,7 +6104,7 @@
         "label": "C9 승인 30대 · 초고소득 · 소액",
         "product": "C9",
         "decision": "승인",
-        "count": 2,
+        "count": 3,
         "age_band": "30대",
         "income_band": "초고소득",
         "amount_band": "소액",
@@ -5453,6 +6140,11 @@
             "record_id": "1000229290885",
             "decision": "승인",
             "reject_reason_text": "-"
+          },
+          {
+            "record_id": "1000229290885",
+            "decision": "승인",
+            "reject_reason_text": "-"
           }
         ]
       },
@@ -5461,7 +6153,7 @@
         "label": "C9 승인 50대 · 저소득 · 중액",
         "product": "C9",
         "decision": "승인",
-        "count": 1,
+        "count": 2,
         "age_band": "50대",
         "income_band": "저소득",
         "amount_band": "중액",
@@ -5492,6 +6184,50 @@
             "record_id": "1000229290899",
             "decision": "승인",
             "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액"
+          },
+          {
+            "record_id": "1000229290899",
+            "decision": "승인",
+            "reject_reason_text": "가계부채 관리대상 연소득 초과 취급 감액"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C9|승인|40대|중소득|고액|사유있음",
+        "label": "C9 승인 40대 · 중소득 · 고액",
+        "product": "C9",
+        "decision": "승인",
+        "count": 1,
+        "age_band": "40대",
+        "income_band": "중소득",
+        "amount_band": "고액",
+        "avg_income": 4125333.0,
+        "avg_amount": 40000000.0,
+        "avg_rate": 13.8,
+        "avg_model_score": null,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 413만원",
+        "avg_amount_display": "약 4,000만원",
+        "avg_rate_display": "13.80%",
+        "avg_model_score_display": "",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [],
+        "top_reject_descriptions": [],
+        "reject_summary": "",
+        "search_text": "c9 승인 40대 · 중소득 · 고액   승인",
+        "examples": [
+          {
+            "record_id": "1000229289026",
+            "decision": "승인",
+            "reject_reason_text": "-"
           }
         ]
       }
@@ -5649,7 +6385,7 @@
         "label": "C11 거절 20대 · 고소득 · 중액",
         "product": "C11",
         "decision": "거절",
-        "count": 172,
+        "count": 170,
         "age_band": "20대",
         "income_band": "고소득",
         "amount_band": "중액",
@@ -5698,7 +6434,7 @@
         "label": "C11 거절 30대 · 초고소득 · 소액",
         "product": "C11",
         "decision": "거절",
-        "count": 5,
+        "count": 6,
         "age_band": "30대",
         "income_band": "초고소득",
         "amount_band": "소액",
@@ -5747,7 +6483,7 @@
         "label": "C11 거절 40대 · 초고소득 · 소액",
         "product": "C11",
         "decision": "거절",
-        "count": 3,
+        "count": 4,
         "age_band": "40대",
         "income_band": "초고소득",
         "amount_band": "소액",
@@ -5786,6 +6522,104 @@
           },
           {
             "record_id": "25000229289571",
+            "decision": "거절",
+            "reject_reason_text": "-"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C11|승인|20대|고소득|중액|사유있음",
+        "label": "C11 승인 20대 · 고소득 · 중액",
+        "product": "C11",
+        "decision": "승인",
+        "count": 4,
+        "age_band": "20대",
+        "income_band": "고소득",
+        "amount_band": "중액",
+        "avg_income": 26000000.0,
+        "avg_amount": 3611000.0,
+        "avg_rate": 17.3,
+        "avg_model_score": 2.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 2,600만원",
+        "avg_amount_display": "약 361만원",
+        "avg_rate_display": "17.30%",
+        "avg_model_score_display": "2점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [],
+        "top_reject_descriptions": [],
+        "reject_summary": "",
+        "search_text": "c11 승인 20대 · 고소득 · 중액   승인",
+        "examples": [
+          {
+            "record_id": "25000229286049",
+            "decision": "승인",
+            "reject_reason_text": "-"
+          },
+          {
+            "record_id": "25000229286049",
+            "decision": "승인",
+            "reject_reason_text": "-"
+          },
+          {
+            "record_id": "25000229286049",
+            "decision": "승인",
+            "reject_reason_text": "-"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C11|거절|30대|초고소득|중액|사유있음",
+        "label": "C11 거절 30대 · 초고소득 · 중액",
+        "product": "C11",
+        "decision": "거절",
+        "count": 3,
+        "age_band": "30대",
+        "income_band": "초고소득",
+        "amount_band": "중액",
+        "avg_income": 120000000.0,
+        "avg_amount": 11306000.0,
+        "avg_rate": 8.9,
+        "avg_model_score": 11.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 1.2억원",
+        "avg_amount_display": "약 1,131만원",
+        "avg_rate_display": "8.90%",
+        "avg_model_score_display": "11점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [],
+        "top_reject_descriptions": [],
+        "reject_summary": "",
+        "search_text": "c11 거절 30대 · 초고소득 · 중액   거절",
+        "examples": [
+          {
+            "record_id": "25000229285815",
+            "decision": "거절",
+            "reject_reason_text": "-"
+          },
+          {
+            "record_id": "25000229285815",
+            "decision": "거절",
+            "reject_reason_text": "-"
+          },
+          {
+            "record_id": "25000229285815",
             "decision": "거절",
             "reject_reason_text": "-"
           }
@@ -5836,25 +6670,25 @@
         ]
       },
       {
-        "cluster_id": "C11|거절|30대|초고소득|중액|사유있음",
-        "label": "C11 거절 30대 · 초고소득 · 중액",
+        "cluster_id": "C11|거절|40대|고소득|초대형|K361",
+        "label": "C11 거절 40대 · 고소득 · 초대형 / KCB 비대면 우수지수 제외대상",
         "product": "C11",
         "decision": "거절",
-        "count": 2,
-        "age_band": "30대",
-        "income_band": "초고소득",
-        "amount_band": "중액",
-        "avg_income": 120000000.0,
-        "avg_amount": 11306000.0,
-        "avg_rate": 8.9,
-        "avg_model_score": 11.0,
+        "count": 1,
+        "age_band": "40대",
+        "income_band": "고소득",
+        "amount_band": "초대형",
+        "avg_income": 30000000.0,
+        "avg_amount": 42401000.0,
+        "avg_rate": 18.1,
+        "avg_model_score": 3.0,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
-        "avg_income_display": "약 1.2억원",
-        "avg_amount_display": "약 1,131만원",
-        "avg_rate_display": "8.90%",
-        "avg_model_score_display": "11점",
+        "avg_income_display": "약 3,000만원",
+        "avg_amount_display": "약 4,240만원",
+        "avg_rate_display": "18.10%",
+        "avg_model_score_display": "3점",
         "avg_delinquency_rate_display": "",
         "delinquency_proxy_rate_display": "0.0%",
         "top_income_source": "소득",
@@ -5862,42 +6696,90 @@
         "top_rate_source": "산출금리",
         "top_model_score_source": "ML스코어 등급",
         "top_delinquency_rate_source": "",
-        "top_reject_codes": [],
-        "top_reject_descriptions": [],
-        "reject_summary": "",
-        "search_text": "c11 거절 30대 · 초고소득 · 중액   거절",
+        "top_reject_codes": [
+          {
+            "code": "K361",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "KCB 비대면 우수지수 제외대상"
+        ],
+        "reject_summary": "KCB 비대면 우수지수 제외대상",
+        "search_text": "c11 거절 40대 · 고소득 · 초대형 / kcb 비대면 우수지수 제외대상 k361 kcb 비대면 우수지수 제외대상 거절",
         "examples": [
           {
-            "record_id": "25000229285815",
+            "record_id": "25000229286051",
             "decision": "거절",
-            "reject_reason_text": "-"
-          },
-          {
-            "record_id": "25000229285815",
-            "decision": "거절",
-            "reject_reason_text": "-"
+            "reject_reason_text": "KCB 비대면 우수지수 제외대상"
           }
         ]
       },
       {
-        "cluster_id": "C11|승인|20대|고소득|중액|사유있음",
-        "label": "C11 승인 20대 · 고소득 · 중액",
+        "cluster_id": "C11|거절|50대|고소득|초대형|K351",
+        "label": "C11 거절 50대 · 고소득 · 초대형 / KCB 통합 R스코어 6등급 하위",
         "product": "C11",
-        "decision": "승인",
-        "count": 2,
-        "age_band": "20대",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "50대",
+        "income_band": "고소득",
+        "amount_band": "초대형",
+        "avg_income": 18000000.0,
+        "avg_amount": 42401000.0,
+        "avg_rate": 16.9,
+        "avg_model_score": 3.0,
+        "avg_delinquency_rate": null,
+        "delinquency_proxy_rate": 0.0,
+        "delinquency_signal_count": 0,
+        "avg_income_display": "약 1,800만원",
+        "avg_amount_display": "약 4,240만원",
+        "avg_rate_display": "16.90%",
+        "avg_model_score_display": "3점",
+        "avg_delinquency_rate_display": "",
+        "delinquency_proxy_rate_display": "0.0%",
+        "top_income_source": "소득",
+        "top_amount_source": "대출금액",
+        "top_rate_source": "산출금리",
+        "top_model_score_source": "ML스코어 등급",
+        "top_delinquency_rate_source": "",
+        "top_reject_codes": [
+          {
+            "code": "K351",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "KCB 통합 R스코어 6등급 하위"
+        ],
+        "reject_summary": "KCB 통합 R스코어 6등급 하위",
+        "search_text": "c11 거절 50대 · 고소득 · 초대형 / kcb 통합 r스코어 6등급 하위 k351 kcb 통합 r스코어 6등급 하위 거절",
+        "examples": [
+          {
+            "record_id": "25000229285955",
+            "decision": "거절",
+            "reject_reason_text": "KCB 통합 R스코어 6등급 하위"
+          }
+        ]
+      },
+      {
+        "cluster_id": "C11|거절|60대+|고소득|중액|K354",
+        "label": "C11 거절 60대+ · 고소득 · 중액 / KCB I-INDEX 등급 하위",
+        "product": "C11",
+        "decision": "거절",
+        "count": 1,
+        "age_band": "60대+",
         "income_band": "고소득",
         "amount_band": "중액",
-        "avg_income": 26000000.0,
+        "avg_income": 24000000.0,
         "avg_amount": 3611000.0,
-        "avg_rate": 17.3,
+        "avg_rate": 17.8,
         "avg_model_score": 2.0,
         "avg_delinquency_rate": null,
         "delinquency_proxy_rate": 0.0,
         "delinquency_signal_count": 0,
-        "avg_income_display": "약 2,600만원",
+        "avg_income_display": "약 2,400만원",
         "avg_amount_display": "약 361만원",
-        "avg_rate_display": "17.30%",
+        "avg_rate_display": "17.80%",
         "avg_model_score_display": "2점",
         "avg_delinquency_rate_display": "",
         "delinquency_proxy_rate_display": "0.0%",
@@ -5906,20 +6788,22 @@
         "top_rate_source": "산출금리",
         "top_model_score_source": "ML스코어 등급",
         "top_delinquency_rate_source": "",
-        "top_reject_codes": [],
-        "top_reject_descriptions": [],
-        "reject_summary": "",
-        "search_text": "c11 승인 20대 · 고소득 · 중액   승인",
+        "top_reject_codes": [
+          {
+            "code": "K354",
+            "count": 1
+          }
+        ],
+        "top_reject_descriptions": [
+          "KCB I-INDEX 등급 하위"
+        ],
+        "reject_summary": "KCB I-INDEX 등급 하위",
+        "search_text": "c11 거절 60대+ · 고소득 · 중액 / kcb i-index 등급 하위 k354 kcb i-index 등급 하위 거절",
         "examples": [
           {
             "record_id": "25000229286049",
-            "decision": "승인",
-            "reject_reason_text": "-"
-          },
-          {
-            "record_id": "25000229286049",
-            "decision": "승인",
-            "reject_reason_text": "-"
+            "decision": "거절",
+            "reject_reason_text": "KCB I-INDEX 등급 하위"
           }
         ]
       }

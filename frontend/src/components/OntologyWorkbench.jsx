@@ -1285,6 +1285,25 @@ const MEMO_DEPARTMENTS = Object.freeze([
   { id: 'it', label: 'IT개발자', icon: '💻', defaultConcept: 'KCB, NICE, 신정원, 공공마이데이터 연계와 개발공수, 정합성 검증을 중시합니다.' },
 ]);
 
+const PRODUCT_DEBATE_PEOPLE = Object.freeze([
+  { id: 'solution', department: '금융솔루션부', name: '금프로', short: '금', tone: 'solution', role: '상품 구조 총괄' },
+  { id: 'credit', department: '신용기획부', name: '신프로', short: '신', tone: 'risk', role: '리스크 기준선' },
+  { id: 'sales', department: '금융영업부', name: '영프로', short: '영', tone: 'sales', role: '승인 전환 전략' },
+  { id: 'it', department: 'IT개발자', name: '아프로', short: '아', tone: 'tech', role: '데이터/개발 검증' },
+]);
+
+const PRODUCT_DEBATE_WARMUP_LINES = Object.freeze([
+  { id: 'hello-solution', speaker: '금프로', department: '금융솔루션부', tone: 'solution', message: '회의실 들어왔습니다. 오늘 안건은 작게 실험하되, 기존 심사 룰은 크게 흔들지 않는 방향으로 열어볼게요.' },
+  { id: 'hello-credit', speaker: '신프로', department: '신용기획부', tone: 'risk', message: '좋습니다. 저는 먼저 리스크 상한선을 잡겠습니다. 승인 전환은 하되, 연체 가능성 높은 구간은 분명히 분리해야 합니다.' },
+  { id: 'hello-sales', speaker: '영프로', department: '금융영업부', tone: 'sales', message: '저는 거절 고객 중 어디까지 되살릴 수 있는지 보겠습니다. 현장에서는 조건이 명확해야 바로 움직일 수 있어요.' },
+  { id: 'hello-it', speaker: '아프로', department: 'IT개발자', tone: 'tech', message: '저는 필요한 데이터가 실제로 붙는지 볼게요. KCB, NICE, 신정원, 공공마이데이터 연계 난이도도 같이 체크합니다.' },
+  { id: 'smalltalk-1', speaker: '금프로', department: '금융솔루션부', tone: 'solution', message: '커피는 각자 챙기셨죠? OLLAMA가 생각하는 동안 우리는 안건의 뼈대를 먼저 맞춰두겠습니다.' },
+  { id: 'smalltalk-2', speaker: '신프로', department: '신용기획부', tone: 'risk', message: '핵심은 씬파일 고객을 무작정 승인하지 않는 겁니다. 소액, 단기, 관찰 가능 조건이면 논의할 수 있습니다.' },
+  { id: 'smalltalk-3', speaker: '영프로', department: '금융영업부', tone: 'sales', message: '그럼 고객 안내 문구도 중요하겠네요. “조건부 승인”처럼 이해하기 쉬운 언어가 필요합니다.' },
+  { id: 'smalltalk-4', speaker: '아프로', department: 'IT개발자', tone: 'tech', message: '실시간 소득/재직 확인이 들어가면 개발 공수가 늘어납니다. 대신 룰이 명확하면 배치 검증부터 작게 시작할 수 있어요.' },
+  { id: 'debate-1', speaker: '금프로', department: '금융솔루션부', tone: 'solution', message: '좋아요. 신상품 후보와 기존 상품 보완안을 분리해서, 최종 산출물은 실험 상품 1개와 룰 개선안으로 묶겠습니다.' },
+]);
+
 const MEMO_STORAGE_KEY = 'ontology-workbench-memo-preferences';
 function normalizeSearchText(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -1680,6 +1699,126 @@ function DepartmentConceptModal({ open, concepts = [], onClose }) {
   );
 }
 
+function resolveDebatePerson(message = {}) {
+  const speakerText = String(message.speaker || message.department || '').toLowerCase();
+  if (speakerText.includes('금융솔루션') || speakerText.includes('금프로') || speakerText.includes('solution')) {
+    return PRODUCT_DEBATE_PEOPLE[0];
+  }
+  if (speakerText.includes('신용기획') || speakerText.includes('신프로') || speakerText.includes('risk') || speakerText.includes('credit')) {
+    return PRODUCT_DEBATE_PEOPLE[1];
+  }
+  if (speakerText.includes('금융영업') || speakerText.includes('영프로') || speakerText.includes('sales')) {
+    return PRODUCT_DEBATE_PEOPLE[2];
+  }
+  if (speakerText.includes('it') || speakerText.includes('개발') || speakerText.includes('아프로') || speakerText.includes('tech')) {
+    return PRODUCT_DEBATE_PEOPLE[3];
+  }
+  return PRODUCT_DEBATE_PEOPLE.find((person) => person.tone === message.tone) || PRODUCT_DEBATE_PEOPLE[0];
+}
+
+function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null }) {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      return undefined;
+    }
+    const timerId = window.setInterval(() => {
+      setTick((value) => value + 1);
+    }, 1150);
+    return () => window.clearInterval(timerId);
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading) {
+      setTick(0);
+    }
+  }, [loading, selectedAgenda?.id, selectedAgenda?.title]);
+
+  const stagedMessages = loading
+    ? PRODUCT_DEBATE_WARMUP_LINES.slice(0, Math.min(PRODUCT_DEBATE_WARMUP_LINES.length, Math.max(4, tick + 1)))
+    : messages.map((message, index) => {
+      const person = resolveDebatePerson(message);
+      return {
+        id: `${person.id}-${index}`,
+        speaker: message.speaker || person.name,
+        department: person.department,
+        tone: message.tone || person.tone,
+        message: message.message || message.content || '',
+      };
+    });
+  const activePerson = resolveDebatePerson(stagedMessages[stagedMessages.length - 1] || {});
+  const agendaTitle = selectedAgenda?.title || '선택된 안건';
+
+  return (
+    <div className={`product-debate-room ${loading ? 'is-live' : 'is-complete'}`}>
+      <div className="product-debate-room-head">
+        <div>
+          <span className="panel-kicker">Live Meeting Room</span>
+          <strong>{loading ? '4명이 회의실에서 안건을 맞추는 중' : '4개 부서 토론 기록'}</strong>
+        </div>
+        <span className="sample-pill">{loading ? '실시간 구성 중' : `${messages.length}개 발언`}</span>
+      </div>
+
+      <div className="product-debate-table">
+        <div className="product-debate-table-surface">
+          <span>{agendaTitle}</span>
+          <strong>{loading ? 'OLLAMA 결과를 기다리는 동안 사전 토론 중' : '토론 정리 완료'}</strong>
+          <div className="product-debate-equalizer" aria-hidden="true">
+            {Array.from({ length: 12 }).map((_, index) => <i key={index} style={{ animationDelay: `${index * 0.08}s` }} />)}
+          </div>
+        </div>
+        {PRODUCT_DEBATE_PEOPLE.map((person, index) => {
+          const isSpeaking = person.id === activePerson.id;
+          return (
+            <motion.div
+              key={person.id}
+              className={`product-debate-person person-${index + 1} is-${person.tone} ${isSpeaking ? 'is-speaking' : ''}`}
+              initial={{ opacity: 0, y: 18, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: isSpeaking ? 1.04 : 1 }}
+              transition={{ duration: 0.32, delay: index * 0.08, ease: 'easeOut' }}
+            >
+              <div className="product-debate-avatar">
+                <span>{person.short}</span>
+                <i aria-hidden="true" />
+              </div>
+              <div>
+                <strong>{person.name}</strong>
+                <small>{person.department} · {person.role}</small>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      <div className="product-debate-live-feed">
+        <AnimatePresence initial={false}>
+          {stagedMessages.slice(-6).map((message, index) => {
+            const person = resolveDebatePerson(message);
+            return (
+              <motion.article
+                key={message.id || `${message.speaker}-${index}-${message.message}`}
+                className={`product-dev-message is-${message.tone || person.tone}`}
+                initial={{ opacity: 0, x: -12, y: 6 }}
+                animate={{ opacity: 1, x: 0, y: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+              >
+                <div className="product-dev-message-speaker">
+                  <span>{person.short}</span>
+                  <strong>{message.speaker || person.name}</strong>
+                  <small>{message.department || person.department}</small>
+                </div>
+                <p>{message.message}</p>
+              </motion.article>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
 function ProductDevelopmentWorkspace({
   state,
   concepts = [],
@@ -1758,22 +1897,13 @@ function ProductDevelopmentWorkspace({
         </div>
       </section>
 
-      {state.debateLoading ? <div className="empty-box product-dev-loading">4개 부서가 회의실에서 빠르게 설전 중입니다. 말은 재밌게, 결론은 숫자로 정리하는 중이에요.</div> : null}
-
-      {messages.length ? (
+      {(state.debateLoading || messages.length) ? (
         <section className="product-dev-section">
           <div className="product-dev-section-head">
             <span className="panel-kicker">Step 2</span>
-            <strong>4개 부서 토론</strong>
+            <strong>{state.debateLoading ? '4개 부서 실시간 회의' : '4개 부서 토론'}</strong>
           </div>
-          <div className="product-dev-debate-grid">
-            {messages.map((message, index) => (
-              <article key={`${message.speaker}-${index}`} className={`product-dev-message is-${message.tone || 'neutral'}`}>
-                <strong>{message.speaker}</strong>
-                <p>{message.message}</p>
-              </article>
-            ))}
-          </div>
+          <ProductDebateMeetingRoom loading={state.debateLoading} messages={messages} selectedAgenda={state.selectedAgenda} />
         </section>
       ) : null}
 
