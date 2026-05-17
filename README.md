@@ -1,428 +1,679 @@
 # AI Log Agent
 
-금융 심사 로그와 뉴스, 규제 문서를 JSON + FAISS 기반으로 분석하는 프로젝트입니다. 현재 대표 UI는 React 기반 Ontology 콘솔이며, FastAPI 백엔드와 연결되어 질문 해석, feature 선택, 군집 검색, retrieval trace, answer summary 를 한 화면에서 확인할 수 있습니다.
+금융 심사 로그, 온톨로지, 고객 군집, LLM 답변 생성을 하나의 흐름으로 묶어 보는 분석형 워크벤치입니다.  
+이 문서는 개발환경 설치보다 **프로젝트가 질문을 어떻게 이해하고, 어떤 근거를 만들고, 최종 답변과 상품개발모드로 어떻게 이어지는지**를 설명하는 데 초점을 둡니다.
 
-PostgreSQL 없이 로컬 JSON 파일과 FAISS 인덱스를 사용합니다.
+## 한 줄 요약
 
-## 현재 구조
+사용자가 자연어로 질문하면 시스템은 질문 안의 상품, 심사 결과, 금리, 한도, 거절 사유, 고객 속성 같은 표현을 온톨로지 feature로 번역합니다.  
+그 feature를 기준으로 실제 심사 로그, 고객 군집, 거절 코드, 통계 큐브, 관련 feature를 찾아 최종 답변 컨텍스트를 만들고, 필요하면 Ollama가 그 근거 안에서만 자연어 답변을 다듬습니다.
 
-- backend/app_main.py: FastAPI 메인 엔트리포인트
-- backend/services.py: 뉴스 수집, 상태 집계, runtime 서비스
-- backend/worker.py: 주기 뉴스 수집 및 백그라운드 작업
-- frontend/: React + Vite Ontology 콘솔
-- app.py: Streamlit 기반 레거시 대시보드
-- data/: 공통 feature, ontology, 제품 매핑, 로그 파생 JSON
-- rag/: FAISS 및 retrieval 유틸리티
-- agent/, analyzer/, mapper/, utils/: 분석 및 에이전트 로직
+예를 들어:
 
-## 주요 기능
+```text
+이지신용대출 신청자의 승인 한도에 영향을 주는 feature는?
+```
 
-- Ontology 탭 중심 semantic runtime console
-- 질문별 runtime stage 추적
-- JSON + FAISS 기반 feature / cluster / retrieval 검색
-- 카드론 심사 연관 뉴스 수집 및 중복 제거
-- 규제 문서 업로드 후 Ontology 화면에서 즉시 학습 반영
-- Streamlit 레거시 화면과 FastAPI API 동시 사용 가능
+이 질문은 대략 이렇게 해석됩니다.
 
-## 온톨로지 기준으로 현재 작업이 흐르는 방식
+- `이지신용대출` -> 상품 코드 `C6`, 대표 feature `application.product_code`
+- `승인`, `승인 한도` -> `decision.approved_amount`
+- `한도`, `대출금액` -> `loan.requested_limit`
+- `영향 주는 feature` -> 승인가능금액/대출금액에 영향을 줄 수 있는 related feature 탐색
+- 최종 컨텍스트 -> 신용대출잔액, KCB 등급, NICE 등급, 연소득, 인정소득, 비대면연계대출등급 등 영향 feature 중심으로 구성
 
-이 프로젝트에서 온톨로지는 단순한 용어 사전이 아니라, 서로 다른 상품과 로그 필드 이름을 하나의 공통 의미로 묶는 기준표 역할을 합니다.
+여기서 중요한 점은 군집 결과가 항상 답변의 주인공이 아니라는 것입니다.  
+질문이 “평균 금리와 한도”라면 군집/통계가 중요하고, 질문이 “영향 feature”라면 related feature와 온톨로지 관계가 더 중요합니다.
 
-초보자 관점에서는 아래처럼 이해하면 됩니다.
+## 주요 모듈
 
-- 실제 심사 로그에는 상품마다 필드 이름이 다를 수 있습니다.
-- 하지만 분석 화면에서는 이런 필드들을 공통 feature 로 묶어서 봅니다.
-- 사용자가 질문을 입력하면, 시스템은 먼저 질문이 어떤 공통 feature 를 뜻하는지 찾습니다.
-- 그 다음 그 feature 와 연결된 고객군집, 유사 로그, reject code, 요약 답변을 이어서 만듭니다.
+- `backend/app_main.py`  
+  FastAPI 메인 서버입니다. 온톨로지 워크벤치, runtime job, 고객 군집, semantic refresh, 상품개발모드 API가 여기에서 연결됩니다.
 
-예를 들어 상품마다 아래처럼 같은 뜻을 다른 이름으로 저장할 수 있습니다.
+- `backend/services.py`  
+  뉴스/로그/FAISS/상태 스냅샷/활동 로그 같은 공통 서비스 레이어입니다.
 
-- C9 카드론: IN_연령
-- C12 이지대환대출: IN_연령
-- 다른 화면 질문: 나이, 연령, 고객 나이
+- `backend/worker.py`  
+  뉴스 수집, 로그 분석, 벡터 갱신 같은 백그라운드 worker입니다. 현재는 서버 startup 때 기본 자동 실행하지 않습니다.
 
-온톨로지에서는 이것들을 applicant.age 라는 하나의 공통 feature 로 묶습니다. 그래서 사용자가 나이 관련 질문을 해도, 시스템은 내부적으로 applicant.age 를 중심으로 데이터를 모읍니다.
+- `frontend/src/components/OntologyWorkbench.jsx`  
+  온톨로지 워크벤치 화면입니다. 질문 입력, 진행 애니메이션, VECTOR 관계형 화면, 상품개발모드, Step 2 회의실 UI가 이 컴포넌트에 있습니다.
 
-### 핵심 파일이 맡는 역할
+- `frontend/src/components/ontologyRuntimeStore.js`  
+  프론트에서 runtime stage, 진행상황, 로그, 결과 요약을 관리하는 Zustand store입니다.
 
-- data/ontology.json: 상품별 입력 필드와 공통 feature 가 어떻게 연결되는지 보여주는 온톨로지 결과물입니다.
-- data/commonfeature.json: 화면에서 직접 검색하는 공통 feature 사전입니다. feature_id, feature_name, alias, 상품 범위, 샘플값이 들어 있습니다.
-- data/full_text_records.json: 실제 로그를 사람이 읽기 쉬운 형태로 펼쳐 놓은 레코드 집합입니다.
-- backend/app_main.py: 온톨로지 워크벤치 API 와 런타임 단계를 조립하는 핵심 엔트리입니다.
-- frontend/src/api.js: 프런트엔드가 온톨로지 워크벤치 API 를 호출하는 경로입니다.
+- `data/ontology.json`  
+  상품별 필드, 공통 feature, 거절 코드 taxonomy, feature 관계를 담는 온톨로지 원천입니다.
 
-### 큰 흐름 한 번에 보기
+- `data/commonfeature.json`  
+  화면과 검색에서 직접 쓰는 공통 feature 사전입니다. feature id, feature name, alias, 상품 범위, 샘플 값 등이 들어갑니다.
 
-1. 로그 원본과 매핑 정보에서 공통 feature 사전을 만듭니다.
-2. 상품별로 제각각인 필드 이름을 공통 feature 기준으로 묶습니다.
-3. 사용자가 온톨로지 화면에서 질문을 입력합니다.
-4. 백엔드는 Query Intent Parsing 으로 질문 토큰을 연령, 직업, 상품, 심사 맥락으로 분류합니다.
-5. 선택 상품 범위에서 Domain-scoped FAISS Retrieval 을 수행하고 Top-K Feature Selection 으로 후보를 압축합니다.
-6. 대표 feature 를 중심으로 Ontology Graph Expansion (1-hop) 을 수행해 관련 feature 와 relation 을 확장합니다.
-7. Semantic Context Compression 으로 hit token, top-k, relation, retrieval evidence 만 남긴 뒤 Prompt Context Generation 으로 LLM 입력을 만듭니다.
-8. 마지막으로 answer summary 를 만들어 화면 상단에 보여줍니다.
+- `data/full_text_records.json`  
+  실제 심사 로그를 검색과 통계에 쓰기 좋은 레코드 형태로 펼친 데이터입니다.
 
-### 현재 LLM grounding 구조
+- `data/feature_customer_clusters.json`  
+  고객 군집 캐시입니다. 상품, 승인/거절 decision, 연령대, 소득대, 금액대, 거절코드, 평균 금리/한도 같은 군집 요약이 들어갑니다.
 
-워크벤치의 LLM 입력은 자유 문장형 컨텍스트가 아니라 아래 블록을 갖는 구조화된 semantic prompt 로 만들어집니다.
+- `data/segment_metric_cube.json`  
+  평균 금리, 평균 한도, 승인/거절 건수 같은 세그먼트 통계 질의에 쓰는 큐브 데이터입니다.
 
-1. [SYSTEM ROLE]
-2. [USER QUERY]
-3. [SEMANTIC PIPELINE]
-4. [SEMANTIC RETRIEVAL RESULT]
-5. [ONTOLOGY EXPANSION]
-6. [BUSINESS CONSTRAINTS]
-7. [ANSWER INSTRUCTION]
+## 전체 프로세스
 
-이 구조의 목적은 hallucination 을 줄이고, answer generation 이 실제 retrieval / ontology expansion 결과만 참조하도록 강제하는 것입니다.
+### 1. 데이터 준비
 
-### 초보자용 비유
+프로젝트는 PostgreSQL 같은 외부 DB 대신 로컬 JSON과 FAISS 산출물을 중심으로 동작합니다.
 
-엑셀 파일마다 열 이름이 제각각인데, 우리가 분석할 때는 모두 같은 표준 컬럼명으로 보고 싶다고 생각하면 됩니다.
+주요 입력은 다음과 같습니다.
 
-- 실제 로그 필드명: IN_접수번호, 신청서접수번호, 요청번호
-- 공통 의미: application.case_id
-- 화면에서 보는 기준: 접수번호
+- 상품/심사 로그
+- 상품별 필드 매핑
+- 공통 feature 사전
+- 거절 사유 코드 매핑
+- 고객 군집 캐시
+- 통계 큐브
+- 선택적으로 규제 문서 벡터
 
-즉, 온톨로지는 여러 현업 용어를 하나의 표준 용어로 번역해 주는 통역 레이어입니다.
+온톨로지는 이 데이터들을 “같은 의미의 다른 필드명”으로 묶는 번역 레이어입니다.
 
-## 온톨로지 런타임 상세 흐름
+예를 들어 상품마다 실제 로그 필드명이 다를 수 있습니다.
 
-현재 Ontology 콘솔에서 질문을 실행하면, 백엔드는 대략 아래 순서로 움직입니다.
+```text
+C6 이지신용대출: 승인가능금액
+C9 카드론: 대출가능금액
+C12 이지론: 한도금액
+```
 
-### 1. Runtime Data Load
+하지만 화면과 질의에서는 이들을 공통 feature인 `decision.approved_amount` 또는 `loan.requested_limit`로 바라봅니다.
 
-먼저 data/commonfeature.json 과 data/full_text_records.json 을 읽습니다.
+### 2. 질문 입력
 
-- commonfeature.json: 어떤 공통 feature 가 있는지 확인
-- full_text_records.json: 실제 로그 레코드가 어떤 값과 reject code 를 가졌는지 확인
-
-쉽게 말하면, 사전과 원본 예문을 동시에 펼쳐 놓는 단계입니다.
-
-### 2. Product Scope Filter
-
-사용자가 특정 상품을 선택했다면, 그 상품에 실제로 등장하는 feature 만 남깁니다.
+사용자는 온톨로지 워크벤치에서 자연어 질문을 입력합니다.
 
 예시:
 
-- 사용자가 C9 카드론을 선택
-- applicant.age 는 유지
-- C12 에만 있는 전용 필드는 제외 가능
+```text
+이지신용대출 평균 금리와 한도는?
+40대 카드론 신청자들의 평균 탈락 사유는?
+이지신용대출 신청자의 승인 한도에 영향을 주는 feature는?
+40대 직장인의 카드론 승인에 중요한 요소는?
+```
 
-이 단계가 필요한 이유는 상품마다 쓰는 필드와 심사 규칙이 조금씩 다르기 때문입니다.
+프론트는 질문을 백엔드의 runtime job으로 넘기고, 백엔드는 단계별 상태를 업데이트합니다.
 
-### 3. Semantic Feature Rank
+주요 API:
 
-질문 문장과 가장 가까운 feature 후보를 점수화합니다.
+- `POST /feature-ontology/runtime-jobs`
+- `GET /feature-ontology/runtime-jobs/{job_id}`
+- `GET /feature-ontology/workbench`
 
-예시 질문:
+### 3. Runtime Stage
+
+질문 하나가 처리될 때 백엔드는 다음 stage를 순서대로 통과합니다.
+
+#### 3.1 Load Runtime Data
+
+`commonfeature.json`, `ontology.json`, `full_text_records.json` 등을 읽습니다.
+
+이 단계는 질문을 해석하기 위한 사전과 실제 로그 원본을 준비하는 단계입니다.
+
+#### 3.2 Product Scope Filter
+
+질문 또는 화면 선택값에서 상품 범위를 잡습니다.
+
+예:
+
+- `이지신용대출` -> `C6`
+- `카드론` -> `C9`
+- `개인사업자대출` -> `C11`
+- `이지론` 또는 유사 표현 -> `C12`
+
+현재 중요한 보정:
+
+- `이지신용대출`은 `C6`로 처리합니다.
+- 상품명이 질문에 있으면 `application.product_code`를 대표 feature 후보에 넣습니다.
+- 특정 상품 질문에서는 해당 상품과 무관한 feature가 과하게 올라오지 않도록 상품 범위를 먼저 좁힙니다.
+
+#### 3.3 Semantic Feature Rank
+
+질문 토큰과 feature alias/name을 비교해 관련 feature 후보를 정렬합니다.
+
+예:
 
 ```text
-카드론에서 나이가 심사에 얼마나 영향 있어?
+이지신용대출 신청자의 승인 한도에 영향을 주는 feature는?
 ```
 
-이 질문이 들어오면 아래 같은 후보를 비교합니다.
+후보 예시:
 
-- applicant.age
-- customer.valid_customer_flag
-- loan.requested_limit
+- `application.product_code` / 이지신용대출
+- `decision.approved_amount` / 승인가능금액
+- `loan.requested_limit` / 대출금액
+- `credit.kcb_grade` / KCB 등급
+- `credit.nice_grade` / NICE 등급
+- `income.annual_income` / 연소득
 
-여기서 나이, 연령, age 같은 alias 와 feature 이름이 질문과 얼마나 가까운지 계산해서 상위 후보를 정렬합니다.
+직접 연결 feature가 없더라도 질문의 보조 토큰은 버리지 않습니다.  
+예를 들어 “탈락 사유”처럼 feature에 바로 매핑되지 않는 표현은 거절 코드, decision, reject reason 쪽으로 의미를 보강하는 힌트로 사용합니다.
 
-### 4. Primary Feature Select
+#### 3.4 Primary Axis Select
 
-점수가 가장 높은 feature 하나를 대표 feature 로 정하고, 그 주변 feature 를 related feature 로 모읍니다.
+상위 후보를 하나만 무조건 고르는 방식이 아니라, 질문 의도에 따라 여러 대표 feature를 함께 잡습니다.
 
-예시:
-
-- 대표 feature: applicant.age
-- related feature: customer.valid_member_flag, loan.requested_limit, application.product_code
-
-초보자 입장에서는 이 단계를 질문의 중심 주제 하나를 뽑는 과정으로 보면 됩니다.
-
-### 5. Cluster Cache Build
-
-대표 feature 와 질문을 기준으로 비슷한 고객 묶음, 즉 고객군집 후보를 계산합니다.
-
-예를 들어 applicant.age 를 중심으로 보면 아래처럼 묶일 수 있습니다.
-
-- 20대 후반 신청자 그룹
-- 30대 중반 신청자 그룹
-- 고연령 신청자 그룹
-
-여기서 FAISS 와 캐시 데이터는 비슷한 패턴을 빠르게 찾기 위한 보조 장치입니다. 초보자는 비슷한 사례를 빨리 모아 주는 검색 가속기라고 이해하면 충분합니다.
-
-### 6. Retrieval Result Build
-
-이제 실제 로그 레코드 중에서 질문과 관련 있는 사례를 뽑고, 어떤 reject code 가 자주 같이 나오는지도 정리합니다.
-
-예시:
-
-- 질문: 카드론에서 나이가 영향 있어?
-- 대표 feature: applicant.age
-- 검색 결과: 연령이 높은 구간에서 특정 거절 사유가 자주 나온 사례 몇 건 추출
-- 함께 표시: 관련 reject_reason_codes, 유사 레코드, 검색 trace
-
-즉, 추상적인 feature 설명에서 끝나지 않고, 실제 로그 증거까지 연결해 주는 단계입니다.
-
-### 7. Answer Summary Build
-
-마지막으로 화면 상단에 보여 줄 요약 답변을 만듭니다.
-
-이 답변은 아래 재료를 조합해서 만들어집니다.
-
-- 사용자가 입력한 질문
-- 선택 상품
-- 대표 feature
-- related feature
-- 고객군집 후보
-- retrieval 결과
-
-Ollama 가 켜져 있으면 더 자연스러운 문장으로 요약하고, 꺼져 있어도 기본 요약은 생성됩니다.
-
-## 질문 하나가 실제로 처리되는 예시
-
-예를 들어 온톨로지 화면에서 아래처럼 질문한다고 가정하겠습니다.
+예:
 
 ```text
-카드론에서 연령이 높으면 어떤 거절 사유가 자주 보여?
+이지신용대출 평균 금리와 한도는?
 ```
 
-그러면 내부 흐름은 아래처럼 이어집니다.
+대표 feature는 하나가 아니라 다음처럼 여러 개가 될 수 있습니다.
 
-1. 상품 C9 카드론 범위의 feature 만 우선 남깁니다.
-2. 연령, 나이, age 와 연결된 applicant.age 가 대표 feature 후보로 올라옵니다.
-3. 관련 feature 로 requested_limit, valid_customer_flag 같은 주변 feature 를 같이 묶습니다.
-4. applicant.age 와 가까운 사례를 고객군집 단위로 모읍니다.
-5. 실제 레코드에서 자주 등장한 reject_reason_codes 를 확인합니다.
-6. 최종적으로 화면에는 이런 형태의 설명이 나옵니다.
+- `application.product_code` / 이지신용대출
+- `pricing.approved_rate` 또는 금리 관련 feature
+- `decision.approved_amount`
+- `loan.requested_limit`
 
-예시 요약:
+질문이 복합 질문이면 primary feature도 복수로 잡는 것이 자연스럽습니다.  
+“금리와 한도”는 두 개의 지표를 묻는 질문이므로 하나의 feature로 압축하면 답변이 잘립니다.
+
+#### 3.5 Cluster Cache Build
+
+고객 군집 캐시를 읽거나 필요하면 재생성합니다.
+
+군집은 승인 고객만 보지 않습니다.  
+현재 구조에서는 승인/거절 decision을 함께 보고, 질문이 탈락/거절/부결/사유를 묻는 경우 거절군의 reject code와 사유 요약을 더 중요하게 봅니다.
+
+군집 예시:
 
 ```text
-카드론 상품에서 연령 관련 질문은 applicant.age feature 로 해석되었습니다.
-관련 사례를 보면 특정 연령대 구간에서 일부 거절 코드가 반복적으로 관찰되며,
-함께 조회된 feature 는 대출금액과 고객 유효성 여부입니다.
+C6 / approved / 30대 / 고소득 / 중액
+C6 / rejected / 40대 / 중소득 / 고액 / K코드 반복
+C9 / rejected / 40대 / 직장인 / DSR 부담
 ```
 
-중요한 점은, 시스템이 처음부터 연령 컬럼만 보는 것이 아니라 온톨로지로 연령의 공통 의미를 찾고, 그 의미를 기준으로 유사 사례와 거절 사유를 연결한다는 것입니다.
+군집은 다음 질문에 특히 유용합니다.
 
-## 왜 이 구조가 중요한가
+- 평균 금리와 한도
+- 승인/거절 고객군 비교
+- 40대, 직장인, 고소득 같은 세그먼트 조건
+- 탈락 사유와 reject code 반복 패턴
+- 특정 상품의 대표 고객군
 
-- 상품마다 필드명이 달라도 하나의 공통 의미로 검색할 수 있습니다.
-- 사람이 질문한 자연어를 바로 로그 필드와 연결할 수 있습니다.
-- 단순 키워드 검색이 아니라 feature 중심으로 군집과 사례를 이어 볼 수 있습니다.
-- 나중에 규제 문서나 신규 상품이 추가되어도 같은 공통 feature 체계로 확장하기 쉽습니다.
+반대로 “승인 한도에 영향을 주는 feature는?”처럼 feature 영향도를 묻는 질문에서는 군집은 보조 근거일 뿐이고, 최종 답변의 주인공은 related feature입니다.
 
-## 처음 보는 사람이 기억하면 좋은 한 줄 정리
+#### 3.6 Retrieval Result Build
 
-이 프로젝트의 온톨로지는 상품별 로그 필드를 공통 feature 로 번역하고, 사용자의 질문을 그 feature 에 연결한 뒤, 관련 군집과 실제 사례를 찾아 최종 답변으로 보여주는 중심 축입니다.
+대표 feature와 질문 의도에 맞는 실제 레코드, 군집, 거절 코드, 통계 큐브 결과를 모읍니다.
 
-## 권장 개발 환경
+예:
 
-- Windows 10/11
-- Python 3.11 또는 3.12 권장
-- Node.js 20 LTS 권장
-- Git
+```text
+40대 카드론 신청자들의 평균 탈락 사유는?
+```
 
-참고:
+이 경우 retrieval은 다음을 우선합니다.
 
-- 코드 안에 Python 3.14 와 호환되지 않는 경고 우회 로직이 있어, 노트북에서도 Python 3.11 또는 3.12 로 맞추는 편이 안전합니다.
+- 상품: 카드론 `C9`
+- 세그먼트: 40대
+- decision: rejected
+- reject code 분포
+- reject reason label
+- 유사 로그 레코드
 
-## 노트북에서 처음 실행하기
+“탈락”과 “사유”가 직접 feature로 hit되지 않아도, 이 질문은 거절 고객군과 reject taxonomy를 봐야 하는 질문입니다.
 
-### 1. 저장소 클론
+#### 3.7 Answer Summary Build
+
+백엔드는 화면 상단에 보여줄 answer summary를 만듭니다.
+
+이 summary는 Ollama가 없어도 생성됩니다.  
+Ollama가 켜져 있으면 같은 근거를 바탕으로 문장을 더 자연스럽게 다듬습니다.
+
+중요한 guardrail:
+
+- 내부 처리 용어인 `대표 축`, `ontology expansion`, `retrieval evidence` 같은 말은 최종 답변에 직접 노출하지 않도록 제한합니다.
+- 질문이 influence feature 질문이면 군집 결론으로 시작하지 않도록 제한합니다.
+- 질문이 평균 금리/한도 질문이면 통계 큐브와 군집 평균을 우선합니다.
+- 질문이 탈락 사유 질문이면 거절군과 reject code를 우선합니다.
+
+## 온톨로지의 역할
+
+온톨로지는 단순 키워드 검색 사전이 아닙니다.  
+상품별 필드명, 업무 용어, 질문 표현, 거절 코드, related feature를 하나의 의미망으로 연결하는 레이어입니다.
+
+### 온톨로지가 하는 일
+
+1. 상품명/별칭을 상품 코드로 연결합니다.
+2. 질문 표현을 feature로 연결합니다.
+3. 상품별 다른 필드명을 공통 feature로 묶습니다.
+4. 대표 feature 주변의 related feature를 확장합니다.
+5. reject code taxonomy와 연결해 탈락 사유 질문을 해석합니다.
+6. LLM에게 넘길 컨텍스트를 제한합니다.
+
+### 예시: 이지신용대출 승인 한도 영향 feature
+
+질문:
+
+```text
+이지신용대출 신청자의 승인 한도에 영향을 주는 feature는?
+```
+
+온톨로지 해석:
+
+- `이지신용대출` -> `C6`
+- `이지신용대출` -> 대표 feature `application.product_code`
+- `승인 한도` -> `decision.approved_amount`
+- `대출금액`, `한도` -> `loan.requested_limit`
+- `영향 feature` -> 위 feature들에 연결된 related feature 탐색
+
+답변에 들어갈 수 있는 영향 feature 예시:
+
+- 신용대출잔액
+- KCB 등급
+- NICE 등급
+- 연소득
+- 인정소득
+- 비대면연계대출등급
+- DSR 또는 상환부담 관련 feature
+- 기존 대출/연체/한도 사용 관련 feature
+
+이 질문에서 “C6 기준 상위 군집은 고소득/30대/중액입니다” 같은 답변이 먼저 나오면 흐름이 어긋난 것입니다.  
+군집은 보조 설명으로만 쓰고, Ollama에는 승인가능금액과 대출금액에 영향을 주는 feature 목록과 근거가 먼저 들어가야 합니다.
+
+### 예시: 평균 금리와 한도
+
+질문:
+
+```text
+이지신용대출 평균 금리와 한도는?
+```
+
+온톨로지 해석:
+
+- 상품: `C6`
+- 지표 1: 금리
+- 지표 2: 승인 한도 또는 대출금액
+- 군집/통계 큐브: C6 기준 평균 금리와 평균 한도 계산
+
+이 질문은 feature 영향도보다 통계 질의에 가깝습니다.  
+따라서 `segment_metric_cube.json`과 `feature_customer_clusters.json`의 평균값이 중요한 근거가 됩니다.
+
+### 예시: 평균 탈락 사유
+
+질문:
+
+```text
+40대 카드론 신청자들의 평균 탈락 사유는?
+```
+
+온톨로지 해석:
+
+- 상품: 카드론 `C9`
+- 세그먼트: 40대
+- decision: rejected
+- 질의 의도: reject reason summary
+- 근거: reject code 빈도, reject taxonomy label, 거절군 고객 군집
+
+여기서 “탈락”, “사유”가 직접 feature hit가 없더라도 괜찮습니다.  
+직접 feature가 아니라 decision/reject taxonomy를 여는 의도 토큰으로 봐야 합니다.
+
+## 군집검색
+
+군집검색은 `data/feature_customer_clusters.json`을 기준으로 질문과 가까운 고객군을 찾는 과정입니다.
+
+군집의 목적은 “비슷한 신청자 묶음에서 어떤 금리, 한도, 승인/거절, reject code 패턴이 반복되는가”를 보여주는 것입니다.
+
+### 군집이 구성되는 축
+
+대표적으로 다음 축이 쓰입니다.
+
+- 상품 코드
+- 승인/거절 decision
+- 연령대
+- 소득대
+- 신청/승인 금액대
+- 금리 구간
+- 거절 코드
+- 위험 proxy
+- 주요 feature 값
+
+### 승인군과 거절군
+
+초기에는 승인된 고객 중심으로 군집이 보일 수 있었지만, 현재 방향은 승인군과 거절군을 모두 봅니다.
+
+질문별 우선순위:
+
+- 승인 요인 질문 -> 승인군 + 승인금액/금리/한도 feature
+- 탈락 사유 질문 -> 거절군 + reject code
+- 평균 금리/한도 질문 -> 해당 상품/세그먼트의 승인/전체 통계
+- 리스크 질문 -> 거절군, 연체 proxy, 등급, DSR, 기존대출 feature
+
+### VECTOR 버튼 화면
+
+왼쪽 `VECTOR` 버튼은 `feature_customer_clusters.json`를 가장 잘 설명하는 관계형 화면으로 연결됩니다.
+
+화면에서 기대하는 구조:
+
+- 상품별 군집 수
+- 승인/거절 decision 분포
+- 대표 군집 카드
+- 평균 금리/한도
+- 주요 reject code
+- 군집 간 관계
+- feature와 cluster의 연결
+
+이 화면은 단순 테이블이 아니라 “상품 -> 고객군 -> feature/reject code -> 평균 지표”의 관계를 읽는 도구입니다.
+
+## 상품개발모드
+
+상품개발모드는 온톨로지와 군집 결과를 바탕으로 신규 상품 아이디어를 만드는 모드입니다.  
+단순히 LLM에게 “상품 만들어줘”라고 하는 것이 아니라, 현재 데이터에서 발견된 고객군/거절군/기회 영역을 바탕으로 부서별 관점의 토론을 구성합니다.
+
+### Step 1. 상품개발 후보 만들기
+
+시스템은 온톨로지, 군집, 통계 큐브에서 상품개발에 쓸 수 있는 힌트를 모읍니다.
+
+예:
+
+- C6 이지신용대출에서 승인 경계에 있는 고객군
+- 카드론 거절군 중 특정 reject code가 반복되는 세그먼트
+- 40대 직장인 중 소득은 충분하지만 DSR 또는 등급 때문에 막히는 그룹
+- 소액 한도에서는 리스크가 낮아 보이는 후보군
+
+이 결과를 바탕으로 agenda를 만듭니다.
+
+주요 API:
+
+- `POST /feature-ontology/product-development/agendas`
+
+### Step 2. 4개 부서 토론
+
+선택한 agenda에 대해 네 명의 역할이 회의실에서 토론합니다.
+
+등장 인물:
+
+- 금융솔루션부 금프로  
+  상품 컨셉, 고객 가치, 실험 범위를 봅니다.
+
+- 신용기획부 신프로  
+  리스크, 심사 룰, 거절 코드, 한도/금리 제한을 봅니다.
+
+- 금융영업부 영프로  
+  영업 가능성, 고객 반응, 승인 전환 가능성을 봅니다.
+
+- IT개발자 아프로  
+  기존 시스템에 어떻게 얹을 수 있는지, 배포 난이도와 데이터 연동 가능성을 봅니다.
+
+Ollama 응답이 오래 걸리는 동안 화면은 결과만 기다리지 않고 회의실에 사람들이 들어와 인사하고, 스몰토크하고, 실무자들이 논점을 주고받는 것처럼 보여줍니다.
+
+주요 API:
+
+- `POST /feature-ontology/product-development/debate`
+
+Step 2의 목적은 “정답 생성”보다 “상품화 가능한 논점 정리”입니다.
+
+예시 agenda:
+
+```text
+씬파일 승인 전환형 소액 신용 상품
+```
+
+토론에서 다루는 질문:
+
+- 어떤 고객군을 대상으로 할 것인가?
+- 기존 룰을 얼마나 흔들 수 있는가?
+- 거절군 중 어떤 세그먼트를 재심사 후보로 볼 수 있는가?
+- 한도는 작게 시작할 것인가?
+- 금리는 어떤 위험 보상 구조로 둘 것인가?
+- IT 구현은 기존 feature와 decision pipeline 안에서 가능한가?
+
+### Step 3. 실행안 정리
+
+토론 결과는 다음처럼 정리됩니다.
+
+- 제안 상품명
+- 대상 고객군
+- 핵심 feature 조건
+- 승인/거절 기준 후보
+- 한도/금리 가이드
+- 리스크 제한
+- 실험 방식
+- 필요한 데이터/개발 작업
+
+상품개발모드는 분석 결과를 보고 끝내지 않고, “그래서 어떤 상품 실험을 할 수 있는가”까지 이어가는 모드입니다.
+
+## 애매한 온톨로지 결과 처리
+
+질문 해석이 애매하면 시스템은 무리하게 단정하지 않고 사용자에게 재질문하는 방향을 갖습니다.
+
+예:
+
+```text
+한도에 영향 주는 요소 알려줘
+```
+
+애매한 점:
+
+- 어떤 상품의 한도인가?
+- 승인한도인가, 신청금액인가?
+- 승인 고객 기준인가, 거절 고객 포함인가?
+
+이 경우 이상적인 재질문:
+
+```text
+한도 기준을 승인가능금액으로 볼까요, 신청 대출금액으로 볼까요?
+상품은 이지신용대출(C6) 기준이면 될까요?
+```
+
+재질문이 필요한 대표 상황:
+
+- 상품명이 없고 상품별 feature 차이가 큰 경우
+- 승인/거절 기준이 불명확한 경우
+- 금리/한도/대출금액처럼 유사 지표가 섞인 경우
+- “사유”, “원인”, “영향”처럼 해석 경로가 여러 개인 경우
+
+## Ollama 사용 방식
+
+Ollama는 전체 시스템의 필수 조건이 아니라 최종 답변을 자연어로 다듬는 선택 레이어입니다.
+
+백엔드는 먼저 자체적으로 다음을 만듭니다.
+
+- representative features
+- related features
+- customer clusters
+- retrieval results
+- reject code summary
+- answer summary
+- Ollama prompt pack
+
+그 다음 Ollama가 가능하면 prompt pack을 받아 문장을 정리합니다.
+
+중요한 원칙:
+
+- Ollama에는 원천 데이터 전체를 던지지 않습니다.
+- 질문 의도에 맞게 압축된 컨텍스트만 줍니다.
+- influence feature 질문에는 영향 feature 중심 컨텍스트를 줍니다.
+- 평균/통계 질문에는 통계 큐브와 군집 평균을 줍니다.
+- 거절 사유 질문에는 reject code와 거절군 근거를 줍니다.
+
+## 백그라운드 서버 동작
+
+현재 서버는 가볍게 뜨도록 기본값을 조정했습니다.
+
+기본 OFF:
+
+- background worker 자동 시작
+- semantic refresh 자동 스케줄러
+- `/health`에서 Ollama live probe
+
+필요할 때만 켜는 환경변수:
 
 ```powershell
-git clone https://github.com/hallowmen924-wq/ai-log-agent.git
-cd ai-log-agent
+$env:AUTO_START_WORKER='1'
+$env:AUTO_START_SEMANTIC_REFRESH='1'
+$env:HEALTH_CHECK_OLLAMA='1'
 ```
 
-### 2. Python 가상환경 생성 및 활성화
+각 옵션의 의미:
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
+- `AUTO_START_WORKER=1`  
+  서버 시작과 동시에 뉴스/로그/벡터 갱신 worker를 돌립니다. 장시간 데모나 운영 모드에 가깝습니다.
 
-### 3. 프런트엔드 의존성 설치
+- `AUTO_START_SEMANTIC_REFRESH=1`  
+  일정 주기로 `full_text_records`, 통계 큐브, 군집 캐시를 자동 갱신합니다. 무거운 작업이므로 개발 중에는 보통 끕니다.
 
-```powershell
-cd frontend
-npm install
-cd ..
-```
+- `HEALTH_CHECK_OLLAMA=1`  
+  `/health` 호출 때마다 Ollama 서버를 실제로 확인합니다. 프론트가 자주 health를 부르면 느려질 수 있으므로 기본 OFF입니다.
 
-### 4. 백엔드 실행
+수동 실행 API:
 
-```powershell
-cd backend
-python -m uvicorn app_main:app --host 127.0.0.1 --port 18000
-```
-
-### 5. 프런트엔드 실행
-
-새 터미널에서:
-
-```powershell
-cd frontend
-npm run dev
-```
-
-기본 접속 주소:
-
-- 프런트엔드: http://127.0.0.1:3000
-- 백엔드: http://127.0.0.1:18000
-
-Vite 개발 서버는 /api 와 /ws 요청을 백엔드로 프록시합니다.
-
-### 6. Streamlit 레거시 화면이 필요할 때만 실행
-
-```powershell
-streamlit run app.py
-```
-
-## 프로덕션 빌드
-
-```powershell
-cd frontend
-npm run build
-```
-
-빌드 결과물은 frontend/dist 에 생성됩니다.
+- `POST /worker/start`
+- `POST /worker/stop`
+- `POST /feature-ontology/semantic-refresh`
+- `GET /health/ollama`
 
 ## 주요 API
 
-- GET /health
-- POST /news/collect
-- POST /logs/analyze
-- POST /faiss/build
-- POST /faiss/search
-- POST /chat/cardloan-debate
-- POST /analysis/run
-- GET /analysis/status
-- POST /regulation/upload
-- POST /worker/start
-- POST /worker/stop
-- GET /feature-ontology/workbench
-- POST /feature-ontology/runtime-jobs
-- GET /feature-ontology/runtime-jobs/{job_id}
-- GET /feature-ontology/clusters
-- POST /feature-ontology/clusters/rebuild
-- POST /feature-ontology/ollama
-- WS /ws/faiss
+온톨로지/워크벤치:
 
-## 노트북으로 옮길 때 같이 알아둘 점
+- `GET /ontology/state`
+- `POST /ontology/save`
+- `GET /feature-ontology/workbench`
+- `POST /feature-ontology/runtime-jobs`
+- `GET /feature-ontology/runtime-jobs/{job_id}`
+- `POST /feature-ontology/ollama`
 
-- .venv, node_modules, frontend/dist, logs, FAISS 생성물은 커밋 대상이 아닙니다.
-- 루트의 faiss_customer, faiss_document, faiss_logs, faiss_news 같은 폴더는 런타임 생성물이므로 노트북에서 재생성될 수 있습니다.
-- data 폴더의 JSON 원본은 프로젝트 실행에 필요하므로 유지합니다.
-- 환경변수나 API 키가 있다면 노트북에 별도로 다시 설정해야 합니다.
+군집/통계:
 
-예시:
+- `GET /feature-ontology/clusters`
+- `POST /feature-ontology/clusters/rebuild`
+- `GET /feature-ontology/segment-metric-cube`
+- `GET /feature-ontology/semantic-refresh-status`
+- `POST /feature-ontology/semantic-refresh`
 
-```powershell
-setx OPENAI_API_KEY "your_api_key_here"
+상품개발모드:
+
+- `POST /feature-ontology/product-development/agendas`
+- `POST /feature-ontology/product-development/debate`
+
+백그라운드/상태:
+
+- `GET /health`
+- `GET /health/ollama`
+- `POST /worker/start`
+- `POST /worker/stop`
+- `WS /ws/faiss`
+
+기존 분석 기능:
+
+- `POST /news/collect`
+- `POST /logs/analyze`
+- `POST /faiss/build`
+- `POST /faiss/search`
+- `POST /analysis/run`
+- `GET /analysis/status`
+- `POST /regulation/upload`
+
+## 화면 흐름
+
+### 온톨로지 워크벤치
+
+1. 사용자가 질문을 입력합니다.
+2. 프론트가 runtime job을 생성합니다.
+3. 진행 애니메이션이 stage별 상태를 보여줍니다.
+4. 백엔드가 feature 후보, 대표 feature, 군집, retrieval 결과를 계산합니다.
+5. answer summary가 상단에 표시됩니다.
+6. VECTOR 화면에서 군집 관계를 볼 수 있습니다.
+7. 필요하면 상품개발모드로 넘어갑니다.
+
+### 옵션 기본값
+
+현재 의도한 기본값:
+
+- Ollama GPU 모드: 켜기
+- 온톨로지 질의 최우선: 켜기
+- 로그 에이전트 호출: 끄기
+- 뉴스 에이전트 호출: 끄기
+
+이 기본값은 온톨로지 질의 실험을 빠르게 하기 위한 설정입니다.  
+로그/뉴스 에이전트는 유용하지만 무거우므로 사용자가 필요할 때만 켜는 것이 좋습니다.
+
+## 자주 쓰는 질문 예시
+
+평균/통계:
+
+```text
+이지신용대출 평균 금리와 한도는?
+카드론 40대 신청자의 평균 승인 한도는?
+C6 승인 고객의 평균 금리와 대출금액은?
 ```
 
-## Git에 올리기 전 확인
+영향 feature:
 
-아래 항목은 커밋하지 않는 것이 안전합니다.
-
-- .venv/
-- frontend/node_modules/
-- frontend/dist/
-- logs/
-- faiss_customer/
-- faiss_document/
-- faiss_logs/
-- faiss_news/
-
-이미 Git이 추적 중인 생성물이 있다면 한 번만 캐시에서 제거하세요.
-
-```powershell
-git rm -r --cached .venv frontend/node_modules frontend/dist logs faiss_customer faiss_document faiss_logs faiss_news
+```text
+이지신용대출 신청자의 승인 한도에 영향을 주는 feature는?
+카드론 승인에 중요한 feature는?
+거절 가능성을 높이는 feature는 뭐야?
 ```
 
-존재하지 않는 경로가 있으면 해당 이름만 빼고 실행하면 됩니다.
+거절/탈락 사유:
 
-## Git push 절차
-
-### 변경 확인
-
-```powershell
-git status
+```text
+40대 카드론 신청자들의 평균 탈락 사유는?
+이지신용대출 거절 고객의 주요 reject code는?
+고소득인데 거절된 고객군은 왜 떨어졌어?
 ```
 
-### 필요한 파일만 스테이징
+군집:
 
-소스와 문서만 올리려면:
-
-```powershell
-git add README.md requirements.txt .gitignore app.py backend frontend agent analyzer mapper rag utils data
+```text
+C6 기준 상위 고객군을 설명해줘
+feature_customer_clusters.json 기준으로 가장 반복되는 관계를 설명해줘
+카드론 거절군 중 위험도가 높은 군집은?
 ```
 
-만약 data 아래 생성 JSON 중 일부를 제외하고 싶으면 git status 를 보고 개별 파일만 추가하세요.
+상품개발:
 
-### 커밋
-
-```powershell
-git commit -m "Update ontology runtime UI and repo setup docs"
+```text
+거절 고객군에서 승인 전환 가능한 신규 상품 아이디어를 만들어줘
+40대 직장인 카드론 거절군을 대상으로 소액 상품을 설계해줘
+씬파일 고객을 위한 승인 전환형 상품을 논의해줘
 ```
 
-### 원격으로 푸시
+## 답변 품질을 볼 때 확인할 것
 
-브랜치명을 확인한 뒤:
+좋은 답변의 조건:
 
-```powershell
-git branch --show-current
-git push origin 브랜치명
+- 질문에 나온 상품이 맞게 잡혔는가?
+- `C6` 이지신용대출처럼 상품 코드가 정확한가?
+- 질문이 복합 지표이면 representative feature가 여러 개 잡혔는가?
+- 평균 질문이면 통계/군집 평균이 먼저 나오는가?
+- 영향 feature 질문이면 related feature가 먼저 나오는가?
+- 탈락 사유 질문이면 거절군과 reject code를 보는가?
+- Ollama 답변이 내부 용어를 그대로 말하지 않는가?
+
+나쁜 신호:
+
+- 영향 feature 질문인데 군집 결과가 첫 문장으로 나옴
+- “대표 축”, “ontology expansion” 같은 내부 용어가 답변에 노출됨
+- 탈락 사유 질문인데 승인 고객군만 봄
+- 상품명이 C6/C9 등으로 잘못 매핑됨
+- “탈락”, “사유”를 feature hit 없음으로만 처리하고 reject code를 보지 않음
+
+## 개발자가 기억할 핵심
+
+이 프로젝트는 단순 검색 UI가 아닙니다.  
+핵심은 다음 순서입니다.
+
+```text
+질문
+-> 상품/의도/지표 해석
+-> 온톨로지 feature 매핑
+-> 대표 feature 복수 선택
+-> related feature 확장
+-> 고객 군집/거절 코드/통계 큐브 조회
+-> 질문 의도별 컨텍스트 압축
+-> answer summary
+-> 선택적으로 Ollama 자연어 생성
 ```
 
-예를 들어 현재 브랜치가 main 이면:
-
-```powershell
-git push origin main
-```
-
-## 추천 점검 순서
-
-노트북에서 바로 이어서 작업하려면, 푸시 전에 아래 두 가지만 확인하는 편이 좋습니다.
-
-1. backend 가 18000 포트에서 뜨는지 확인
-2. frontend 에서 npm run build 가 성공하는지 확인
-
-## 트러블슈팅
-
-### npm build 가 루트에서 실패할 때
-
-frontend 폴더에서 실행해야 합니다.
-
-```powershell
-cd frontend
-npm run build
-```
-
-### uvicorn 실행이 안 될 때
-
-가상환경이 활성화되어 있는지 확인하고, backend 폴더에서 app_main:app 으로 실행하세요.
-
-```powershell
-cd backend
-python -m uvicorn app_main:app --host 127.0.0.1 --port 18000
-```
-
-### 규제 업로드가 실패할 때
-
-루트 requirements.txt 에 python-multipart 가 포함되어 있어야 하며, 백엔드를 재시작해야 합니다.
-
-## 참고 파일
-
-- backend/app_main.py
-- backend/services.py
-- backend/worker.py
-- frontend/src/App.jsx
-- frontend/src/components/OntologyWorkbench.jsx
-- frontend/src/components/ontologyRuntimeStore.js
+온톨로지는 feature를 찾는 도구이고, 군집은 실제 고객 패턴을 보여주는 도구이며, 상품개발모드는 그 둘을 이용해 실험 가능한 금융상품 논의를 만드는 도구입니다.
