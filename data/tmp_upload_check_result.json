@@ -1,0 +1,9 @@
+{
+  "upload_status": null,
+  "upload_body": "",
+  "health_status": null,
+  "reg_status": null,
+  "reg_summary_len": 0,
+  "upload_error": "HTTPConnectionPool(host='127.0.0.1', port=18000): Read timed out. (read timeout=120)",
+  "health_error": "HTTPConnectionPool(host='127.0.0.1', port=18000): Read timed out. (read timeout=30)"
+}

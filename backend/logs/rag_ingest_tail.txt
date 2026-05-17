@@ -1,0 +1,200 @@
+﻿{
+  "title": "?щえ?異쒖? 珥덇린吏留????⑹뼱由?移대뱶濡??곗껜?⑥? 湲덉쑖?꾧린 ?섏? - ?고빀?명룷留μ뒪",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMicEFVX3lxTE5xbExPZ0Q4VnRRQ0xqT01NSzN5bWJKUEowdUFrU3JPbktfNG5NU2tFeE9oS3lsYjF5dnZkem83VnVHeTdjd01KdFIzNXR0aFItaUVGQXFPTEdUaVpPbkF4RWlxZXNrTEstNDhlVTJQbVnSAXRBVV95cUxQbkNfRUxoamppTUVoUmE3MVVwVGM5VEwzREhEX2ZMbGN2d1MzOF9EeWVJa19DOGs5WlotUG1hNHdHZkFJNU1YTGFzLTZxMkJ4MFRMazhxSWxLc3hROUxFTUFnVXpXcDR3eDBXS2NuMHNXUERRYg?oc=5\" target=\"_blank\">?щえ?異쒖? 珥덇린吏留????⑹뼱由?移대뱶濡??곗껜?⑥? 湲덉쑖?꾧린 ?섏?</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?고빀?명룷留μ뒪</font>",
+  "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTE5xbExPZ0Q4VnRRQ0xqT01NSzN5bWJKUEowdUFrU3JPbktfNG5NU2tFeE9oS3lsYjF5dnZkem83VnVHeTdjd01KdFIzNXR0aFItaUVGQXFPTEdUaVpPbkF4RWlxZXNrTEstNDhlVTJQbVnSAXRBVV95cUxQbkNfRUxoamppTUVoUmE3MVVwVGM5VEwzREhEX2ZMbGN2d1MzOF9EeWVJa19DOGs5WlotUG1hNHdHZkFJNU1YTGFzLTZxMkJ4MFRMazhxSWxLc3hROUxFTUFnVXpXcDR3eDBXS2NuMHNXUERRYg?oc=5",
+  "published": "Thu, 26 Mar 2026 07:00:00 GMT"
+}
+2026-04-16 00:27:23,547 INFO ---- RAG INGEST: original news ----
+{
+  "title": "?異?議곗씠??怨좉툑由ъ뿉 媛뉙엺 ??좎슜?먥?뭅?쒕줎쨌?遺??鍮꾩쨷 60% - v.daum.net",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiRkFVX3lxTE9UYW9GMzgxc2V1RUZlVl8xaTlfMGdObU12dmNCZjQxd042TGpRMlphaklaaERJZENpcW11RHBqV19TNnpjMGc?oc=5\" target=\"_blank\">?異?議곗씠??怨좉툑由ъ뿉 媛뉙엺 ??좎슜?먥?뭅?쒕줎쨌?遺??鍮꾩쨷 60%</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">v.daum.net</font>",
+  "link": "https://news.google.com/rss/articles/CBMiRkFVX3lxTE9UYW9GMzgxc2V1RUZlVl8xaTlfMGdObU12dmNCZjQxd042TGpRMlphaklaaERJZENpcW11RHBqV19TNnpjMGc?oc=5",
+  "published": "Mon, 23 Mar 2026 07:00:00 GMT"
+}
+2026-04-16 00:27:23,547 INFO ---- RAG INGEST: original news ----
+{
+  "title": "移대뱶?? 移대뱶濡?洹쒖젣???ъ뾽?먭툑?異쒕줈 ?쒕줈 紐⑥깋 - ?고빀?명룷留μ뒪",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMicEFVX3lxTE56aXUyNWMtN09IOFU5UEtHOS0taHJZZnhXbmtndXN2OVI1M3h6SXROTk1XSWNDZlVTZndVb2g4LVhpYjM0SWlrUkRRUDd4dXMteGtqY0hNeFdRdHNOa2FkLTJaT0RyczJ4dWM4WXpBT2Y?oc=5\" target=\"_blank\">移대뱶?? 移대뱶濡?洹쒖젣???ъ뾽?먭툑?異쒕줈 ?쒕줈 紐⑥깋</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?고빀?명룷留μ뒪</font>",
+  "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTE56aXUyNWMtN09IOFU5UEtHOS0taHJZZnhXbmtndXN2OVI1M3h6SXROTk1XSWNDZlVTZndVb2g4LVhpYjM0SWlrUkRRUDd4dXMteGtqY0hNeFdRdHNOa2FkLTJaT0RyczJ4dWM4WXpBT2Y?oc=5",
+  "published": "Thu, 27 Nov 2025 08:00:00 GMT"
+}
+2026-04-16 00:27:23,547 INFO ---- RAG INGEST: original news ----
+{
+  "title": "3??移대뱶濡졖룰컻?몄떊?⑸?異???쬆 - ?쇨컙?щ뜲??,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMia0FVX3lxTE90SlNnTzh4Y3NDZlZDNU1yb09UOGJ6TmJCTlpLb0swNUFsUDhvUXhyX0ZXVFBUM0ttd0tRSkxtYXE5ZTVlLTAwUnU1U29UTHA0a1F3YUR4dk93aFMwUU1CNHd2Mm5zY3ZiWlJn?oc=5\" target=\"_blank\">3??移대뱶濡졖룰컻?몄떊?⑸?異???쬆</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?쇨컙?щ뜲??/font>",
+  "link": "https://news.google.com/rss/articles/CBMia0FVX3lxTE90SlNnTzh4Y3NDZlZDNU1yb09UOGJ6TmJCTlpLb0swNUFsUDhvUXhyX0ZXVFBUM0ttd0tRSkxtYXE5ZTVlLTAwUnU1U29UTHA0a1F3YUR4dk93aFMwUU1CNHd2Mm5zY3ZiWlJn?oc=5",
+  "published": "Tue, 07 Apr 2026 07:00:00 GMT"
+}
+2026-04-16 00:27:23,548 INFO ---- RAG INGEST: original news ----
+{
+  "title": "鍮싴닾 ?먭툑, ???留됲엳??移대뱶濡좎쑝濡???怨좉툑由??덈쾭由ъ????곗껜??'寃쎄퀬?? - ?대뜲?쇰━ 寃쎌젣",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMie0FVX3lxTE1JcHFzZldJNDJsY21jY0oycHJCWENVdWZKWnUwYXpXek1YVXlBV2hmcnI4cXVFeGgzcF9UMk90OVFwSFFOMEVNLTAzR0wtVmhDcV9MQUNzSWtpZ2otTzFxOUlYSmp5ZUlRUDdPYTIxSk9rRG5kdlZ4WVo1NA?oc=5\" target=\"_blank\">鍮싴닾 ?먭툑, ???留됲엳??移대뱶濡좎쑝濡???怨좉툑由??덈쾭由ъ????곗껜??'寃쎄퀬??</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?대뜲?쇰━ 寃쎌젣</font>",
+  "link": "https://news.google.com/rss/articles/CBMie0FVX3lxTE1JcHFzZldJNDJsY21jY0oycHJCWENVdWZKWnUwYXpXek1YVXlBV2hmcnI4cXVFeGgzcF9UMk90OVFwSFFOMEVNLTAzR0wtVmhDcV9MQUNzSWtpZ2otTzFxOUlYSmp5ZUlRUDdPYTIxSk9rRG5kdlZ4WVo1NA?oc=5",
+  "published": "Thu, 09 Apr 2026 02:31:23 GMT"
+}
+2026-04-16 00:27:23,548 INFO ---- RAG INGEST: original news ----
+{
+  "title": "寃쎄린 遺덊솴??'移대뱶 ?뚮젮留됯린' 6媛쒖썡 留뚯뿉 諛섎벑??뿰泥댁쑉??20?꾩깉 理쒓퀬 - ?댁뒪1",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiYkFVX3lxTE1oMU00LU5WcFE5b2o4TXhjZlFHajN1ZEs3UEQ3MUN4ZlFEWERiOElzRC15VjFTZUcxQ2tWQWROTVhFQlJDdF9VUjh5eHkwR3U2TFJQRk95QmcwaVNBUkpmYmR3?oc=5\" target=\"_blank\">寃쎄린 遺덊솴??'移대뱶 ?뚮젮留됯린' 6媛쒖썡 留뚯뿉 諛섎벑??뿰泥댁쑉??20?꾩깉 理쒓퀬</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?댁뒪1</font>",
+  "link": "https://news.google.com/rss/articles/CBMiYkFVX3lxTE1oMU00LU5WcFE5b2o4TXhjZlFHajN1ZEs3UEQ3MUN4ZlFEWERiOElzRC15VjFTZUcxQ2tWQWROTVhFQlJDdF9VUjh5eHkwR3U2TFJQRk95QmcwaVNBUkpmYmR3?oc=5",
+  "published": "Wed, 08 Apr 2026 21:30:00 GMT"
+}
+2026-04-16 00:27:23,549 INFO ---- RAG INGEST: original news ----
+{
+  "title": "移대뱶濡?寃쎄퀬?기??뚮젮留됯린' ?ㅼ떆 ?섏뼱?쒕떎 - 留ㅼ씪寃쎌젣TV",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiaEFVX3lxTE44bjdHVjR3NGN5ZHl1b0hwOTFUSjNfU1NIN21JbExYcDNsd291VTh3WXpweTNuTm5LTU42VUwwX3ZaX2ZyWmJZVHZqdWZyNF9xOEFQeTVBbnIteWNDRUtLNnlFWWVYTVBn?oc=5\" target=\"_blank\">移대뱶濡?寃쎄퀬?기??뚮젮留됯린' ?ㅼ떆 ?섏뼱?쒕떎</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">留ㅼ씪寃쎌젣TV</font>",
+  "link": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE44bjdHVjR3NGN5ZHl1b0hwOTFUSjNfU1NIN21JbExYcDNsd291VTh3WXpweTNuTm5LTU42VUwwX3ZaX2ZyWmJZVHZqdWZyNF9xOEFQeTVBbnIteWNDRUtLNnlFWWVYTVBn?oc=5",
+  "published": "Sun, 05 Apr 2026 08:37:00 GMT"
+}
+2026-04-16 00:27:23,549 INFO ---- RAG INGEST: original news ----
+{
+  "title": "??좎슜???異쒖쐞異???怨좉툑由??좊┝??뭅?쒕줎쨌?遺??鍮꾩쨷 60% - ?고빀?댁뒪",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiW0FVX3lxTFBMcUx4X3h0bGI0VDN2dHBPdGpJa2VTZmF5N2VmQllmNUttNk02cUcyUlhlS0FjM3ZWWThDWWdDQzJqU1F2d1QxanUyNzNXemx1bjVZMzd6cHdmWGc?oc=5\" target=\"_blank\">??좎슜???異쒖쐞異???怨좉툑由??좊┝??뭅?쒕줎쨌?遺??鍮꾩쨷 60%</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?고빀?댁뒪</font>",
+  "link": "https://news.google.com/rss/articles/CBMiW0FVX3lxTFBMcUx4X3h0bGI0VDN2dHBPdGpJa2VTZmF5N2VmQllmNUttNk02cUcyUlhlS0FjM3ZWWThDWWdDQzJqU1F2d1QxanUyNzNXemx1bjVZMzd6cHdmWGc?oc=5",
+  "published": "Sat, 21 Mar 2026 07:00:00 GMT"
+}
+2026-04-16 00:27:23,549 INFO ---- RAG INGEST: original news ----
+{
+  "title": "'?⑦? ?먭툑'??移대뱶濡졻???좎슜???異쒕Ц?????믪븘議뚮떎 - ?쒓뎅寃쎌젣",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiWkFVX3lxTE0tejBJMFBlUkxERUx2NWR1WjVrYk43REVfSS1lc0JZakhZajBCVmdMdWRvT3hiWVJCY21FcDdFdG5BbzE4dkdKS0dRNjBaWlJjWnM5UUZ4MU9ZZ9IBVEFVX3lxTE9oUENlU1J3aUtSVXpGV2NNU0c5bllKQkowRE84WkFMWW1wWkgtR0FUNUN0dGVHNHR5N0JmSk02YzBaZHMxZk5iNmY4ZF9BMWVuTmd4Nw?oc=5\" target=\"_blank\">'?⑦? ?먭툑'??移대뱶濡졻???좎슜???異쒕Ц?????믪븘議뚮떎</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?쒓뎅寃쎌젣</font>",
+  "link": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE0tejBJMFBlUkxERUx2NWR1WjVrYk43REVfSS1lc0JZakhZajBCVmdMdWRvT3hiWVJCY21FcDdFdG5BbzE4dkdKS0dRNjBaWlJjWnM5UUZ4MU9ZZ9IBVEFVX3lxTE9oUENlU1J3aUtSVXpGV2NNU0c5bllKQkowRE84WkFMWW1wWkgtR0FUNUN0dGVHNHR5N0JmSk02YzBaZHMxZk5iNmY4ZF9BMWVuTmd4Nw?oc=5",
+  "published": "Thu, 19 Feb 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,550 INFO ---- RAG INGEST: original news ----
+{
+  "title": "二쇳깮?대낫?異?議곗씠?? ???섏뼱??移대뱶?異??댁슜?먥???좎슜??湲덈━??18%? - 留덉폆??,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMic0FVX3lxTE5uMWt2aGNMUUp5N2NoZ090emhpWUJFOVBiTVdNaHp5TFIwR24wVVQwc1FmV0RhUm5xSVZuWDIwUXB2eXZPTWd3c0hkRkM1ODVrcFBybHJzZUZSWkhVWWtYMUVaUk44UmtXOTNqSHA1Vjdmejg?oc=5\" target=\"_blank\">二쇳깮?대낫?異?議곗씠?? ???섏뼱??移대뱶?異??댁슜?먥???좎슜??湲덈━??18%?</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">留덉폆??/font>",
+  "link": "https://news.google.com/rss/articles/CBMic0FVX3lxTE5uMWt2aGNMUUp5N2NoZ090emhpWUJFOVBiTVdNaHp5TFIwR24wVVQwc1FmV0RhUm5xSVZuWDIwUXB2eXZPTWd3c0hkRkM1ODVrcFBybHJzZUZSWkhVWWtYMUVaUk44UmtXOTNqSHA1Vjdmejg?oc=5",
+  "published": "Mon, 23 Feb 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,550 INFO ---- RAG INGEST: original news ----
+{
+  "title": "[痍⑥옱?щ떞] ?좎슜?먯닔 500??몃뜲 移대뱶濡?湲덈━媛 7%???뼱?붿꽌, 臾댁뒯 ?? - v.daum.net",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiT0FVX3lxTE9CdjVFdkx5UEZ2OHdoM3dUVEJucE5uYm5uNE5ocUNjT0FZbXYwR1hYYy1aTnV3Zzk2NmxnLXBmTmZVYXlRUW82MktubUViSDg?oc=5\" target=\"_blank\">[痍⑥옱?щ떞] ?좎슜?먯닔 500??몃뜲 移대뱶濡?湲덈━媛 7%???뼱?붿꽌, 臾댁뒯 ??</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">v.daum.net</font>",
+  "link": "https://news.google.com/rss/articles/CBMiT0FVX3lxTE9CdjVFdkx5UEZ2OHdoM3dUVEJucE5uYm5uNE5ocUNjT0FZbXYwR1hYYy1aTnV3Zzk2NmxnLXBmTmZVYXlRUW82MktubUViSDg?oc=5",
+  "published": "Sat, 10 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,550 INFO ---- RAG INGEST: original news ----
+{
+  "title": "????異?留됲엳??移대뱶濡?湲됱쬆 - ??쒓툑?듭떊臾?,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMibEFVX3lxTE5OcXVHREpERjh1WThQMlN1ak5YeGo5bXZDaWNQMk44dlZDV1BWVS13d1I5aTE1MkI0SWFxSnJPdWVyLUdLV0xwajB1cjNmUHdhOWxMejg2UU5BcXVQN1dGOXdBbkE0eTdRRXR2Q9IBcEFVX3lxTE1KMll3TWZ2U0RRSE5ud0xmRGJJdTR1ekdzZHNLM2Fqb3c4dE9qV2tkT1RVNlNwX2tvNjNjdzdjNG9SbkhOeDRtVVg0RkJLOVFPeWNOQUNzV3hmOGo2dnlSTzUwMTJqMUdtNVlBM3pqRFA?oc=5\" target=\"_blank\">????異?留됲엳??移대뱶濡?湲됱쬆</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">??쒓툑?듭떊臾?/font>",
+  "link": "https://news.google.com/rss/articles/CBMibEFVX3lxTE5OcXVHREpERjh1WThQMlN1ak5YeGo5bXZDaWNQMk44dlZDV1BWVS13d1I5aTE1MkI0SWFxSnJPdWVyLUdLV0xwajB1cjNmUHdhOWxMejg2UU5BcXVQN1dGOXdBbkE0eTdRRXR2Q9IBcEFVX3lxTE1KMll3TWZ2U0RRSE5ud0xmRGJJdTR1ekdzZHNLM2Fqb3c4dE9qV2tkT1RVNlNwX2tvNjNjdzdjNG9SbkhOeDRtVVg0RkJLOVFPeWNOQUNzV3hmOGo2dnlSTzUwMTJqMUdtNVlBM3pqRFA?oc=5",
+  "published": "Mon, 05 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,551 INFO ---- RAG INGEST: original news ----
+{
+  "title": "移대뱶濡??붿븸 ?????곗냽 利앷?...????異쒕쭑?덉옄 湲됱쟾 ?섏슂 紐곕젮 - 以묒븰?쇰낫",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiVkFVX3lxTE1HNzJCMmZfc2lMZG1IVTlIek16eVE5bTBfQ3ZoVU5wNHc3b0QwS3dvOC11NlFIWTNCMEpNS2l0REJnOE96Rzd6N1JQeWZHVmphSVl5Q1dB?oc=5\" target=\"_blank\">移대뱶濡??붿븸 ?????곗냽 利앷?...????異쒕쭑?덉옄 湲됱쟾 ?섏슂 紐곕젮</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">以묒븰?쇰낫</font>",
+  "link": "https://news.google.com/rss/articles/CBMiVkFVX3lxTE1HNzJCMmZfc2lMZG1IVTlIek16eVE5bTBfQ3ZoVU5wNHc3b0QwS3dvOC11NlFIWTNCMEpNS2l0REJnOE96Rzd6N1JQeWZHVmphSVl5Q1dB?oc=5",
+  "published": "Sun, 04 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,551 INFO ---- RAG INGEST: original news ----
+{
+  "title": "移대뱶濡???섎?異??뺣???寃쎄퀬, ??묒씠 ?쒓툒?섎떎 - ?곗씪由ъ븞",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiVkFVX3lxTE1QdkI5MWJmZGRmRlg0dFpBUWFERGV0MmNPTGtTSXBEYndLQ0V4SFRMTkNTSkRCWGJJMGZBYktSd05jdlpXZlM1M1dORUZQeXpXOWhueE9R0gFYQVVfeXFMTkI5T1VtVm82dktYcEJDd1NkZnQ3RnpxX3RkaWVIODlESUpfTlgwUnlhem9fLVVyQV9VaW50SGkxVHM0MUZwU0Z6RWxMTHppdUVGWnQtcFVJVA?oc=5\" target=\"_blank\">移대뱶濡???섎?異??뺣???寃쎄퀬, ??묒씠 ?쒓툒?섎떎</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?곗씪由ъ븞</font>",
+  "link": "https://news.google.com/rss/articles/CBMiVkFVX3lxTE1QdkI5MWJmZGRmRlg0dFpBUWFERGV0MmNPTGtTSXBEYndLQ0V4SFRMTkNTSkRCWGJJMGZBYktSd05jdlpXZlM1M1dORUZQeXpXOWhueE9R0gFYQVVfeXFMTkI5T1VtVm82dktYcEJDd1NkZnQ3RnpxX3RkaWVIODlESUpfTlgwUnlhem9fLVVyQV9VaW50SGkxVHM0MUZwU0Z6RWxMTHppdUVGWnQtcFVJVA?oc=5",
+  "published": "Tue, 31 Mar 2026 22:07:00 GMT"
+}
+2026-04-16 00:27:23,551 INFO ---- RAG INGEST: original news ----
+{
+  "title": "?쒖뭅?쒕줎 湲덈━媛 ??븘議뚮떎?붾뜲?앪?뭅?쒖궗???꾨왂 蹂?? ?? - 留ㅼ씪寃쎌젣",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiVEFVX3lxTE82c3VndFpaMTBxanBlSGU5NkJBbnFiSVczQjVsZFpubTNwN3ZOLVY0elF6S2YyRVlkcEdld25POTNzaFo4Q2wxVDNoNGJsc1E4aFljZQ?oc=5\" target=\"_blank\">?쒖뭅?쒕줎 湲덈━媛 ??븘議뚮떎?붾뜲?앪?뭅?쒖궗???꾨왂 蹂?? ??</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">留ㅼ씪寃쎌젣</font>",
+  "link": "https://news.google.com/rss/articles/CBMiVEFVX3lxTE82c3VndFpaMTBxanBlSGU5NkJBbnFiSVczQjVsZFpubTNwN3ZOLVY0elF6S2YyRVlkcEdld25POTNzaFo4Q2wxVDNoNGJsc1E4aFljZQ?oc=5",
+  "published": "Wed, 04 Feb 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,552 INFO ---- RAG INGEST: original news ----
+{
+  "title": "43議곗썝 ?〓컯??移대뱶濡졻?“?ш툑由?4%? ?뚰뙆???異?湲덈━ ?몄긽 ?곕젮 - ??쒓꼍??,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMihgFBVV95cUxOTS1JMVhod3gtcTZBUG9rYXpQUEJwMU9GVVppdFg2NWV3T1ZNUEhNam1ScFRKSlNuejhqaHAtZWFpV2tQQ3B3QmlZbUFMcEFlRTcwazY3ME9iWmtuNlhxUV9hSXQ1bVQzSXUyS1dRTGs1LWx1OG5UN2dCZ1A5Z3ozMzRlZUlsZw?oc=5\" target=\"_blank\">43議곗썝 ?〓컯??移대뱶濡졻?“?ш툑由?4%? ?뚰뙆???異?湲덈━ ?몄긽 ?곕젮</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">??쒓꼍??/font>",
+  "link": "https://news.google.com/rss/articles/CBMihgFBVV95cUxOTS1JMVhod3gtcTZBUG9rYXpQUEJwMU9GVVppdFg2NWV3T1ZNUEhNam1ScFRKSlNuejhqaHAtZWFpV2tQQ3B3QmlZbUFMcEFlRTcwazY3ME9iWmtuNlhxUV9hSXQ1bVQzSXUyS1dRTGs1LWx1OG5UN2dCZ1A5Z3ozMzRlZUlsZw?oc=5",
+  "published": "Sun, 29 Mar 2026 03:00:13 GMT"
+}
+2026-04-16 00:27:23,552 INFO ---- RAG INGEST: original news ----
+{
+  "title": "????異?臾명꽦 ?믪븘吏??移대뱶濡??붿븸 ?????곗냽 利앷? - ?몃뜑?ㅽ듃由щ돱??,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMickFVX3lxTE5BU2NCRjVzX28wdWNGUlBzblJSUmw5aW9oWmxYR0E1bUxfb0tEbW9QTlFfRkp2d3VyY1plQTF2d2FGcUc3alZqVGpUMGNsaXNPU3MwM3RmU1BhM3YwU2VtRXlyc1NIeDl0M05sYnRzaEFjdw?oc=5\" target=\"_blank\">????異?臾명꽦 ?믪븘吏??移대뱶濡??붿븸 ?????곗냽 利앷?</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?몃뜑?ㅽ듃由щ돱??/font>",
+  "link": "https://news.google.com/rss/articles/CBMickFVX3lxTE5BU2NCRjVzX28wdWNGUlBzblJSUmw5aW9oWmxYR0E1bUxfb0tEbW9QTlFfRkp2d3VyY1plQTF2d2FGcUc3alZqVGpUMGNsaXNPU3MwM3RmU1BhM3YwU2VtRXlyc1NIeDl0M05sYnRzaEFjdw?oc=5",
+  "published": "Mon, 05 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,552 INFO ---- RAG INGEST: original news ----
+{
+  "title": "????異??쒗븳??湲됱쟾 ?異?移대뱶濡?湲됱쬆??1???붿븸 42.5議?- 留덉폆??,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMic0FVX3lxTE9hcHQ4Q0g0cmQ3WDRuYmhIU25MMDVfU3o3cDNmNTBIT2lpdEUxdXFHLWRWb3RMYnQ3YVo3aVpkREdZX0thNF9vV1lHc1ZyRjhhOHpudUxiQkxhMHNfZTJrYTRTRTJYaVZuVW9aRVoyNk5PMWs?oc=5\" target=\"_blank\">????異??쒗븳??湲됱쟾 ?異?移대뱶濡?湲됱쬆??1???붿븸 42.5議?/a>&nbsp;&nbsp;<font color=\"#6f6f6f\">留덉폆??/font>",
+  "link": "https://news.google.com/rss/articles/CBMic0FVX3lxTE9hcHQ4Q0g0cmQ3WDRuYmhIU25MMDVfU3o3cDNmNTBIT2lpdEUxdXFHLWRWb3RMYnQ3YVo3aVpkREdZX0thNF9vV1lHc1ZyRjhhOHpudUxiQkxhMHNfZTJrYTRTRTJYaVZuVW9aRVoyNk5PMWs?oc=5",
+  "published": "Mon, 05 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,553 INFO ---- RAG INGEST: original news ----
+{
+  "title": "????異?議곗씠?먥?뭅?쒕줎 '?띿꽑 ?④낵' - ?쒓뎅寃쎌젣",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiWkFVX3lxTE5CVzFLTXNjLVRxSGdzRkc0Z2ZWcjhUSnJweFRoZnZvc29uV1NROFU1dHJqOU1pTWFHa0Z3ZGpJNVJWUWFtTlVoUldmakJfb3AwQjdrVU9jWkVQQdIBVEFVX3lxTE9uYnlGZElSUmtxanYtUmZ6M3FfYWxfZmVSOFFobTJLajhTakxTRXVQUXVDTjZWaHNnVGo5STd0RzE1eV82OWRzdzZpTTE2alN6ZVJNbg?oc=5\" target=\"_blank\">????異?議곗씠?먥?뭅?쒕줎 '?띿꽑 ?④낵'</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?쒓뎅寃쎌젣</font>",
+  "link": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE5CVzFLTXNjLVRxSGdzRkc0Z2ZWcjhUSnJweFRoZnZvc29uV1NROFU1dHJqOU1pTWFHa0Z3ZGpJNVJWUWFtTlVoUldmakJfb3AwQjdrVU9jWkVQQdIBVEFVX3lxTE9uYnlGZElSUmtxanYtUmZ6M3FfYWxfZmVSOFFobTJLajhTakxTRXVQUXVDTjZWaHNnVGo5STd0RzE1eV82OWRzdzZpTTE2alN6ZVJNbg?oc=5",
+  "published": "Mon, 05 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,553 INFO ---- RAG INGEST: original news ----
+{
+  "title": "遺덉옣??'鍮싴닾'??퀬?좎슜??'湲됱쟾李쎄뎄' ??移대뱶濡?- ?쒓뎅寃쎌젣",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiWkFVX3lxTFBUWVd2Mzl4YzU1ZGZZeE4yYTBMeE9aeFYzZzlSdlg1cVN0cEFTbmtUSDVzTHdXZTBLcWFoM3BmS3daZU1xeEhZLWEyYkQ0MzdLclY5TzU1NEhlQdIBVEFVX3lxTE1DOWh1cjJPZUVPMndfN0VtOFhOSlRpNVlYVVRINWdBek14bVp5NXRVMkJZM2RvN3V3ZVRqSzgxSVk2dnJEZnUtcnN1RzRGZmlSY2JBcA?oc=5\" target=\"_blank\">遺덉옣??'鍮싴닾'??퀬?좎슜??'湲됱쟾李쎄뎄' ??移대뱶濡?/a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?쒓뎅寃쎌젣</font>",
+  "link": "https://news.google.com/rss/articles/CBMiWkFVX3lxTFBUWVd2Mzl4YzU1ZGZZeE4yYTBMeE9aeFYzZzlSdlg1cVN0cEFTbmtUSDVzTHdXZTBLcWFoM3BmS3daZU1xeEhZLWEyYkQ0MzdLclY5TzU1NEhlQdIBVEFVX3lxTE1DOWh1cjJPZUVPMndfN0VtOFhOSlRpNVlYVVRINWdBek14bVp5NXRVMkJZM2RvN3V3ZVRqSzgxSVk2dnJEZnUtcnN1RzRGZmlSY2JBcA?oc=5",
+  "published": "Thu, 19 Feb 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,554 INFO ---- RAG INGEST: original news ----
+{
+  "title": "[鍮④컙遺? 移대뱶濡? ?쒕쾲 ?곕㈃ 媛싳븘???좎슜?깃툒 '????湲덉쑖 ?異??대젮?뚯졇 - ?댁뒪?뚯튂",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiaEFVX3lxTE14NG4zSkxyWUNXRnBjYXFRUG9yUW13VGc4aGV2MThxeHp4TXF0TmhnaFdlUTctWHJIVGxpc0ZUOHR4T1g5TnB5T3pvSjhCSjZjU2pQdUI2b3pSd2FhMWhHNWZOc3dDdjR6?oc=5\" target=\"_blank\">[鍮④컙遺? 移대뱶濡? ?쒕쾲 ?곕㈃ 媛싳븘???좎슜?깃툒 '????湲덉쑖 ?異??대젮?뚯졇</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?댁뒪?뚯튂</font>",
+  "link": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE14NG4zSkxyWUNXRnBjYXFRUG9yUW13VGc4aGV2MThxeHp4TXF0TmhnaFdlUTctWHJIVGxpc0ZUOHR4T1g5TnB5T3pvSjhCSjZjU2pQdUI2b3pSd2FhMWhHNWZOc3dDdjR6?oc=5",
+  "published": "Thu, 22 Jan 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,554 INFO ---- RAG INGEST: original news ----
+{
+  "title": "??좎슜???좎슜?異?11% 媛먯냼??뭅?쒕줎쨌?遺??鍮꾩쨷 60% - 留ㅼ씪寃쎌젣TV",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiaEFVX3lxTE54cEkxMENxY0lfSno0Y0tDVVZBRW1QaEhiV2tqSHhpTHV3WkpEYXVfMmdJLWRzTHplS1U5NGhoX09HZ1NYTE1VN0xMXzZWRUlJczFRRUN3WHM5eXVjREF0ZExqay1YdWNa?oc=5\" target=\"_blank\">??좎슜???좎슜?異?11% 媛먯냼??뭅?쒕줎쨌?遺??鍮꾩쨷 60%</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">留ㅼ씪寃쎌젣TV</font>",
+  "link": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE54cEkxMENxY0lfSno0Y0tDVVZBRW1QaEhiV2tqSHhpTHV3WkpEYXVfMmdJLWRzTHplS1U5NGhoX09HZ1NYTE1VN0xMXzZWRUlJczFRRUN3WHM5eXVjREF0ZExqay1YdWNa?oc=5",
+  "published": "Mon, 23 Mar 2026 07:00:00 GMT"
+}
+2026-04-16 00:27:23,554 INFO ---- RAG INGEST: original news ----
+{
+  "title": "??좎슜???좎슜?異?11% 湲됯컧??퀬湲덈━ 移대뱶濡졖룸?遺???좊┝ ?ы솕 - ?뱀깋寃쎌젣?좊Ц",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiaEFVX3lxTFAzN280bkJYWHZkcVQ0TVE0Y3NJM3JyOFR5bzFGa0x2WUhhVjhFZGNLM3A0SE9WRUE0b1dRNGc5Wmlua2tINTlsY1JlR0l2U0gwa094VWZORlU1dl9jSlhFSWthb19GdWFD?oc=5\" target=\"_blank\">??좎슜???좎슜?異?11% 湲됯컧??퀬湲덈━ 移대뱶濡졖룸?遺???좊┝ ?ы솕</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?뱀깋寃쎌젣?좊Ц</font>",
+  "link": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFAzN280bkJYWHZkcVQ0TVE0Y3NJM3JyOFR5bzFGa0x2WUhhVjhFZGNLM3A0SE9WRUE0b1dRNGc5Wmlua2tINTlsY1JlR0l2U0gwa094VWZORlU1dl9jSlhFSWthb19GdWFD?oc=5",
+  "published": "Mon, 23 Mar 2026 07:00:00 GMT"
+}
+2026-04-16 00:27:23,555 INFO ---- RAG INGEST: original news ----
+{
+  "title": "移대뱶濡?湲덈━, 怨좎떊?⑹옄 1.4%p ?⑥뼱吏?????좎슜?먮뒗 0.45%p留?- ?쒖슱寃쎌젣",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiUkFVX3lxTE9BZTdXOVVINERRVUl5cTZIQ2VGeUNwc0JVS0JsVV9vemhWN0lvWDRCLTFuOVNLQ3ZiLTd6WWxyVXh3bHNiQzlZU2xDc1hKS1N6dkHSAVNBVV95cUxNQ1MzQVlZOXVnWEFKOXI3bmx3VEZ4MzJSVmNPMmRYWFZhU2VMemQyWlNkd0t4RUk1TFQ0eFo1aktfYTFKZXUtUk9fVGlkS2duQWhIcw?oc=5\" target=\"_blank\">移대뱶濡?湲덈━, 怨좎떊?⑹옄 1.4%p ?⑥뼱吏?????좎슜?먮뒗 0.45%p留?/a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?쒖슱寃쎌젣</font>",
+  "link": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE9BZTdXOVVINERRVUl5cTZIQ2VGeUNwc0JVS0JsVV9vemhWN0lvWDRCLTFuOVNLQ3ZiLTd6WWxyVXh3bHNiQzlZU2xDc1hKS1N6dkHSAVNBVV95cUxNQ1MzQVlZOXVnWEFKOXI3bmx3VEZ4MzJSVmNPMmRYWFZhU2VMemQyWlNkd0t4RUk1TFQ0eFo1aktfYTFKZXUtUk9fVGlkS2duQWhIcw?oc=5",
+  "published": "Fri, 03 Apr 2026 07:32:46 GMT"
+}
+2026-04-16 00:27:23,555 INFO ---- RAG INGEST: original news ----
+{
+  "title": "議곕떖湲덈━??移대뱶濡?湲덈━?볛?뭅?쒖궗 ?섎쭏吏??뺣컯??- ??쒓툑?듭떊臾?,
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMibEFVX3lxTE9CNE01Z0x1WmZoZE5oVlh6elpiNTllTGZnT0pfcE43YUhVN0lpS0p1SVMwb1RxMkdnWGoyQ1VYWjZEQkZNVFktelpnVUNQQnUwWGQ2ZlVvS2I2RUJwckZpQkZnN29oNG0zSERvZNIBcEFVX3lxTE9KUmxURXNURWlSMnEyT3BmWGpjUHFJMkN4b2RFc1FNdElfQzRDbm9TLWV4eW40S1NBQm9ObGg4WXpDcXdKSzYwY29iMzVrUmRpcE5RcmYxWU5pVXIzeWU1VlhUUEN5cDBnRHhkQzY2NUQ?oc=5\" target=\"_blank\">議곕떖湲덈━??移대뱶濡?湲덈━?볛?뭅?쒖궗 ?섎쭏吏??뺣컯??/a>&nbsp;&nbsp;<font color=\"#6f6f6f\">??쒓툑?듭떊臾?/font>",
+  "link": "https://news.google.com/rss/articles/CBMibEFVX3lxTE9CNE01Z0x1WmZoZE5oVlh6elpiNTllTGZnT0pfcE43YUhVN0lpS0p1SVMwb1RxMkdnWGoyQ1VYWjZEQkZNVFktelpnVUNQQnUwWGQ2ZlVvS2I2RUJwckZpQkZnN29oNG0zSERvZNIBcEFVX3lxTE9KUmxURXNURWlSMnEyT3BmWGpjUHFJMkN4b2RFc1FNdElfQzRDbm9TLWV4eW40S1NBQm9ObGg4WXpDcXdKSzYwY29iMzVrUmRpcE5RcmYxWU5pVXIzeWU1VlhUUEN5cDBnRHhkQzY2NUQ?oc=5",
+  "published": "Thu, 05 Mar 2026 08:00:00 GMT"
+}
+2026-04-16 00:27:23,556 INFO ---- RAG INGEST: original news ----
+{
+  "title": "\"移대뱶?異??곗껜 1議?000????? 理쒓퀬\"...媛뺣?援?\"湲덉쑖?밴뎅 '移대뱶濡??異? 愿由?泥좎??댁빞\" - v.daum.net",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMiT0FVX3lxTFBlYkdqZV81czNrdDdoY1YwMjA2RWF6RU5xV0cyNlhndEVsUUdFc0NnQVpPTEp4RHhZZzFaZ1ZYWjdmUG5zX0JGMzJHY1hhaFU?oc=5\" target=\"_blank\">\"移대뱶?異??곗껜 1議?000????? 理쒓퀬\"...媛뺣?援?\"湲덉쑖?밴뎅 '移대뱶濡??異? 愿由?泥좎??댁빞\"</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">v.daum.net</font>",
+  "link": "https://news.google.com/rss/articles/CBMiT0FVX3lxTFBlYkdqZV81czNrdDdoY1YwMjA2RWF6RU5xV0cyNlhndEVsUUdFc0NnQVpPTEp4RHhZZzFaZ1ZYWjdmUG5zX0JGMzJHY1hhaFU?oc=5",
+  "published": "Wed, 22 Oct 2025 07:00:00 GMT"
+}
+2026-04-16 00:27:23,556 INFO ---- RAG INGEST: original news ----
+{
+  "title": "?꾧툑?쒕퉬??以꾧퀬 移대뱶濡졖룸━蹂쇰튃 ?섍퀬쨌쨌쨌?섎텋?⑺삎 ?異쒋숈쓽 洹몃뒛 - ?대돱?ㅽ닾?곗씠",
+  "summary": "<a href=\"https://news.google.com/rss/articles/CBMicEFVX3lxTFBvUDNyOWt5VjdOZUxoRl92WEx5bHFPRTdsMkhoVzFXMjF5U1d5czhKZE1fZ05JdFNKd0VRc2pRcS1sQ19la1doTVNmWWp4clNKM29TaVhyVjFuMk84NmRPclBOSzlSdDVLUm1BV1BLZlTSAXRBVV95cUxNeEc3eHJXLWlpSVRHNHM2OWkyRFBpSU9SV3JtV2dlX292QXJlTDU4czQzVC1xOV9HZDNHMmhVbUs0UXljY1JVZVQ0cXRNeXRMcW0wTTZOQzBHYWd2S1pOVnRMUVNuc0ZKOGZzdnlUMllUTEwyVw?oc=5\" target=\"_blank\">?꾧툑?쒕퉬??以꾧퀬 移대뱶濡졖룸━蹂쇰튃 ?섍퀬쨌쨌쨌?섎텋?⑺삎 ?異쒋숈쓽 洹몃뒛</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">?대돱?ㅽ닾?곗씠</font>",
+  "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTFBvUDNyOWt5VjdOZUxoRl92WEx5bHFPRTdsMkhoVzFXMjF5U1d5czhKZE1fZ05JdFNKd0VRc2pRcS1sQ19la1doTVNmWWp4clNKM29TaVhyVjFuMk84NmRPclBOSzlSdDVLUm1BV1BLZlTSAXRBVV95cUxNeEc3eHJXLWlpSVRHNHM2OWkyRFBpSU9SV3JtV2dlX292QXJlTDU4czQzVC1xOV9HZDNHMmhVbUs0UXljY1JVZVQ0cXRNeXRMcW0wTTZOQzBHYWd2S1pOVnRMUVNuc0ZKOGZzdnlUMllUTEwyVw?oc=5",
+  "published": "Mon, 23 Mar 2026 07:00:00 GMT"
+}
+2026-04-16 00:28:56,022 INFO ---- RAG INGEST: agent report ----
+{
+  "agent": "log",
+  "title": "periodic log briefing",
+  "content": " 1) ?먯씤\n   - ?좎엯 濡쒓렇?먯꽌??C11 ?곹뭹怨?C6 ?곹뭹???좎껌??諛섎났?섍퀬 ?덉뒿?덈떎. (Case 1, Case 2 ?좎궗)\n   - C6 ?곹뭹? Sub-prime遺?ㅼ삁痢〓え???깃툒?먯꽌 '02'濡?留ㅼ슦 ?믪? ?꾪뿕??蹂댁씠怨??덉뒿?덈떎. (Case 3 ?좎궗)\n   - C11 ?곹뭹??AS?깃툒怨?CBML?깃툒????븘 ?좎슜?깃툒??臾몄젣媛 ?덈뒗 寃껋쑝濡??먮떒?????덉뒿?덈떎.\n\n2) 議곗튂\n   - ?곗꽑, 怨좉컼 ?좎껌???뺤씤?섏뿬 C6 ?곹뭹???꾪뿕 ?붿냼瑜?紐낇솗???섍퀬 ?곸젅???異??곹뭹??異붿쿇?댁빞 ?⑸땲?? (Case 2 ?좎궗)\n   - ?먰븳, C11 ?곹뭹??AS?깃툒怨?CBML?깃툒???μ긽?쒗궎湲??꾪빐 ?좎슜 愿由ъ? ?됯? ?꾨줈?몄뒪瑜?媛뺥솕?섍퀬, ?꾩슂???곕씪 ?좎슜 議곗젙???듯빐 ?좎슜?깃툒 媛쒖꽑???섏벐??寃껋씠 以묒슂?⑸땲??\n   - 理쒖쥌?쇰줈, ?좉퇋 ?ъ슜?먭? C6 ?곹뭹???꾪뿕?붿냼? ?異??섑삙 媛?μ꽦???댄빐?섍린 ?ъ슫 援먯쑁 ?꾨줈洹몃옩??媛쒕컻?섍퀬 ?쒓났?댁빞 ?⑸땲?? (Case 2 ?좎궗)\n\n踰덊샇留ㅺ꺼??\n1) ?먯씤\n   - A: ?숈씪???곹뭹??諛섎났?곸씤 ?좎껌\n   - B: C6 ?곹뭹??Sub-prime遺?ㅼ삁痢〓え???깃툒??留ㅼ슦 ?믪쓬\n   - C: C11 ?곹뭹??AS?깃툒怨?CBML?깃툒??臾몄젣媛 ?덉쓬\n\n2) 議곗튂\n   - D: 怨좉컼 ?좎껌???뺤씤?섏뿬 ?곸젅???異??곹뭹 異붿쿇\n   - E: C11 ?곹뭹??AS?깃툒怨?CBML?깃툒 ?μ긽 諛??좎슜 愿由?議곗젙\n   - F: ?좉퇋?ъ슜?먮? ?꾪븳 援먯쑁 ?꾨줈洹몃옩 媛쒕컻 諛??쒓났"
+}
+2026-04-16 00:29:07,735 INFO ---- RAG INGEST: agent report ----
+{
+  "agent": "log",
+  "title": "periodic log briefing",
+  "content": " 1) ?먯씤 (Cause)\n   - ?곹뭹 C11怨?C6?먯꽌 ?쇱씪???좎껌???異?嫄댁쓽 ?뱀씤媛?μ꽦怨??꾪뿕?⑦꽩??議곗궗??寃곌낵, ?믪? ?꾪뿕?꾩? 嫄곕??????덈뒗 媛?μ꽦???덉쓬.\n   - (Case 1) 湲덉쑖?쒖옣?먯꽌 ???⑹뼱由?移대뱶濡좉낵 媛숈? '遺덊솴???異???利앹긽??蹂댁뿬二쇰뒗 湲곗궗濡쒕????믪? ?꾪뿕?꾩? ?곗껜?⑥씠 鍮꾩젙?곸쟻?쇰줈 ?믪쓬???좎텛?????덉쓬.\n   - (Case 3) 湲덉쑖?쒕퉬??以꾧퀬 移대뱶濡졖룸━蹂쇰튃??利앹긽??蹂댁뿬二쇰뒗 湲곗궗?먯꽌???믪? ?꾪뿕?꾩? ?곗껜?⑥씠 鍮꾩젙?곸쟻?쇰줈 ?믪쓬???좎텛?????덉쓬.\n\n2) 議곗튂 (Action)\n   - ?곗꽑, 湲덉쑖 濡쒓렇 ?곗씠?곕? 遺꾩꽍?섏뿬 怨좉컼???異??좎껌 怨쇱젙?먯꽌 諛쒖깮?섎뒗 ?믪? ?꾪뿕?꾩? ?곗껜?⑥쓣 ?뚯븙?⑸땲?? (Case 1, Case 3)\n   - ?ㅼ쓬?쇰줈, 怨좉컼 ?異??좎껌?먮즺瑜?寃?좏븯??異붽??곸씤 ?뺣낫瑜??섏쭛?⑸땲?? ?대? ?듯빐 怨좉컼???異??좎껌 怨쇱젙?먯꽌 諛쒖깮?????덈뒗 ?꾪뿕?붿냼瑜??뚯븙?⑸땲?? (Case 2)\n   - 洹명썑, 濡쒓렇 遺꾩꽍???듯븳 寃곌낵? 異붽??곸쑝濡??섏쭛???뺣낫瑜?諛뷀깢?쇰줈 ?대떦 怨좉컼???異??좎껌??????뱀씤 ?щ?瑜??먮떒?⑸땲?? (Case 1, Case 3)\n   - ?먰븳, ?믪? ?꾪뿕?꾩? ?곗껜?⑥씠 諛쒖깮?섎뒗 ?곗씠?곕? 遺꾩꽍?섏뿬 ?꾨컲?곸씤 ?異??좎껌怨쇱젙?먯꽌???꾪뿕?붿냼? ?곗껜 ?덉륫??媛쒖꽑?⑸땲?? (Case 1, Case 3)"
+}

@@ -1,0 +1,311 @@
+import os
+import time
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+from agent.strategy_chat import strategy_chat
+from analyzer.log_analyzer import analyze_logs
+from analyzer.risk_analyzer import calculate_risk
+from agent.news_agent import collect_news, analyze_news
+# rag.vector_db may load heavy ML models (FAISS / HuggingFace). Provide a
+# lightweight fallback when those dependencies are not available so the
+# Streamlit UI can start quickly for local testing.
+try:
+    from rag.vector_db import build_vector_db, get_vector_count
+except Exception:
+    def build_vector_db(results, news):
+        print("[경량모드] build_vector_db 호출이 무시되었습니다.")
+
+    def get_vector_count():
+        return 0
+
+st.set_page_config(page_title="AI 대출 심사", layout="wide")
+st.title("🔥 AI 대출 심사 대시보드")
+
+# 배경 애니메이션: 그라디언트가 천천히 움직이는 효과
+st.markdown(
+    """
+    <style>
+    html, body { height: 100%; }
+    .streamlit-app-background {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
+      background: linear-gradient(270deg, #0f172a, #001219, #071e3d, #04293a);
+      background-size: 800% 800%; animation: gradientBG 20s ease infinite;
+      opacity: 0.12; filter: blur(20px);
+    }
+    @keyframes gradientBG { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+    .stApp > .main > div { background: rgba(255,255,255,0.9); }
+    </style>
+    <div class="streamlit-app-background"></div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# -------------------------------
+# 📁 로그 로딩
+# -------------------------------
+
+def load_all_logs(log_dir="data/logs"):
+    logs = ""
+    count = 0
+    if not os.path.exists(log_dir):
+        return logs, count
+    for f in os.listdir(log_dir):
+        if f.endswith(".txt") or f.endswith(".log"):
+            with open(os.path.join(log_dir, f), encoding="utf-8") as file:
+                logs += file.read()
+                count += 1
+    return logs, count
+
+
+# -------------------------------
+# 유틸: 뉴스 스니펫 및 키워드 추출
+# -------------------------------
+
+def get_news_snippets(k=10):
+    try:
+        _, news_snips, _ = search_context("뉴스", k=k)
+        return news_snips
+    except Exception:
+        try:
+            news = collect_news()
+            return [f"{n.get('title','')}: {n.get('content','')[:200]}" for n in (news or [])[:k]]
+        except Exception:
+            return []
+
+
+def extract_keywords(snippets, top_n=10):
+    import re
+    text = "\n".join(snippets)
+    kor = re.findall(r'[가-힣]{2,}', text)
+    eng = re.findall(r'[A-Za-z]{2,}', text)
+    words = [w for w in kor + eng if len(w) > 1]
+    freq = {}
+    for w in words:
+        freq[w] = freq.get(w, 0) + 1
+    items = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    return items
+
+
+# -------------------------------
+# 레이아웃
+# -------------------------------
+col_left, col_main = st.columns([1, 3])
+
+# -------------------------------
+# LEFT PANEL
+# -------------------------------
+with col_left:
+    st.header("⚙️ 실행")
+
+    if st.button("📂 전체 분석 실행"):
+        progress = st.progress(0)
+        status = st.empty()
+        start = time.time()
+
+        raw, file_count = load_all_logs()
+        progress.progress(10)
+
+        status.info("🔍 로그 분석 중...")
+        results = analyze_logs(raw)
+        progress.progress(40)
+
+        status.info("📰 뉴스 분석 중...")
+        news = collect_news()
+        issues = analyze_news(news)
+        progress.progress(70)
+
+        status.info("🧠 FAISS 생성 중...")
+        build_vector_db(results, news)
+        progress.progress(100)
+
+        status.success("✅ 완료!")
+
+        st.session_state.results = results
+        st.session_state.issues = issues
+        st.session_state.file_count = file_count
+        st.session_state.total_time = time.time() - start
+
+    # 샘플 데이터 생성 (로컬 테스트용)
+    if st.button("🧪 샘플 데이터 생성"):
+        sample_logs = []
+        products = ["C6", "C9", "C11", "C12"]
+        for i in range(8):
+            prod = products[i % len(products)]
+            in_fields = {
+                "A2001": 5000000 * (i + 1),
+                "CREDIT_SCORE": 650 - (i % 4) * 40,
+                "INCOME": 2500000 + (i % 5) * 400000,
+                "LOAN_CNT": (i % 5),
+                "JOB_TYPE": "정규직" if i % 2 == 0 else "프리랜서",
+            }
+            out_fields = {"R0003": 25 + (i % 5) * 8, "OVERDUE_YN": "Y" if i % 5 == 3 else "N"}
+            sample_logs.append({
+                "product": prod,
+                "in_fields": in_fields,
+                "out_fields": out_fields,
+                "in_mapping": {k: k for k in in_fields.keys()},
+                "out_mapping": {k: k for k in out_fields.keys()},
+            })
+        st.session_state.results = sample_logs
+        st.session_state.file_count = len(sample_logs)
+        st.session_state.total_time = 0.1
+
+    # 자동 새로고침 설정
+    if "auto_refresh" not in st.session_state:
+        st.session_state.auto_refresh = False
+    if "auto_interval" not in st.session_state:
+        st.session_state.auto_interval = 3
+
+    st.caption("자동 새로고침")
+    ar_col1, ar_col2 = st.columns([1, 1])
+    with ar_col1:
+        st.session_state.auto_refresh = st.checkbox("Auto-refresh", value=st.session_state.auto_refresh)
+    with ar_col2:
+        st.session_state.auto_interval = st.slider("간격(초)", min_value=1, max_value=10, value=st.session_state.auto_interval)
+
+    # 벡터 히스토리 초기화
+    if "vector_history" not in st.session_state:
+        st.session_state.vector_history = []
+
+    st.divider()
+
+    if "results" in st.session_state:
+        st.subheader("📊 상태")
+        st.metric("📁 파일 수", st.session_state.file_count)
+        st.metric("📊 로그 수", len(st.session_state.results))
+        st.metric("🧠 벡터 수", get_vector_count())
+        st.metric("⏱️ 시간", f"{st.session_state.total_time:.1f}s")
+
+
+# -------------------------------
+# MAIN
+# -------------------------------
+with col_main:
+    st.header("💬 AI 심사 전략")
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    user_input = st.chat_input("질문 입력 (예: 승인율 올리는 방법?)")
+    if user_input:
+        with st.spinner("🧠 전략 생성 중..."):
+            answer = strategy_chat(user_input)
+        st.session_state.chat_history.append(("user", user_input))
+        st.session_state.chat_history.append(("ai", answer))
+
+    for role, msg in st.session_state.chat_history:
+        if role == "user":
+            st.chat_message("user").write(msg)
+        else:
+            st.chat_message("assistant").write(msg)
+
+    st.divider()
+
+    # 결과 대시보드
+    if "results" in st.session_state:
+        results = st.session_state.results
+        st.subheader("📊 제품별 실시간 리스크 대시보드 (C6, C9, C11, C12)")
+
+        products = ["C6", "C9", "C11", "C12"]
+        per_prod = {p: [] for p in products}
+        raw_by_product = {p: [] for p in products}
+        for r in results:
+            p = r.get("product") or ""
+            if p in products:
+                risk = calculate_risk(r.get("in_fields", {}), r.get("out_fields", {}), r.get("in_mapping", {}), r.get("out_mapping", {}), product=p)
+                raw_by_product[p].append({"score": risk["score"], "grade": risk["grade"]})
+
+        max_len = max((len(v) for v in raw_by_product.values()), default=0)
+        frames = []
+        for t in range(1, max_len + 1):
+            for p in products:
+                prev = per_prod[p][-1] if per_prod[p] else {"score": 0, "grade": "N/A"}
+                item = raw_by_product[p][t-1] if t-1 < len(raw_by_product[p]) else prev
+                row = {"frame": t, "time": t, "product": p, "score": item.get("score", 0), "grade": item.get("grade", "N/A")}
+                per_prod[p].append(row)
+                frames.append(row)
+
+        anim_df = pd.DataFrame(frames) if frames else pd.DataFrame(columns=["frame", "time", "product", "score", "grade"])
+
+        # 4분면 레이아웃: TL=뉴스, TR=제품 트렌드, BL=제품 요약, BR=벡터
+        top_left, top_right = st.columns(2)
+        bot_left, bot_right = st.columns(2)
+
+        # Top-left: 뉴스 키워드 (우선 노출)
+        with top_left:
+            st.markdown("### 실시간 뉴스 키워드")
+            snippets = get_news_snippets(20)
+            keywords = extract_keywords(snippets, top_n=12)
+            if not snippets:
+                st.info("사용 가능한 뉴스가 없습니다. FAISS가 생성되었는지 확인하세요.")
+            else:
+                if keywords:
+                    kw_df = pd.DataFrame(keywords, columns=["keyword", "count"]) 
+                    fig_kw = px.bar(kw_df, x="keyword", y="count", title="Top 뉴스 키워드")
+                    st.plotly_chart(fig_kw, use_container_width=True)
+                with st.expander("원문 뉴스/스니펫 보기", expanded=False):
+                    for s in snippets[:10]:
+                        st.write(s)
+
+        # Top-right: 제품별 애니메이션 라인
+        with top_right:
+            st.markdown("### 제품별 점수 트렌드")
+            if anim_df.empty:
+                st.info("표시할 제품별 데이터가 없습니다. '샘플 데이터 생성'을 눌러 테스트하세요.")
+            else:
+                fig = px.line(anim_df, x="time", y="score", color="product", animation_frame="frame", range_y=[0, anim_df["score"].max() + 20])
+                fig.update_layout(transition={"duration": 400})
+                st.plotly_chart(fig, use_container_width=True)
+
+        # Bottom-left: 제품 요약 + 최신 점수
+        with bot_left:
+            st.markdown("### 제품 요약")
+            cols = st.columns(len(products))
+            color_map = {"HIGH": "#ff4d4f", "MEDIUM": "#ffa940", "LOW": "#52c41a", "N/A": "#999"}
+            latest_rows = []
+            for i, p in enumerate(products):
+                last = per_prod[p][-1] if per_prod[p] else {"score": 0, "grade": "N/A"}
+                with cols[i]:
+                    st.markdown(f"**{p}**")
+                    st.markdown(f"<div style='font-size:22px;font-weight:700;color:{color_map.get(last['grade'],'#333')}'>{int(last['score'])}</div>", unsafe_allow_html=True)
+                    st.markdown(f"등급: **{last['grade']}**")
+                if per_prod[p]:
+                    latest_rows.append({"product": p, "score": per_prod[p][-1]["score"]})
+            if latest_rows:
+                df_latest = pd.DataFrame(latest_rows)
+                fig_bar = px.bar(df_latest, x="product", y="score", title="제품별 최신 점수")
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+        # Bottom-right: 벡터 상태
+        with bot_right:
+            st.markdown("### 벡터 저장 상태")
+            vc = get_vector_count()
+            vh = st.session_state.get("vector_history", [])
+            vh.append(int(vc))
+            if len(vh) > 60:
+                vh = vh[-60:]
+            st.session_state.vector_history = vh
+            cap = max(10, len(results) * 5)
+            stored = int(vc)
+            remaining = max(0, cap - stored)
+            fig_donut = px.pie(names=["Stored", "Remaining"], values=[stored, remaining], hole=0.6)
+            fig_donut.update_traces(textinfo='percent+label')
+            st.plotly_chart(fig_donut, use_container_width=True)
+            st.caption(f"벡터 카운트: {stored} / cap {cap}")
+            df_v = pd.DataFrame({"vector_count": st.session_state.vector_history})
+            df_v.index = pd.RangeIndex(start=0, stop=len(df_v))
+            st.line_chart(df_v)
+
+        # 자동 새로고침 처리
+        if st.session_state.get("auto_refresh"):
+            time.sleep(max(1, int(st.session_state.get("auto_interval", 3))))
+            try:
+                params = {"_autorefresh": int(time.time())}
+                st.experimental_set_query_params(**params)
+            except Exception:
+                try:
+                    st.stop()
+                except Exception:
+                    pass

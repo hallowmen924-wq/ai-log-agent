@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+_reject_code_mapping_cache: dict[
+    str, tuple[tuple[tuple[str, int, int], ...], dict[str, dict[str, str]]]
+] = {}
+_PREFERRED_MAPPING_FILES = ("ko_full.xlsx", "ko_supplement.csv")
+
+
+def _normalize_column_name(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text.replace(" ", "")
+
+
+def _pick_column(columns: list[str], candidates: list[str]) -> str | None:
+    normalized = {_normalize_column_name(col): col for col in columns}
+    for candidate in candidates:
+        matched = normalized.get(_normalize_column_name(candidate))
+        if matched:
+            return matched
+    for col in columns:
+        norm = _normalize_column_name(col)
+        if any(candidate in norm for candidate in candidates):
+            return col
+    return None
+
+
+def _load_mapping_from_frame(df: pd.DataFrame) -> dict[str, dict[str, str]]:
+    if df.empty:
+        return {}
+
+    frame = df.copy()
+    frame.columns = [str(col).strip() for col in frame.columns]
+    columns = list(frame.columns)
+
+    code_col = _pick_column(columns, ["코드", "rclips코드", "심사코드"])
+    desc_col = _pick_column(columns, ["설명", "항목명", "사유"])
+    risk_col = _pick_column(columns, ["리스크레벨", "리스크", "등급"])
+
+    # Some KO Excel files are saved with legacy encodings and can surface as mojibake.
+    # Fall back to positional columns so KO_full.xlsx still maps reject reasons reliably.
+    if not code_col and columns:
+        code_col = columns[0]
+    if not desc_col and len(columns) >= 3:
+        desc_col = columns[2]
+    elif not desc_col and len(columns) >= 2:
+        desc_col = columns[1]
+    if not risk_col and len(columns) >= 4:
+        risk_col = columns[3]
+
+    if not code_col or not desc_col:
+        return {}
+
+    mapping: dict[str, dict[str, str]] = {}
+    for _, row in frame.iterrows():
+        code = str(row.get(code_col, "") or "").strip().upper()
+        if not re.fullmatch(r"K\d{3}", code):
+            continue
+
+        raw_description = row.get(desc_col, "")
+        raw_risk_level = row.get(risk_col, "") if risk_col else ""
+        if pd.isna(raw_description):
+            raw_description = ""
+        if pd.isna(raw_risk_level):
+            raw_risk_level = ""
+
+        description = str(raw_description or "").strip()
+        risk_level = str(raw_risk_level or "").strip() if risk_col else ""
+        if not description:
+            continue
+
+        mapping[code] = {
+            "description": description,
+            "risk_level": risk_level,
+        }
+
+    return mapping
+
+
+def load_reject_code_mapping(data_dir: str | Path) -> dict[str, dict[str, str]]:
+    base_dir = str(Path(data_dir).resolve())
+    search_dir = Path(base_dir)
+    if not search_dir.exists():
+        _reject_code_mapping_cache[base_dir] = ((), {})
+        return {}
+
+    preferred_candidates = [search_dir / file_name for file_name in _PREFERRED_MAPPING_FILES]
+    candidates = [path for path in preferred_candidates if path.exists()]
+    if not candidates:
+        candidates = sorted(
+            [
+                path
+                for path in search_dir.iterdir()
+                if path.suffix.lower() in {".xlsx", ".xls", ".csv"}
+            ],
+            key=lambda path: (
+                0 if "ko_full" in path.name.lower() else 1,
+                0 if path.suffix.lower() == ".csv" else 1,
+                path.name.lower(),
+            ),
+        )
+    signature = tuple(
+        (path.name.lower(), int(path.stat().st_mtime_ns), int(path.stat().st_size))
+        for path in candidates
+    )
+
+    cached = _reject_code_mapping_cache.get(base_dir)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+
+    mapping: dict[str, dict[str, str]] = {}
+
+    for path in candidates:
+        try:
+            if path.suffix.lower() == ".csv":
+                frame = pd.read_csv(path)
+                mapping.update(_load_mapping_from_frame(frame))
+                continue
+
+            excel_file = pd.ExcelFile(path)
+            preferred_sheets = sorted(
+                excel_file.sheet_names,
+                key=lambda name: (
+                    0 if "ko" in str(name).lower() and "full" in str(name).lower() else 1,
+                    0 if "심사" in str(name) else 1,
+                    str(name),
+                ),
+            )
+            for sheet_name in preferred_sheets:
+                frame = pd.read_excel(path, sheet_name=sheet_name)
+                sheet_mapping = _load_mapping_from_frame(frame)
+                if sheet_mapping:
+                    mapping.update(sheet_mapping)
+        except Exception:
+            continue
+
+    _reject_code_mapping_cache[base_dir] = (signature, mapping)
+    return mapping
+
+
+def _normalize_fallback_description(text: str) -> str:
+    cleaned = re.sub(r"[\x00-\x1f]+", " ", str(text or ""))
+    cleaned = re.sub(r"^[\s:=,;/\-|\[\](){}]+", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:/|-[](){}")
+    if not cleaned:
+        return ""
+    if re.fullmatch(r"(?:K\d{3}[\s,;/:\-|]*)+", cleaned, re.I):
+        return ""
+    return cleaned[:120]
+
+
+def extract_reject_reason_candidates(out_data: str) -> list[dict[str, str]]:
+    if not out_data:
+        return []
+
+    seen: set[str] = set()
+    candidates: list[dict[str, str]] = []
+    for segment in re.split(r"KORLT", str(out_data), flags=re.I)[1:]:
+        match = re.search(r"(K\d{3})", segment, re.I)
+        if not match:
+            continue
+        code = match.group(1).upper()
+        if code in seen:
+            continue
+        seen.add(code)
+        candidates.append(
+            {
+                "code": code,
+                "fallback_description": _normalize_fallback_description(
+                    segment[match.end() :]
+                ),
+            }
+        )
+
+    if candidates:
+        return candidates
+
+    for code in re.findall(r"\bK\d{3}\b", str(out_data).upper()):
+        if code in seen:
+            continue
+        seen.add(code)
+        candidates.append({"code": code, "fallback_description": ""})
+    return candidates
+
+
+def extract_reject_reason_codes(out_data: str) -> list[str]:
+    return [candidate["code"] for candidate in extract_reject_reason_candidates(out_data)]
+
+
+def extract_reject_reason_fallbacks(out_data: str) -> dict[str, str]:
+    return {
+        candidate["code"]: candidate["fallback_description"]
+        for candidate in extract_reject_reason_candidates(out_data)
+        if candidate.get("fallback_description")
+    }
+
+
+def map_reject_reason_codes(
+    codes: list[str],
+    mapping: dict[str, dict[str, str]],
+    fallback_descriptions: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    fallback_descriptions = fallback_descriptions or {}
+    for code in codes:
+        mapped = mapping.get(code, {})
+        description = str(mapped.get("description", "") or "").strip()
+        if not description:
+            description = str(fallback_descriptions.get(code, "") or "").strip()
+        results.append(
+            {
+                "code": code,
+                "description": description,
+                "risk_level": str(mapped.get("risk_level", "") or "").strip(),
+            }
+        )
+    return results
+
+
+def format_reject_reason_details(
+    details: list[dict[str, str]], limit: int = 5
+) -> list[str]:
+    formatted: list[str] = []
+    for item in details[:limit]:
+        code = str(item.get("code", "") or "").strip()
+        description = str(item.get("description", "") or "").strip()
+        risk_level = str(item.get("risk_level", "") or "").strip()
+
+        if description and risk_level:
+            formatted.append(f"{code}={description} ({risk_level})")
+        elif description:
+            formatted.append(f"{code}={description}")
+        elif code:
+            formatted.append(code)
+    return formatted

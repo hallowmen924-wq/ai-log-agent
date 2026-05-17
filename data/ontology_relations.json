@@ -1,0 +1,100 @@
+{
+  "generated_at": "2026-05-15T00:00:00",
+  "source": {
+    "mode": "manual_seed",
+    "description": "Explainability-oriented ontology relation overrides. When a feature is listed here, these explicit 1-hop relations are preferred over derived graph neighbors."
+  },
+  "features": {
+    "applicant.age": {
+      "canonical_meaning": "신청자 연령",
+      "business_purpose": "신청자 기본 프로필과 심사 맥락을 설명하기 위한 기준 feature",
+      "relations": {
+        "related_features": [
+          "income.annual_income",
+          "decision.approved_amount",
+          "loan.requested_limit",
+          "credit.loan_count"
+        ],
+        "correlated_with": [
+          "income.annual_income",
+          "credit.loan_count"
+        ],
+        "used_in": [
+          "input"
+        ]
+      }
+    },
+    "income.annual_income": {
+      "canonical_meaning": "신청자 연소득 또는 소득 금액",
+      "business_purpose": "상환 여력과 한도 맥락을 설명하기 위한 소득 feature",
+      "relations": {
+        "related_features": [
+          "applicant.age",
+          "decision.approved_amount",
+          "loan.requested_limit"
+        ],
+        "correlated_with": [
+          "applicant.age",
+          "loan.requested_limit"
+        ],
+        "used_in": [
+          "input",
+          "output"
+        ]
+      }
+    },
+    "decision.approved_amount": {
+      "canonical_meaning": "심사 결과 산출된 승인 가능 금액 또는 한도",
+      "business_purpose": "심사 결과 explainability에서 최종 승인 가능 금액의 근거 축을 설명하기 위한 feature",
+      "relations": {
+        "related_features": [
+          "applicant.age",
+          "income.annual_income",
+          "loan.requested_limit"
+        ],
+        "correlated_with": [
+          "loan.requested_limit",
+          "income.annual_income"
+        ],
+        "used_in": [
+          "output"
+        ]
+      }
+    },
+    "credit.loan_count": {
+      "canonical_meaning": "보유한 신용대출 건수",
+      "business_purpose": "기대출 보유 정도를 설명하기 위한 신용 feature",
+      "relations": {
+        "related_features": [
+          "applicant.age",
+          "income.annual_income",
+          "loan.requested_limit"
+        ],
+        "correlated_with": [
+          "applicant.age",
+          "income.annual_income"
+        ],
+        "used_in": [
+          "input"
+        ]
+      }
+    },
+    "input.auto.현직장등록경과일수n": {
+      "canonical_meaning": "현 직장 등록 경과 일수",
+      "business_purpose": "재직 안정성 맥락을 설명하기 위한 직업/재직 feature",
+      "relations": {
+        "related_features": [
+          "applicant.age",
+          "income.annual_income",
+          "credit.loan_count"
+        ],
+        "correlated_with": [
+          "income.annual_income"
+        ],
+        "used_in": [
+          "input"
+        ]
+      }
+    }
+  }
+}
