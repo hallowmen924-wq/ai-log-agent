@@ -1,0 +1,14 @@
+.tool-mini-card {
+  overflow: hidden;
+  white-space: normal;
+  text-overflow: ellipsis;
+  word-break: break-all;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tool-mini-card > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-all;
+}

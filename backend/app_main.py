@@ -619,6 +619,56 @@ def _format_reject_code_summary(reject_code_summary: list[dict[str, object]], li
     return ", ".join(parts)
 
 
+def _format_reject_reason_stat_line(reject_code_summary: list[dict[str, object]], limit: int = 3) -> str:
+    parts: list[str] = []
+    for item in reject_code_summary[:limit]:
+        code = str(item.get("code") or "").strip()
+        description = str(item.get("description") or "").strip()
+        count = int(item.get("count") or 0)
+        share = item.get("share")
+        if not code:
+            continue
+        label = f"{code}"
+        if description:
+            label = f"{label}({description})"
+        try:
+            share_text = f", {float(share) * 100:.1f}%"
+        except (TypeError, ValueError):
+            share_text = ""
+        parts.append(f"{label} {count:,}건{share_text}")
+    return " / ".join(parts)
+
+
+def _build_reject_reason_highlights(
+    reject_code_summary: list[dict[str, object]],
+    selected_product: str,
+    customer_clusters: list[dict],
+) -> list[dict[str, object]]:
+    product_name = _product_display_name(selected_product) or selected_product or "전체"
+    top_item = reject_code_summary[0] if reject_code_summary else {}
+    top_code = str(top_item.get("code") or "-")
+    top_description = str(top_item.get("description") or "").strip()
+    top_label = f"{top_code} {top_description}".strip()
+    base_count = int(top_item.get("base_rejected_records") or 0)
+    top_cluster = customer_clusters[0] if customer_clusters else {}
+    cluster_label = " / ".join(
+        part for part in [
+            str(top_cluster.get("decision") or "").strip(),
+            str(top_cluster.get("age_band") or "").strip(),
+            str(top_cluster.get("income_band") or "").strip(),
+            str(top_cluster.get("amount_band") or "").strip(),
+        ]
+        if part and part != "미상"
+    )
+    return [
+        {"label": "상품", "value": product_name},
+        {"label": "최빈 거절사유", "value": top_label},
+        {"label": "거절 표본", "value": f"{base_count:,}건" if base_count else "-"},
+        {"label": "상위 거절사유", "value": _format_reject_reason_stat_line(reject_code_summary)},
+        {"label": "대표 고객군", "value": cluster_label or "-"},
+    ]
+
+
 def _format_reject_code_scope_note(reject_code_summary: list[dict[str, object]], selected_product: str) -> str:
     if not reject_code_summary:
         return ""
@@ -630,7 +680,7 @@ def _format_reject_code_scope_note(reject_code_summary: list[dict[str, object]],
     return ""
 
 
-def _build_answer_summary(query: str, selected_product: str, selected_feature: dict | None, representative_features: list[dict[str, object]], customer_clusters: list[dict], retrieval_results: list[dict], related_features: list[dict[str, object]] | None = None, reject_code_summary: list[dict[str, object]] | None = None) -> dict[str, object]:
+def _build_answer_summary(query: str, selected_product: str, selected_feature: dict | None, representative_features: list[dict[str, object]], customer_clusters: list[dict], retrieval_results: list[dict], records: list[dict], related_features: list[dict[str, object]] | None = None, reject_code_summary: list[dict[str, object]] | None = None) -> dict[str, object]:
     top_cluster = customer_clusters[0] if customer_clusters else {}
     top_feature_name = str((selected_feature or {}).get("feature_name") or (selected_feature or {}).get("feature_id") or "핵심 기준")
     representative_names = _dedupe_text_items([
@@ -657,8 +707,52 @@ def _build_answer_summary(query: str, selected_product: str, selected_feature: d
     decision = str(top_cluster.get("decision") or "미상")
     count = int(top_cluster.get("count") or 0)
     reject_summary = _format_cluster_reject_reason_summary(top_cluster)
+    # records가 이미 profiles라면 그대로 사용
+    sample_records = records[:1000] if len(records) > 1000 else records
+    if (not reject_code_summary or not len(reject_code_summary)) and records is not None:
+        reject_code_summary = _build_reject_code_distribution(sample_records, selected_product, query, limit=3)
     reject_code_line = _format_reject_code_summary(reject_code_summary or [])
     reject_code_scope_note = _format_reject_code_scope_note(reject_code_summary or [], selected_product)
+    if reject_intent and reject_code_summary:
+        product_name = _product_display_name(selected_product) or selected_product or "전체"
+        stat_line = _format_reject_reason_stat_line(reject_code_summary)
+        top_item = reject_code_summary[0]
+        top_code = str(top_item.get("code") or "").strip()
+        top_description = str(top_item.get("description") or "").strip()
+        top_label = f"{top_code}({top_description})" if top_description else top_code
+        top_count = int(top_item.get("count") or 0)
+        try:
+            top_share = f"{float(top_item.get('share')) * 100:.1f}%"
+        except (TypeError, ValueError):
+            top_share = ""
+        scope_prefix = f"{reject_code_scope_note} " if reject_code_scope_note else ""
+        cluster_context = ""
+        if top_cluster:
+            cluster_parts = [
+                str(top_cluster.get("decision") or "").strip(),
+                str(top_cluster.get("age_band") or "").strip(),
+                str(top_cluster.get("income_band") or "").strip(),
+                str(top_cluster.get("amount_band") or "").strip(),
+            ]
+            cluster_label = " / ".join(part for part in cluster_parts if part and part != "미상")
+            if cluster_label:
+                cluster_context = f" 참고로 가장 가까운 고객군은 {cluster_label}이며 {count:,}건입니다."
+        explanation = (
+            f"{scope_prefix}{product_name} 거절 고객군에서 가장 자주 연결되는 reject reason은 "
+            f"{top_label}입니다. 이 사유는 {top_count:,}건"
+            f"{f'({top_share})' if top_share else ''}으로 가장 많이 나타났습니다. "
+            f"상위 거절사유 분포는 {stat_line}입니다."
+            f"{cluster_context}"
+        )
+        return {
+            "headline": f"{product_name} 거절 고객군의 최빈 reject reason은 {top_label}입니다.",
+            "explanation": explanation,
+            "highlights": _build_reject_reason_highlights(reject_code_summary, selected_product, customer_clusters),
+            "reject_code_summary": list(reject_code_summary or []),
+            "top_reject_codes": list(reject_code_summary or []),
+            "metric_summary": [],
+            "source": "reject-reason-distribution",
+        }
     avg_income = _format_krw_compact(top_cluster.get("avg_income"))
     avg_amount = _format_krw_compact(top_cluster.get("avg_amount"))
     avg_rate = str(top_cluster.get("avg_rate_display") or "")
@@ -2286,28 +2380,42 @@ def _format_cluster_reject_reason_summary(cluster: dict[str, object], limit: int
 
 
 def _build_reject_code_distribution(
-    records: list[dict],
+    records_or_profiles: list[dict],
     selected_product: str,
     query: str,
     limit: int = 3,
 ) -> list[dict[str, object]]:
-    reject_code_mapping = _get_reject_code_mapping()
-    age_band_focus = _extract_age_band_focus(query)
-    profiles = [_build_record_profile(record, reject_code_mapping=reject_code_mapping) for record in records]
-    income_thresholds = _derive_measure_band_thresholds(
-        [float(item.get("income")) for item in profiles if item.get("income") is not None],
-        ["저소득", "중소득", "고소득", "초고소득"],
-        DEFAULT_INCOME_BAND_THRESHOLDS,
-    )
-    amount_thresholds = _derive_measure_band_thresholds(
-        [float(item.get("amount")) for item in profiles if item.get("amount") is not None],
-        ["소액", "중액", "고액", "초대형"],
-        DEFAULT_AMOUNT_BAND_THRESHOLDS,
-    )
-    prepared_profiles = [
-        _apply_profile_bands(dict(profile), income_thresholds, amount_thresholds)
-        for profile in profiles
-    ]
+    """
+    records_or_profiles: list of raw records or already-built profiles
+    """
+    def _is_profile(obj):
+        return isinstance(obj, dict) and (
+            "product" in obj and ("age" in obj or "age_band" in obj)
+        )
+
+    if records_or_profiles and all(_is_profile(r) for r in records_or_profiles):
+        # 이미 profiles가 들어온 경우
+        prepared_profiles = records_or_profiles
+        reject_code_mapping = _get_reject_code_mapping()
+        age_band_focus = _extract_age_band_focus(query)
+    else:
+        reject_code_mapping = _get_reject_code_mapping()
+        age_band_focus = _extract_age_band_focus(query)
+        profiles = [_build_record_profile(record, reject_code_mapping=reject_code_mapping) for record in records_or_profiles]
+        income_thresholds = _derive_measure_band_thresholds(
+            [float(item.get("income")) for item in profiles if item.get("income") is not None],
+            ["저소득", "중소득", "고소득", "초고소득"],
+            DEFAULT_INCOME_BAND_THRESHOLDS,
+        )
+        amount_thresholds = _derive_measure_band_thresholds(
+            [float(item.get("amount")) for item in profiles if item.get("amount") is not None],
+            ["소액", "중액", "고액", "초대형"],
+            DEFAULT_AMOUNT_BAND_THRESHOLDS,
+        )
+        prepared_profiles = [
+            _apply_profile_bands(dict(profile), income_thresholds, amount_thresholds)
+            for profile in profiles
+        ]
 
     def summarize(use_age_filter: bool) -> list[dict[str, object]]:
         counter: collections.Counter[str] = collections.Counter()
@@ -2345,10 +2453,43 @@ def _build_reject_code_distribution(
     age_summary = summarize(True)
     if age_summary or not age_band_focus:
         return age_summary
+    # 1차 fallback: product 기준
     fallback_summary = summarize(False)
     for item in fallback_summary:
         item["fallback_reason"] = "no_age_band_reject_codes"
-    return fallback_summary
+    if fallback_summary:
+        return fallback_summary
+    # 2차 fallback: 모든 거절 레코드에서 K코드 집계
+    def summarize_any_reject():
+        counter: collections.Counter[str] = collections.Counter()
+        rejected_count = 0
+        for profile in prepared_profiles:
+            codes = [
+                str(code).strip().upper()
+                for code in (profile.get("reject_codes") or [])
+                if re.match(r"^K\d{3}$", str(code).strip().upper())
+            ]
+            if not codes:
+                continue
+            rejected_count += 1
+            counter.update(codes)
+        summary: list[dict[str, object]] = []
+        for code, count in counter.most_common(limit):
+            description = str((reject_code_mapping.get(code) or {}).get("description") or "").strip()
+            summary.append({
+                "code": code,
+                "count": count,
+                "description": description,
+                "share": round(count / rejected_count, 4) if rejected_count else 0,
+                "base_rejected_records": rejected_count,
+                "age_filter": "",
+                "age_filter_used": False,
+                "scope": "all_rejects",
+                "fallback_reason": "no_product_reject_codes",
+            })
+        return summary
+    any_reject_summary = summarize_any_reject()
+    return any_reject_summary
 
 
 def _extract_normalized_record_measures(record: dict) -> tuple[float | None, str, float | None, float | None, str, float | None, float | None]:
@@ -3725,20 +3866,41 @@ def _build_customer_clusters(records: list[dict], selected_product: str, query: 
         clusters = list((cache_payload.get("products") or {}).get(selected_product) or [])
     else:
         clusters = list(cache_payload.get("all") or [])
+
+    # 군집을 상품+연령+금액+탈락사유 조합별로 세분화
+    def cluster_key(item):
+        return (
+            str(item.get("product") or ""),
+            str(item.get("age_band") or ""),
+            str(item.get("amount_band") or ""),
+            str(item.get("income_band") or ""),
+            str(item.get("decision") or ""),
+            ",".join(sorted([str(code.get("code") or code) for code in (item.get("top_reject_codes") or [])]))
+        )
+    # 중복 조합 제거 및 대표 군집만 추출
+    seen = set()
+    unique_clusters = []
+    for c in clusters:
+        k = cluster_key(c)
+        if k not in seen:
+            seen.add(k)
+            unique_clusters.append(c)
+
     age_band_focus = _extract_age_band_focus(query)
     income_band_focus = _extract_income_band_focus(query)
     amount_band_focus = _extract_amount_band_focus(query)
     decision_focus = _extract_decision_focus(query)
     if age_band_focus:
-        clusters = [item for item in clusters if str(item.get("age_band") or "") == age_band_focus]
+        unique_clusters = [item for item in unique_clusters if str(item.get("age_band") or "") == age_band_focus]
     if income_band_focus:
-        clusters = [item for item in clusters if str(item.get("income_band") or "") == income_band_focus]
+        unique_clusters = [item for item in unique_clusters if str(item.get("income_band") or "") == income_band_focus]
     if amount_band_focus:
-        clusters = [item for item in clusters if str(item.get("amount_band") or "") == amount_band_focus]
+        unique_clusters = [item for item in unique_clusters if str(item.get("amount_band") or "") == amount_band_focus]
     if decision_focus:
-        clusters = [item for item in clusters if str(item.get("decision") or "") == decision_focus]
+        unique_clusters = [item for item in unique_clusters if str(item.get("decision") or "") == decision_focus]
+
     reject_intent = _query_has_reject_intent(query, selected_feature)
-    clusters.sort(
+    unique_clusters.sort(
         key=lambda item: (
             0 if (reject_intent and str(item.get("decision") or "") == "거절") else (1 if reject_intent else 0),
             -_score_customer_cluster(item, query, selected_feature, representative_features=representative_features),
@@ -3746,8 +3908,10 @@ def _build_customer_clusters(records: list[dict], selected_product: str, query: 
             str(item.get("label") or ""),
         )
     )
+    # 군집 수 제한 완화 (최대 20개까지 반환)
+    max_limit = max(limit, 20)
     enriched_clusters: list[dict] = []
-    for cluster in clusters[:limit]:
+    for cluster in unique_clusters[:max_limit]:
         enriched = dict(cluster)
         enriched["metric_summary"] = _build_cluster_metric_summary(enriched, representative_features)
         enriched_clusters.append(enriched)
@@ -3875,15 +4039,26 @@ def _build_explainability_agent_result(
     if _query_has_reject_intent(query, selected_feature) or _is_cross_product_feature_label(selected_axis, selected_product):
         selected_axis = "거절사유코드"
     candidate_impacts: list[dict[str, object]] = []
+    metric_cards: list[dict[str, object]] = []
     if reject_code_summary:
         for index, item in enumerate(reject_code_summary[:3]):
             label = str(item.get("code") or "")
             description = str(item.get("description") or "").strip()
+            count = int(item.get("count") or 0)
+            try:
+                share_value = f"{float(item.get('share')) * 100:.1f}%"
+            except (TypeError, ValueError):
+                share_value = f"{count:,}건"
             candidate_impacts.append({
                 "feature": f"{label} {description}".strip(),
                 "impact": [42, 28, 18][index] if index < 3 else 10,
                 "direction": "risk_up",
-                "evidence": f"{int(item.get('count') or 0)}건",
+                "evidence": f"{count:,}건 · {share_value}",
+            })
+            metric_cards.append({
+                "label": label or f"사유 {index + 1}",
+                "value": f"{count:,}건 · {share_value}",
+                "tone": "warning" if index == 0 else "neutral",
             })
     if not candidate_impacts and top_cluster:
         if top_cluster.get("avg_rate_display"):
@@ -3905,6 +4080,7 @@ def _build_explainability_agent_result(
         "method": "tool-first SHAP-ready attribution",
         "llm_call": False,
         "primary_axis": selected_axis,
+        "metrics": metric_cards,
         "shap_values": impacts,
         "reasoning": [
             "심사 로그/군집/거절코드 기반으로 영향도를 먼저 계산합니다.",
@@ -4049,17 +4225,21 @@ def _build_cluster_intelligence_result(customer_clusters: list[dict], selected_p
             "delinquency_source": item.get("top_delinquency_rate_source") or ("연체/부실 로그 proxy" if item.get("delinquency_proxy_rate_display") else ""),
             "risk_pattern": _format_cluster_reject_reason_summary(item) or "소득/한도/연령 패턴",
         })
-    metric_cards = _cluster_metric_cards(ranked_clusters[:4])
     return {
         "id": "cluster",
         "title": "Customer Cluster Intelligence",
         "status": "ready" if clusters else "empty",
-        "summary": f"{_product_display_name(selected_product) or selected_product or '전체'}의 평균 지표를 고객군집 기준으로 묶었습니다." if metric_question else f"{_product_display_name(selected_product) or selected_product or '전체'} 고객군 {len(clusters)}개를 대화 흐름에 연결했습니다.",
+        "summary": (
+            f"{_product_display_name(selected_product) or selected_product or '전체'} 기준으로 "
+            f"{len(clusters)}개 고객군을 비교했습니다."
+            if clusters
+            else "조건에 맞는 고객군을 찾지 못했습니다."
+        ),
         "llm_call": False,
+        "metrics": _cluster_metric_cards(ranked_clusters[:4]),
         "clusters": clusters,
-        "metrics": metric_cards,
-        "visualization": _build_cluster_visualization(ranked_clusters),
-        "shap_values": _build_cluster_shap_values(ranked_clusters),
+        "shap_values": _build_cluster_shap_values(ranked_clusters[:4]),
+        "visualization": _build_cluster_visualization(ranked_clusters[:4]),
     }
 
 
@@ -6002,6 +6182,9 @@ def _build_feature_workbench_payload(
     ontology = _read_json_file(ONTOLOGY_PATH)
     commonfeature = _read_json_file(COMMONFEATURE_PATH)
     records = _read_record_list(FULL_TEXT_RECORDS_PATH)
+    # profiles 1회만 생성
+    reject_code_mapping = _get_reject_code_mapping()
+    profiles = [_build_record_profile(record, reject_code_mapping=reject_code_mapping) for record in records]
     if job_id:
         _update_workbench_job(job_id, "extraction", "completed", f"feature {len(commonfeature.get('common_features') or [])}건, record {len(records)}건을 읽었습니다.", meta={"record_count": len(records)})
     all_features = list(commonfeature.get("common_features") or [])
@@ -6149,7 +6332,8 @@ def _build_feature_workbench_payload(
         _update_workbench_job(job_id, "faiss", "running", "고객군집 캐시와 cluster 후보를 계산합니다.")
     customer_cluster_cache = _load_or_build_customer_cluster_cache(records)
     customer_clusters = _build_customer_clusters(records, selected_product, query=query, selected_feature=selected_feature, representative_features=representative_features)
-    reject_code_summary = _build_reject_code_distribution(records, selected_product, query, limit=3)
+    # profiles를 넘겨서 중복 변환 방지
+    reject_code_summary = _build_reject_code_distribution(profiles, selected_product, query, limit=3)
     if job_id:
         _update_workbench_job(job_id, "faiss", "completed", f"cluster {len(customer_clusters)}건을 계산했고 K코드 상위 {len(reject_code_summary)}건을 확인했습니다.", meta={"cluster_count": len(customer_clusters), "top_reject_codes": reject_code_summary})
 
@@ -6233,7 +6417,7 @@ def _build_feature_workbench_payload(
             *list(prompt_pack.get("context_preview") or []),
             f"user memo: {department or '-'} / {memo_notes[:80] or '-'}",
         ]
-    server_answer_summary = _build_answer_summary(query, selected_product, selected_feature, representative_features, customer_clusters, retrieval_results, related_features=related_features, reject_code_summary=reject_code_summary)
+    server_answer_summary = _build_answer_summary(query, selected_product, selected_feature, representative_features, customer_clusters, retrieval_results, profiles, related_features=related_features, reject_code_summary=reject_code_summary)
     server_answer_summary["citations"] = list((prompt_pack.get("semantic_context") or {}).get("regulation_citations") or [])
     if regulation_first_route and regulation_evidence:
         prompt_pack = _build_regulation_first_prompt_pack(query, regulation_evidence, prompt_pack)
@@ -6261,7 +6445,7 @@ def _build_feature_workbench_payload(
         prompt_pack = _build_general_fallback_prompt_pack(query, prompt_pack)
         ollama_runtime, answer_summary = _run_general_ollama_fallback(query, prompt_pack, job_id=job_id)
     elif _query_asks_average_metrics(query) or query_has_segment_metric_intent(query):
-        answer_summary = _build_average_metric_answer_summary(query, selected_product, records, customer_clusters)
+        answer_summary = _build_average_metric_answer_summary(query, selected_product, profiles, customer_clusters)
         ollama_runtime = {
             "enabled": False,
             "status": "skipped",

@@ -834,8 +834,10 @@ textarea {
 .workspace-result-panel {
   display: grid;
   gap: 12px;
-  width: min(920px, 100%);
+  width: min(1120px, 100%);
+  max-width: 100%;
   justify-self: stretch;
+  min-width: 0;
   padding: 14px;
   border-radius: 20px;
   border: 1px solid rgba(115, 163, 202, 0.18);
@@ -902,9 +904,9 @@ textarea {
 .workspace-result-tab-body {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
-.workspace-summary-view,
 .workspace-cluster-view,
 .workspace-insight-view,
 .workspace-policy-view,
@@ -912,6 +914,26 @@ textarea {
   display: grid;
   gap: 12px;
   animation: workspaceTabEnter 0.22s ease both;
+}
+
+.workspace-summary-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+  animation: workspaceTabEnter 0.22s ease both;
+}
+
+.workspace-summary-main,
+.workspace-summary-tools {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workspace-summary-tools {
+  align-content: start;
 }
 
 .workspace-summary-callout {
@@ -998,6 +1020,10 @@ textarea {
 .financial-tool-card {
   display: grid;
   gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 14px;
   border-radius: 16px;
   border: 1px solid rgba(87, 153, 204, 0.16);
@@ -1017,11 +1043,18 @@ textarea {
   align-items: start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .financial-tool-card-head > div {
   display: grid;
   gap: 3px;
+  min-width: 0;
+}
+
+.financial-tool-card-head strong,
+.financial-tool-card p {
+  overflow-wrap: anywhere;
 }
 
 .financial-tool-card p {
@@ -1037,9 +1070,41 @@ textarea {
 
 .tool-impact-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1.2fr) minmax(120px, 1fr) auto;
+  grid-template-columns: minmax(0, 1.2fr) minmax(82px, 1fr) auto;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+}
+
+.tool-impact-meta {
+  min-width: 0;
+}
+
+.tool-impact-meta strong,
+.tool-impact-meta span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+  .workspace-summary-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-summary-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-summary-tools,
+  .workspace-summary-metric-grid,
+  .workspace-insight-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tool-impact-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tool-impact-meta {

@@ -4,6 +4,7 @@ import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { EventType, useRive, useStateMachineInput } from '@rive-app/react-canvas';
 import ReactFlow, { Background, Controls, Handle, MarkerType, MiniMap, Position } from 'reactflow';
 import 'reactflow/dist/style.css';
+import './OntologyWorkbench.local.css';
 import regulationDocumentAnimation from '../assets/regulation-document.json';
 import promptSubmitAnimation from '../assets/prompt-submit.json';
 import cardLoanNewsAnimation from '../assets/card-loan-news.json';
@@ -392,7 +393,7 @@ function FinancialToolCard({ tool }) {
 }
 
 function StrategyWorkspace({ panels = [], workflow = [], semanticLayer = {} }) {
-  const panelMap = Object.fromEntries((panels || []).map((item) => [item.id, item]));
+  const panelMap = Object.fromEntries((panels || []).filter(Boolean).map((item) => [item.id, item]));
   return (
     <section className="strategy-workspace-panel">
       <div className="strategy-workspace-head">
@@ -2486,8 +2487,8 @@ export default function OntologyWorkbench({
   const hasResolvedRuntimeAnswer = Boolean(backendState.workbench?.answer_summary);
   const agenticWorkspace = backendState.workbench?.agentic_workspace || {};
   const agentWorkflow = backendState.workbench?.agent_workflow || agenticWorkspace?.agent_workflow || [];
-  const activeToolCards = agenticWorkspace?.version_1?.active_tools || [];
-  const strategyPanels = agenticWorkspace?.version_2?.panels || [];
+  const activeToolCards = (agenticWorkspace?.version_1?.active_tools || []).filter(Boolean);
+  const strategyPanels = (agenticWorkspace?.version_2?.panels || []).filter(Boolean);
   const productModeToolCards = strategyPanels.filter((tool) => ['strategy', 'persona'].includes(tool?.id));
   const semanticFinancialLayer = backendState.workbench?.semantic_financial_layer || agenticWorkspace?.semantic_layer || {};
   const ollamaRuntime = backendState.workbench?.ollama_runtime || {};
@@ -3181,12 +3182,6 @@ export default function OntologyWorkbench({
   const workspaceToolTabs = hasResolvedRuntimeAnswer
     ? [
         { id: 'summary', label: '요약' },
-        activeToolIds.has('cluster')
-          ? {
-              id: 'cluster',
-              label: /승인|거절|비교/.test(currentQuestion) ? '승인 vs 거절 비교' : '군집 분석',
-            }
-          : null,
         (activeToolIds.has('explainability') || runtimeToolCards.length > 0)
           ? { id: 'insight', label: '상세 인사이트' }
           : null,
@@ -3208,7 +3203,7 @@ export default function OntologyWorkbench({
     ...(insightToolCard?.metrics || []).slice(0, 2),
   ].slice(0, 4);
   const promptDock = (
-    <div className="roni-prompt-dock workspace-prompt-dock">
+    <div className="roni-prompt-dock workspace-prompt-dock" style={{ maxWidth: '900px', width: '100%' }}>
       <div className="ontology-chat-input-shell copilot-composer-shell roni-prompt-dock-input-shell">
         <div className="workspace-prompt-textarea-shell">
           <textarea
@@ -3336,8 +3331,8 @@ export default function OntologyWorkbench({
           <strong>Bunny 금융 워크스페이스</strong>
           <span>질문하면 답변, 군집, 정책 분석이 함께 열립니다</span>
         </div>
-        <div className="ontology-copilot-main">
-          <section className="panel ontology-runtime-hero ontology-runtime-hero-compact roni-floating-stage">
+        <div className="ontology-copilot-main" style={{ maxWidth: '1680px', width: '100%', margin: '0 auto' }}>
+          <section className="panel ontology-runtime-hero ontology-runtime-hero-compact roni-floating-stage" style={{ maxWidth: '100%', minWidth: 0 }}>
             <div
               className={`ontology-hero-roni-panel ontology-hero-roni-panel-top ${isRoniHovered ? 'is-hovered' : ''}`}
               onMouseEnter={() => setIsRoniHovered(true)}
@@ -3582,7 +3577,7 @@ export default function OntologyWorkbench({
             </div>
           </section>
 
-          <section className="panel ontology-chat-shell copilot-thread-shell">
+          <section className="panel ontology-chat-shell copilot-thread-shell" style={{ maxWidth: '100%', minWidth: 0 }}>
             <div className="ontology-conversation-stack ontology-conversation-thread">
               {answerMode === 'product' ? (
                 <ProductDevelopmentWorkspace
@@ -3686,27 +3681,76 @@ export default function OntologyWorkbench({
                         <div className="workspace-result-tab-body">
                           {selectedWorkspaceResultTab === 'summary' ? (
                             <div className="workspace-summary-view">
-                              <article className="workspace-summary-callout">
-                                <span aria-hidden="true">🐰</span>
-                                <div>
-                                  <strong>
-                                    <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '분석 요약을 준비했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
-                                  </strong>
-                                  <p>
-                                    <HighlightedAnswerText text={finalAnswerBody || '핵심 결과를 실제 로그와 고객군집 기준으로 정리했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
-                                  </p>
-                                </div>
-                              </article>
-                              {summaryHighlightItems.length ? (
-                                <div className="workspace-summary-metric-grid">
-                                  {summaryHighlightItems.map((item) => (
-                                    <div key={`summary-${item.label}-${item.value}`} className="workspace-summary-metric">
-                                      <span>{item.label}</span>
-                                      <strong><HighlightedAnswerText text={String(item.value || '-')} terms={answerHighlightTerms} termMeta={answerTermMeta} /></strong>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : null}
+                              <div className="workspace-summary-main">
+                                <article className="workspace-summary-callout">
+                                  <span aria-hidden="true">🐰</span>
+                                  <div>
+                                    <strong>
+                                      <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '분석 요약을 준비했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                    </strong>
+                                    <p>
+                                      <HighlightedAnswerText text={finalAnswerBody || '핵심 결과를 실제 로그와 고객군집 기준으로 정리했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                    </p>
+                                  </div>
+                                </article>
+                                {summaryHighlightItems.length ? (
+                                  <div className="workspace-summary-metric-grid">
+                                    {summaryHighlightItems.map((item) => (
+                                      <div key={`summary-${item.label}-${item.value}`} className="workspace-summary-metric">
+                                        <span>{item.label}</span>
+                                        <strong><HighlightedAnswerText text={String(item.value || '-')} terms={answerHighlightTerms} termMeta={answerTermMeta} /></strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {/* K코드별 통계 표 노출 (summary 영역) */}
+                                {resolvedAnswerSummary?.top_reject_codes?.length ? (
+                                  <div className="summary-reject-code-table" style={{ margin: '16px 0', overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                                      <thead>
+                                        <tr style={{ background: '#f7f7fa' }}>
+                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>K코드</th>
+                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>설명</th>
+                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>건수</th>
+                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>비중</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {resolvedAnswerSummary.top_reject_codes.slice(0, 3).map((code) => (
+                                          <tr key={code.code}>
+                                            <td style={{ padding: '4px 8px', border: '1px solid #eee', fontWeight: 600 }}>{code.code}</td>
+                                            <td style={{ padding: '4px 8px', border: '1px solid #eee' }}>{code.description || '-'}</td>
+                                            <td style={{ padding: '4px 8px', border: '1px solid #eee', textAlign: 'right' }}>{Number(code.count || 0).toLocaleString('ko-KR')}</td>
+                                            <td style={{ padding: '4px 8px', border: '1px solid #eee', textAlign: 'right' }}>{(Number(code.share || 0) * 100).toFixed(1)}%</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="workspace-summary-tools">
+                                {/* Customer Cluster Intelligence Card (군집 카드) */}
+                                {clusterToolCard ? <FinancialToolCard tool={clusterToolCard} /> : null}
+                                {insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
+                                {/* 군집/로그/지표가 없을 때 Explainability Agent 결과로 대체 */}
+                                {!clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
+                                  !insightToolCard
+                                    ? <div className="empty-box compact">조건에 맞는 고객군, 로그, 지표가 없습니다.<br />상품, 연령, 기간 등 필터를 넓혀보세요.</div>
+                                    : null
+                                ) : null}
+                                {!clusterToolCard && clusterInsightItems.length ? (
+                                  <div className="tool-mini-grid">
+                                    {clusterInsightItems.map((cluster) => (
+                                      <div key={cluster.cluster_id || cluster.label} className="tool-mini-card">
+                                        <span>{cluster.decision || '군집'} · {cluster.count || cluster.records || 0}건</span>
+                                        <strong>{cluster.label || cluster.display_label || cluster.cluster_id}</strong>
+                                        <small>금리 {cluster.avg_rate || '-'} · 한도 {cluster.avg_limit || '-'}</small>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                           ) : null}
 
@@ -3920,7 +3964,7 @@ export default function OntologyWorkbench({
       <AnimatePresence>
         {showDetailModal ? (
           <motion.div className="prompt-modal-backdrop ontology-detail-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowDetailModal(false)}>
-            <motion.section className="prompt-modal ontology-detail-modal" initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+            <motion.section className="prompt-modal ontology-detail-modal" style={{ maxWidth: '900px', width: '100%' }} initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
               <div className="ontology-detail-modal-head">
                 <div>
                   <div className="panel-kicker">Detail View</div>
