@@ -65,6 +65,12 @@ from backend.services import (
     state,
 )
 from backend.explainability_profiles import build_explainability_payload
+from backend.evidence_guard import (
+    apply_grounded_prompt_rules,
+    build_blocked_runtime_answer,
+    decorate_grounded_answer_summary,
+    evaluate_runtime_evidence,
+)
 from backend.worker import worker
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
@@ -3997,6 +4003,7 @@ def _detect_financial_agent_intents(query: str, selected_feature: dict | None = 
     compact_query = _compact_search_text(query)
     intents: list[str] = []
     metric_intent = _query_has_metric_intent(query)
+    strategy_intent = _query_requires_strategy_simulation(query)
     reason_intent = _query_has_reject_intent(query, selected_feature) or any(token in compact_query for token in ["왜", "이유", "설명", "사유", "탈락", "거절"])
     if _query_requires_regulation_first(query):
         intents.append("policy")
@@ -4014,9 +4021,29 @@ def _detect_financial_agent_intents(query: str, selected_feature: dict | None = 
         intents.append("strategy")
     if any(token in compact_query for token in ["영업점", "신용기획", "솔루션", "운영", "부서", "관점"]):
         intents.append("persona")
+    if strategy_intent:
+        intents.append("strategy")
     if not intents:
         intents.append("cluster" if metric_intent else "explainability")
     return _dedupe_text_items(intents, limit=5)
+
+
+def _query_requires_strategy_simulation(query: str) -> bool:
+    compact_query = _compact_search_text(query)
+    scenario_markers = [
+        "예측", "예상", "가정", "변화", "변하면", "바꾸면", "올리면", "올렸을때",
+        "낮추면", "내리면", "인상", "인하", "상향", "하향", "조정", "늘리면", "줄이면",
+        "완화", "강화", "시뮬레이션", "simulation", "strategy", "whatif", "what-if",
+        "어떻게될까", "어떻게돼", "어떻게될지", "영향", "impact",
+    ]
+    business_markers = [
+        "금리", "한도", "dsr", "거절코드", "승인률", "승인율", "수익", "부실", "리스크",
+        "전환", "심사기준", "대출", "상품",
+    ]
+    return (
+        any(token in compact_query for token in scenario_markers)
+        and any(token in compact_query for token in business_markers)
+    )
 
 
 def _query_has_metric_intent(query: str) -> bool:
@@ -4259,7 +4286,11 @@ def _build_policy_conflict_result(
     }
 
 
-def _build_strategy_simulation_result(customer_clusters: list[dict], reject_code_summary: list[dict[str, object]]) -> dict[str, object]:
+def _build_strategy_simulation_result(
+    customer_clusters: list[dict],
+    reject_code_summary: list[dict[str, object]],
+    query: str = "",
+) -> dict[str, object]:
     total_records = sum(int(item.get("count") or 0) for item in customer_clusters) or sum(int(item.get("base_rejected_records") or 0) for item in reject_code_summary[:1]) or 1
     rejected_records = sum(int(item.get("count") or 0) for item in customer_clusters if str(item.get("decision") or "") == "거절")
     first_reject = reject_code_summary[0] if reject_code_summary else {}
@@ -4267,18 +4298,33 @@ def _build_strategy_simulation_result(customer_clusters: list[dict], reject_code
     estimated_uplift = round(min(8.5, max(1.2, top_reject_share * 7.5)), 1)
     estimated_profit = round(total_records * estimated_uplift * 0.018, 1)
     estimated_risk = round(min(4.8, max(0.4, estimated_uplift * 0.32)), 1)
+    compact_query = _compact_search_text(query)
+    if any(token in compact_query for token in ["금리", "rate", "이자"]):
+        rate_direction = "인상" if any(token in compact_query for token in ["올리", "인상", "상향", "높이"]) else ("인하" if any(token in compact_query for token in ["낮추", "내리", "인하", "하향"]) else "조정")
+        summary = f"금리 {rate_direction} 시 승인률, 예상 이자수익, 부실률 변화를 고객군 기준으로 가정합니다."
+        scenario = f"금리 {rate_direction} 민감도 시뮬레이션"
+        metric_labels = ["승인률 민감도", "예상 이자수익", "부실률 민감도"]
+    elif any(token in compact_query for token in ["한도", "limit"]):
+        limit_direction = "확대" if any(token in compact_query for token in ["늘리", "올리", "상향", "확대"]) else ("축소" if any(token in compact_query for token in ["줄이", "낮추", "하향", "축소"]) else "조정")
+        summary = f"한도 {limit_direction} 시 승인 전환, 노출 금액, 부실률 변화를 고객군 기준으로 가정합니다."
+        scenario = f"한도 {limit_direction} 민감도 시뮬레이션"
+        metric_labels = ["승인 전환 변화", "예상 노출/수익", "부실률 민감도"]
+    else:
+        summary = "질문에 포함된 전략 조건을 바꿨을 때 승인률, 수익, 리스크 변화를 빠르게 가정합니다."
+        scenario = "전략 조건 민감도 시뮬레이션"
+        metric_labels = ["승인률 변화", "예상 수익 변화", "부실률 변화"]
     return {
         "id": "strategy",
         "title": "Strategy Simulation",
         "status": "ready",
-        "summary": "DSR/거절코드 기준을 완화했을 때의 승인률, 수익, 리스크 변화를 빠르게 가정합니다.",
-        "llm_call": False,
-        "scenario": "DSR/거절 기준 5% 완화",
+        "summary": summary,
+        "llm_call": True,
+        "scenario": scenario,
         "baseline_rejected_records": rejected_records,
         "metrics": [
-            {"label": "승인률 변화", "value": f"+{estimated_uplift}%", "tone": "positive"},
-            {"label": "예상 수익 변화", "value": f"+{estimated_profit} index", "tone": "positive"},
-            {"label": "부실률 변화", "value": f"+{estimated_risk}%", "tone": "warning"},
+            {"label": metric_labels[0], "value": f"+{estimated_uplift}%", "tone": "positive"},
+            {"label": metric_labels[1], "value": f"+{estimated_profit} index", "tone": "positive"},
+            {"label": metric_labels[2], "value": f"+{estimated_risk}%", "tone": "warning"},
         ],
     }
 
@@ -4315,7 +4361,7 @@ def _build_agentic_workspace_payload(
     explainability = _build_explainability_agent_result(query, selected_product, selected_feature, representative_features, customer_clusters, reject_code_summary)
     cluster = _build_cluster_intelligence_result(customer_clusters, selected_product, query=query)
     policy = _build_policy_conflict_result(regulation_evidence, regulation_evidence_reason, answer_summary)
-    strategy = _build_strategy_simulation_result(customer_clusters, reject_code_summary)
+    strategy = _build_strategy_simulation_result(customer_clusters, reject_code_summary, query=query)
     persona = _build_department_persona_result(answer_summary, customer_clusters)
     tool_map = {
         "explainability": explainability,
@@ -5587,6 +5633,38 @@ def _build_general_fallback_prompt_pack(
     return pack
 
 
+def _build_strategy_simulation_prompt_pack(
+    query: str,
+    selected_product: str,
+    base_prompt_pack: dict[str, object] | None = None,
+) -> dict[str, object]:
+    pack = dict(base_prompt_pack or {})
+    system_prompt = str(pack.get("system_prompt") or "").strip()
+    user_prompt = str(pack.get("user_prompt") or "").strip()
+    strategy_rules = [
+        "[STRATEGY SIMULATION MODE]",
+        "- 반드시 Ollama가 고객군/승인률/금리/한도/부실률 근거를 함께 해석해 답변한다.",
+        "- 질문의 변경 조건을 그대로 사용한다. 금리 질문이면 DSR/거절코드 완화로 바꾸지 않는다.",
+        "- 확정 예측처럼 말하지 말고, 현재 학습 데이터 기준의 민감도 가정으로 표현한다.",
+        "- 승인률, 수익 또는 이자수익, 리스크/부실률 방향을 짧게 비교한다.",
+        "- 근거가 약한 수치는 '가정' 또는 '방향성'이라고 표시한다.",
+    ]
+    pack["answer_mode"] = "strategy_simulation_ollama_required"
+    pack["system_prompt"] = "\n".join([system_prompt, *strategy_rules]).strip()
+    pack["user_prompt"] = "\n".join([
+        user_prompt,
+        "",
+        f"[SIMULATION QUESTION] {query}",
+        f"[SELECTED PRODUCT] {selected_product}",
+        "이 질문은 예측/시뮬레이션 질문입니다. 위 근거 안에서 변경 조건별 영향만 답하세요.",
+    ]).strip()
+    pack["context_preview"] = [
+        *list(pack.get("context_preview") or []),
+        f"strategy simulation required: {query[:120]}",
+    ]
+    return pack
+
+
 def _run_general_ollama_fallback(
     query: str,
     prompt_pack: dict[str, object],
@@ -6344,6 +6422,7 @@ def _build_feature_workbench_payload(
     )
     raw_regulation_evidence_count = len(raw_regulation_evidence)
     regulation_first_route = _query_requires_regulation_first(query)
+    strategy_simulation_route = _query_requires_strategy_simulation(query)
     if regulation_first_route:
         regulation_evidence, regulation_evidence_reason = _select_regulation_first_evidence(
             query,
@@ -6402,9 +6481,25 @@ def _build_feature_workbench_payload(
             *list(prompt_pack.get("context_preview") or []),
             f"user memo: {department or '-'} / {memo_notes[:80] or '-'}",
         ]
+    evidence_gate = evaluate_runtime_evidence(
+        query=query,
+        answer_mode=str((conversation_profile or {}).get("answer_mode") or "general"),
+        retrieval_results=retrieval_results,
+        regulation_evidence=regulation_evidence,
+        customer_clusters=customer_clusters,
+    )
+    if evidence_gate.get("allowed"):
+        prompt_pack = apply_grounded_prompt_rules(prompt_pack, evidence_gate)
     server_answer_summary = _build_answer_summary(query, selected_product, selected_feature, representative_features, customer_clusters, retrieval_results, profiles, related_features=related_features, reject_code_summary=reject_code_summary)
     server_answer_summary["citations"] = list((prompt_pack.get("semantic_context") or {}).get("regulation_citations") or [])
-    if regulation_first_route and regulation_evidence:
+    if not evidence_gate.get("allowed"):
+        ollama_runtime, answer_summary = build_blocked_runtime_answer(
+            query=query,
+            evaluation=evidence_gate,
+            model=str(prompt_pack.get("model") or OLLAMA_LIGHTWEIGHT_MODEL),
+        )
+        ollama_runtime["updated_at"] = _iso_now()
+    elif regulation_first_route and regulation_evidence:
         prompt_pack = _build_regulation_first_prompt_pack(query, regulation_evidence, prompt_pack)
         answer_summary = _build_regulation_first_answer_summary(query, regulation_evidence)
         ollama_runtime = {
@@ -6429,6 +6524,9 @@ def _build_feature_workbench_payload(
     elif regulation_first_route:
         prompt_pack = _build_general_fallback_prompt_pack(query, prompt_pack)
         ollama_runtime, answer_summary = _run_general_ollama_fallback(query, prompt_pack, job_id=job_id)
+    elif strategy_simulation_route:
+        prompt_pack = _build_strategy_simulation_prompt_pack(query, selected_product, prompt_pack)
+        ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, server_answer_summary, job_id=job_id)
     elif _query_asks_average_metrics(query) or query_has_segment_metric_intent(query):
         answer_summary = _build_average_metric_answer_summary(query, selected_product, profiles, customer_clusters)
         ollama_runtime = {
@@ -6473,6 +6571,8 @@ def _build_feature_workbench_payload(
         }
     else:
         ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, server_answer_summary, job_id=job_id)
+    if evidence_gate.get("allowed"):
+        answer_summary = decorate_grounded_answer_summary(answer_summary, evidence_gate)
     reject_code_line = _format_reject_code_summary(reject_code_summary)
     if reject_code_line and _query_has_reject_intent(query, selected_feature):
         reject_code_scope_note = _format_reject_code_scope_note(reject_code_summary, selected_product)

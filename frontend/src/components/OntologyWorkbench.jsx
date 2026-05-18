@@ -40,6 +40,15 @@ const ONTOLOGY_PROMPT_EXAMPLES = [
     ],
   },
   {
+    group: '예측/시뮬레이션',
+    accent: 'violet',
+    prompts: [
+      '이지신용대출 금리를 올리면 승인률과 수익은 어떻게 될까?',
+      '이지론 금리를 1%p 낮추면 고객군별 리스크가 어떻게 바뀔까?',
+      '이지신용대출 한도를 늘리면 승인 전환과 부실률은 어떻게 변할까?',
+    ],
+  },
+  {
     group: '군집/벡터',
     accent: 'amber',
     prompts: [
@@ -263,6 +272,12 @@ function RuntimeProgressPanel({
   );
 }
 
+function parseDisplayNumber(value) {
+  const text = String(value || '').replace(/,/g, '');
+  const matched = text.match(/-?\d+(?:\.\d+)?/);
+  return matched ? Number(matched[0]) : 0;
+}
+
 function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   if (!tool) {
     return null;
@@ -273,11 +288,6 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   const conflicts = tool.conflicts || [];
   const metrics = tool.metrics || [];
   const personas = tool.personas || [];
-  const clusterBars = clusters.map((item) => ({
-    label: String(item.decision || item.display_label || item.label || '군집').replace(/\s+/g, ' ').slice(0, 12),
-    value: Number(item.records || item.count || item.size || 0),
-    tone: String(item.decision || '').includes('거절') ? 'reject' : 'approve',
-  }));
   const detailedClusterRows = clusters.map((item) => ({
     key: item.cluster_id || item.label || `${item.decision || '군집'}-${item.records || 0}`,
     label: String(item.display_label || item.label || item.decision || '군집'),
@@ -286,15 +296,17 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
     approvalRate: Number(item.approval_rate || 0),
     avgRate: String(item.avg_rate || '-'),
     avgLimit: String(item.avg_limit || '-'),
+    delinquencyRate: String(item.delinquency_rate || '-'),
+    modelScore: String(item.avg_model_score || '-'),
   }));
-  const maxClusterBar = Math.max(1, ...clusterBars.map((item) => item.value));
-  const hasClusterBarChart = clusterBars.length > 1;
   const hasDetailedClusterRows = detailedClusterRows.length > 0;
-  const shouldCollapseClusterExploratory = (
-    collapseExploratoryVisuals
-    && tool?.id === 'cluster'
-    && (hasClusterBarChart || hasDetailedClusterRows)
-  );
+  const maxClusterRecords = Math.max(1, ...detailedClusterRows.map((item) => item.records));
+  const maxClusterRate = Math.max(1, ...detailedClusterRows.map((item) => parseDisplayNumber(item.avgRate)));
+  const maxClusterLimit = Math.max(1, ...detailedClusterRows.map((item) => parseDisplayNumber(item.avgLimit)));
+  const maxDelinquencyRate = Math.max(1, ...detailedClusterRows.map((item) => parseDisplayNumber(item.delinquencyRate)));
+  const shouldRenderClusterSummaryChart = tool?.id === 'cluster' && hasDetailedClusterRows;
+  const isClusterTool = tool?.id === 'cluster';
+  const hasMoreClusterContext = isClusterTool && (Boolean(tool.summary) || metrics.length > 0 || shapValues.length > 0);
   return (
     <motion.article
       className={`financial-tool-card tool-${tool.id || 'generic'}`}
@@ -309,13 +321,77 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
         </div>
         <span className="sample-pill">{tool.status || 'ready'}</span>
       </div>
-      <p>{tool.summary || '대화 흐름에 필요한 분석 도구를 실행했습니다.'}</p>
-      {metrics.length ? (
+      {shouldRenderClusterSummaryChart ? (
+        <div className="tool-cluster-summary-chart" aria-label="군집 요약 차트">
+          {detailedClusterRows.map((row) => {
+            const rateValue = parseDisplayNumber(row.avgRate);
+            const limitValue = parseDisplayNumber(row.avgLimit);
+            const delinquencyValue = parseDisplayNumber(row.delinquencyRate);
+            return (
+              <section key={`${tool.id}-cluster-summary-${row.key}`} className={`tool-cluster-summary-row is-${row.decision.includes('거절') ? 'reject' : 'approve'}`}>
+                <div className="tool-cluster-summary-head">
+                  <span>{row.decision} · {row.records.toLocaleString()}건</span>
+                  <strong>{row.label}</strong>
+                </div>
+                <div className="tool-cluster-summary-bars">
+                  <div>
+                    <span>표본</span>
+                    <i><b style={{ width: `${Math.max(8, Math.round((row.records / maxClusterRecords) * 100))}%` }} /></i>
+                    <em>{row.records.toLocaleString()}건</em>
+                  </div>
+                  <div>
+                    <span>금리</span>
+                    <i><b style={{ width: `${Math.max(8, Math.round((rateValue / maxClusterRate) * 100))}%` }} /></i>
+                    <em>{row.avgRate}</em>
+                  </div>
+                  <div>
+                    <span>한도</span>
+                    <i><b style={{ width: `${Math.max(8, Math.round((limitValue / maxClusterLimit) * 100))}%` }} /></i>
+                    <em>{row.avgLimit}</em>
+                  </div>
+                  <div>
+                    <span>연체/부실</span>
+                    <i><b style={{ width: `${delinquencyValue > 0 ? Math.max(8, Math.round((delinquencyValue / maxDelinquencyRate) * 100)) : 0}%` }} /></i>
+                    <em>{row.delinquencyRate}</em>
+                  </div>
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      ) : null}
+      {isClusterTool && hasMoreClusterContext ? (
+        <details className="tool-exploratory-disclosure">
+          <summary>더보기</summary>
+          {tool.summary ? <p>{tool.summary}</p> : null}
+          {metrics.length ? (
+            <div className="tool-metric-row">
+              {metrics.map((item) => <div key={item.label} className={`tool-metric is-${item.tone || 'neutral'}`}><span>{item.label}</span><strong>{item.value}</strong></div>)}
+            </div>
+          ) : null}
+          {shapValues.length ? (
+            <div className="tool-impact-list">
+              {shapValues.map((item) => (
+                <div key={`${tool.id}-${item.feature}`} className="tool-impact-row">
+                  <div className="tool-impact-meta">
+                    <strong>{item.feature}</strong>
+                    <span>{item.evidence || item.direction || ''}</span>
+                  </div>
+                  <div className="tool-impact-bar"><span style={{ width: `${Math.min(100, Number(item.impact || 0))}%` }} /></div>
+                  <b>{Number(item.impact || 0).toFixed(1)}%</b>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </details>
+      ) : null}
+      {!isClusterTool ? <p>{tool.summary || '대화 흐름에 필요한 분석 도구를 실행했습니다.'}</p> : null}
+      {!isClusterTool && metrics.length ? (
         <div className="tool-metric-row">
           {metrics.map((item) => <div key={item.label} className={`tool-metric is-${item.tone || 'neutral'}`}><span>{item.label}</span><strong>{item.value}</strong></div>)}
         </div>
       ) : null}
-      {shapValues.length ? (
+      {!isClusterTool && shapValues.length ? (
         <div className="tool-impact-list">
           {shapValues.map((item) => (
             <div key={`${tool.id}-${item.feature}`} className="tool-impact-row">
@@ -329,7 +405,7 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
           ))}
         </div>
       ) : null}
-      {clusters.length ? (
+      {tool?.id !== 'cluster' && clusters.length ? (
         <div className="tool-mini-grid">
           {clusters.map((item) => (
             <div key={item.cluster_id || item.label} className="tool-mini-card">
@@ -341,68 +417,6 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
           ))}
         </div>
       ) : null}
-      {shouldCollapseClusterExploratory ? (
-        <details className="tool-exploratory-disclosure">
-          <summary>보조 분석 그래프 보기</summary>
-          {hasClusterBarChart ? (
-            <>
-              <div className="tool-cluster-bar-chart-desc" style={{ marginBottom: 4, fontWeight: 500, color: '#2a2a2a' }}>
-                {tool.cluster_compare_label || '승인/거절 고객군별 주요 분포 비교 (승인률, 인원수 등)'}
-              </div>
-              <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
-                {clusterBars.map((item, index) => (
-                  <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
-                    <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
-                    <b>{item.label}</b>
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : null}
-          {hasDetailedClusterRows ? (
-            <div className="tool-mini-grid" style={{ marginTop: 10 }}>
-              {detailedClusterRows.map((row) => (
-                <div key={`${tool.id}-cluster-detail-${row.key}`} className="tool-mini-card">
-                  <span>{row.decision} · {row.records.toLocaleString()}건</span>
-                  <strong>{row.label}</strong>
-                  <small>승인률 {row.approvalRate.toFixed(1)}% · 평균 금리 {row.avgRate}</small>
-                  <small>평균 한도 {row.avgLimit}</small>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </details>
-      ) : (
-        <>
-          {hasClusterBarChart ? (
-            <>
-              <div className="tool-cluster-bar-chart-desc" style={{ marginBottom: 4, fontWeight: 500, color: '#2a2a2a' }}>
-                {tool.cluster_compare_label || '승인/거절 고객군별 주요 분포 비교 (승인률, 인원수 등)'}
-              </div>
-              <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
-                {clusterBars.map((item, index) => (
-                  <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
-                    <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
-                    <b>{item.label}</b>
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : null}
-          {hasDetailedClusterRows ? (
-            <div className="tool-mini-grid" style={{ marginTop: 10 }}>
-              {detailedClusterRows.map((row) => (
-                <div key={`${tool.id}-cluster-detail-${row.key}`} className="tool-mini-card">
-                  <span>{row.decision} · {row.records.toLocaleString()}건</span>
-                  <strong>{row.label}</strong>
-                  <small>승인률 {row.approvalRate.toFixed(1)}% · 평균 금리 {row.avgRate}</small>
-                  <small>평균 한도 {row.avgLimit}</small>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </>
-      )}
       {conflicts.length ? (
         <div className="tool-mini-list">
           {conflicts.map((item) => <span key={item.title} className={`tool-status-line is-${item.level || 'info'}`}>{item.title}</span>)}
@@ -567,6 +581,9 @@ function bunnySpeech({ agentState, activeStageKey, showSuccess, isHovered, hasSu
   }
   if (agentState === 'idle') {
     return { message: '지금은 쉬고 있어요. 궁금한 걸 던져 주세요.', detail: '대기 중', mood: 'idle' };
+  }
+  if (agentState === 'clarifying') {
+    return { message: '근거를 못 찾았어요. 상품명이나 정책 키워드를 조금 더 콕 집어 주세요!', detail: '다른 질문 유도', mood: 'listening' };
   }
   return { message: stageWaitCopyKo(activeStageKey), detail: '작업 중', mood: 'talking' };
 }
@@ -778,6 +795,7 @@ function deriveAgentState({
   activeStageKey,
   runtimeJobStatus,
   hasWorkbench,
+  hasBlockedAnswer,
   isRoniHovered,
   regulationBusy,
   showRoniSuccess,
@@ -790,6 +808,9 @@ function deriveAgentState({
     return 'clarifying';
   }
   if (hasError) {
+    return 'clarifying';
+  }
+  if (hasBlockedAnswer) {
     return 'clarifying';
   }
   if (hasWorkbench && runtimeJobStatus === 'completed') {
@@ -1258,6 +1279,9 @@ function getProductDisplayName(codeOrName = '') {
 
 function getAnswerSourceTag(answerSummary = {}, ollamaStatus = '') {
   const source = String(answerSummary?.source || '').toLowerCase();
+  if (source.includes('evidence-blocked')) {
+    return '근거없음';
+  }
   if (source.includes('regulation')) {
     return '규제문서';
   }
@@ -1279,7 +1303,7 @@ function shouldShowProductChip(product = '', sourceTag = '') {
   if (!normalizedProduct || normalizedProduct === 'ALL') {
     return false;
   }
-  return !['규제문서', '일반답변'].includes(normalizedSource);
+  return !['규제문서', '일반답변', '근거없음'].includes(normalizedSource);
 }
 
 function buildCitationHighlights(citation = {}, query = '') {
@@ -2480,6 +2504,7 @@ export default function OntologyWorkbench({
     activeStageKey: activeStage?.key || 'extraction',
     runtimeJobStatus,
     hasWorkbench: Boolean(backendState.workbench),
+    hasBlockedAnswer: String(backendState.workbench?.answer_summary?.source || '').toLowerCase().includes('evidence-blocked'),
     isRoniHovered,
     regulationBusy,
     showRoniSuccess,
@@ -2527,6 +2552,8 @@ export default function OntologyWorkbench({
   const ollamaOutput = ollamaRuntime?.output || {};
   const ollamaStatus = ollamaRuntime?.status || resultSummary.ollama_status || 'skipped';
   const currentAnswerSourceTag = getAnswerSourceTag(resolvedAnswerSummary, ollamaStatus);
+  const isEvidenceBlockedAnswer = currentAnswerSourceTag === '근거없음'
+    || String(resolvedAnswerSummary?.source || '').toLowerCase().includes('evidence-blocked');
   const isDocumentOrGeneralAnswer = ['규제문서', '일반답변'].includes(currentAnswerSourceTag);
   const finalAnswerBody = hasResolvedRuntimeAnswer ? (resolvedAnswerSummary?.explanation || ollamaOutput?.response_text || '') : '';
   const ollamaFullInput = ollamaInput?.prompt || [ollamaInput?.system_prompt, ollamaInput?.user_prompt].filter(Boolean).join('\n\n') || '아직 Ollama 입력이 없습니다.';
@@ -3213,17 +3240,18 @@ export default function OntologyWorkbench({
   const workspaceToolTabs = hasResolvedRuntimeAnswer
     ? [
         { id: 'summary', label: '요약' },
-        (activeToolIds.has('explainability') || runtimeToolCards.length > 0)
+        !isEvidenceBlockedAnswer && (activeToolIds.has('explainability') || runtimeToolCards.length > 0)
           ? { id: 'insight', label: '상세 인사이트' }
           : null,
-        activeToolIds.has('policy') ? { id: 'policy', label: '정책/규제 영향' } : null,
-        activeToolIds.has('strategy') ? { id: 'strategy', label: '상품 시뮬레이션' } : null,
+        !isEvidenceBlockedAnswer && activeToolIds.has('policy') ? { id: 'policy', label: '정책/규제 영향' } : null,
+        !isEvidenceBlockedAnswer && activeToolIds.has('strategy') ? { id: 'strategy', label: '상품 시뮬레이션' } : null,
       ].filter(Boolean)
     : [];
   const selectedWorkspaceResultTab = workspaceToolTabs.some((tab) => tab.id === activeWorkspaceResultTab)
     ? activeWorkspaceResultTab
     : (workspaceToolTabs[0]?.id || 'summary');
-  const summaryHighlightItems = (resolvedAnswerSummary?.highlights || []).slice(0, 4);
+  const ollamaWasCalled = ['completed', 'failed', 'unavailable', 'running'].includes(String(ollamaStatus || '').toLowerCase());
+  const ollamaCallLabel = ollamaWasCalled ? 'Ollama 호출됨' : 'Ollama 미호출';
   const clusterToolCard = runtimeToolMap.cluster;
   const insightToolCard = runtimeToolMap.explainability;
   const policyToolCard = runtimeToolMap.policy;
@@ -3729,16 +3757,36 @@ export default function OntologyWorkbench({
                                     </p>
                                   </div>
                                 </article>
-                                {summaryHighlightItems.length ? (
-                                  <div className="workspace-summary-metric-grid">
-                                    {summaryHighlightItems.map((item) => (
-                                      <div key={`summary-${item.label}-${item.value}`} className="workspace-summary-metric">
-                                        <span>{item.label}</span>
-                                        <strong><HighlightedAnswerText text={String(item.value || '-')} terms={answerHighlightTerms} termMeta={answerTermMeta} /></strong>
+                                <div className="workspace-summary-status-row">
+                                  <span
+                                    className={`ollama-call-icon ${ollamaWasCalled ? 'is-called' : 'is-skipped'}`}
+                                    title={ollamaCallLabel}
+                                    aria-label={ollamaCallLabel}
+                                  />
+                                  <details className="workspace-answer-disclosure">
+                                    <summary>더보기</summary>
+                                    <div className="workspace-answer-disclosure-body">
+                                      <div className="ontology-runtime-answer-head">
+                                        <span className="panel-kicker">Answer</span>
+                                        <div className="detail-chip-row">
+                                          <span className="sample-pill">{currentAnswerSourceTag}</span>
+                                          {shouldShowProductChip(selectedProductCode || backendState.workbench?.input?.product, currentAnswerSourceTag) ? (
+                                            <span className="sample-pill">상품 {getProductDisplayName(selectedProductCode || backendState.workbench?.input?.product)}</span>
+                                          ) : null}
+                                          <button type="button" className="secondary-button ontology-inline-detail-button" onClick={() => handleOpenDetailModal('answer')}>자세히</button>
+                                        </div>
                                       </div>
-                                    ))}
-                                  </div>
-                                ) : null}
+                                      <div className="ontology-answer-stream-shell">
+                                        <strong className="ontology-answer-stream-headline">
+                                          <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '답변 기록'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                        </strong>
+                                        <p className="ontology-answer-stream-body">
+                                          <HighlightedAnswerText text={finalAnswerBody || '답변 내용을 불러오는 중입니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} className="ontology-answer-stream-copy" />
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </details>
+                                </div>
                                 {/* K코드별 통계 표 노출 (summary 영역) */}
                                 {resolvedAnswerSummary?.top_reject_codes?.length ? (
                                   <div className="summary-reject-code-table" style={{ margin: '16px 0', overflowX: 'auto' }}>
@@ -3765,17 +3813,19 @@ export default function OntologyWorkbench({
                                   </div>
                                 ) : null}
                               </div>
+                              {!isEvidenceBlockedAnswer ? (
                               <div className="workspace-summary-tools">
+                                {strategyToolCard ? <FinancialToolCard tool={strategyToolCard} /> : null}
                                 {/* Customer Cluster Intelligence Card (군집 카드) */}
-                                {clusterToolCard ? <FinancialToolCard tool={clusterToolCard} collapseExploratoryVisuals={isAverageDistributionQuestion} /> : null}
-                                {insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
+                                {!strategyToolCard && clusterToolCard ? <FinancialToolCard tool={clusterToolCard} collapseExploratoryVisuals={isAverageDistributionQuestion} /> : null}
+                                {!strategyToolCard && insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
                                 {/* 군집/로그/지표가 없을 때 Explainability Agent 결과로 대체 */}
-                                {!clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
+                                {!strategyToolCard && !clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
                                   !insightToolCard
                                     ? <div className="empty-box compact">조건에 맞는 고객군, 로그, 지표가 없습니다.<br />상품, 연령, 기간 등 필터를 넓혀보세요.</div>
                                     : null
                                 ) : null}
-                                {!clusterToolCard && clusterInsightItems.length ? (
+                                {!strategyToolCard && !clusterToolCard && clusterInsightItems.length ? (
                                   <div className="tool-mini-grid">
                                     {clusterInsightItems.map((cluster) => (
                                       <div key={cluster.cluster_id || cluster.label} className="tool-mini-card">
@@ -3787,6 +3837,7 @@ export default function OntologyWorkbench({
                                   </div>
                                 ) : null}
                               </div>
+                              ) : null}
                             </div>
                           ) : null}
 
@@ -3856,6 +3907,7 @@ export default function OntologyWorkbench({
                       </section>
                     ) : null}
 
+                    {!isEvidenceBlockedAnswer && (showAnswerProgress || !workspaceToolTabs.length) ? (
                     <article className="ontology-chat-bubble ontology-chat-bubble-assistant">
                       <div className="ontology-runtime-answer-head">
                           <span className="panel-kicker">Answer</span>
@@ -3984,6 +4036,7 @@ export default function OntologyWorkbench({
                         </div>
                       )}
                     </article>
+                    ) : null}
                   </React.Fragment>
                 );
               })}
