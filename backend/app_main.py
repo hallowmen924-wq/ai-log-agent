@@ -666,8 +666,11 @@ def _build_answer_summary(query: str, selected_product: str, selected_feature: d
     amount_source = str(top_cluster.get("top_amount_source") or "")
     rate_source = str(top_cluster.get("top_rate_source") or "")
     metric_summary = _build_cluster_metric_summary(top_cluster, representative_features)
-    headline = f"{selected_product or '전체'} 기준 상위 군집은 {income_band} / {age_band} / {amount_band} 입니다."
+    # 대표축 해석이 headline에 먼저 오도록 개선
+    headline = f"질문 '{query or '기본 질의'}'는 {selected_product or '전체'} / {representative_label} 기준으로 해석했습니다."
+    # 군집 요약은 explanation에 포함
     if _query_asks_influence_features(query):
+        # 영향 feature 최대 5개, 군집 최대 2개만 반환
         amount_axes = [
             item.get("feature_name") or item.get("feature_id") or ""
             for item in representative_features
@@ -676,46 +679,30 @@ def _build_answer_summary(query: str, selected_product: str, selected_feature: d
         ]
         influence_names = _dedupe_text_items([
             item.get("feature_name") or item.get("feature_id") or ""
-            for item in (related_features or [])[:6]
-        ], limit=6)
+            for item in (related_features or [])[:5]
+        ], limit=5)
         product_label = _product_display_name(selected_product) or selected_product or "해당 상품"
         influence_buckets = _dedupe_text_items([
             _business_influence_bucket(item)[0]
-            for item in (related_features or [])
+            for item in (related_features or [])[:5]
             if isinstance(item, dict)
         ], limit=3)
         return {
             "headline": f"{product_label} 승인 한도는 {', '.join(influence_buckets) or '핵심 심사 기준'}이 좌우합니다.",
-            "explanation": _build_business_friendly_influence_answer({"influence_features": related_features or []}, selected_product),
+            "explanation": _build_business_friendly_influence_answer({"influence_features": (related_features or [])[:5]}, selected_product),
             "highlights": [
                 {"label": "핵심 기준", "value": " / ".join(influence_buckets) or "-"},
                 {"label": "주요 지표", "value": ", ".join(influence_names[:3]) or "-"},
                 {"label": "상품", "value": product_label},
             ],
         }
-        axis_label = " / ".join(_dedupe_text_items(amount_axes, limit=3)) or representative_label
-        headline = f"{selected_product or '전체'} 기준 {axis_label}에 영향을 주는 feature를 우선 설명합니다."
-        explanation = (
-            f"질문 '{query or '기본 질의'}'는 군집 분포가 아니라 영향 feature 탐색으로 해석했습니다. "
-            f"대표 축은 {representative_label}이며, 영향 feature 후보는 {', '.join(influence_names) or '부족'} 입니다."
-        )
-        return {
-            "headline": headline,
-            "explanation": explanation,
-            "highlights": [
-                {"label": "Primary Axis", "value": top_feature_name},
-                {"label": "Top Axes", "value": representative_label},
-                {"label": "Influence Features", "value": ", ".join(influence_names[:3]) or "-"},
-                {"label": "Product", "value": selected_product or "ALL"},
-            ],
-        }
+        # axis_label, headline, explanation 등은 기존과 동일하게 유지
     if not customer_clusters:
         headline = f"{selected_product or '전체'} 기준으로 질문과 직접 연결된 군집을 찾지 못했습니다."
         if reject_code_line and reject_intent:
             product_name = _product_display_name(selected_product) or selected_product or "전체"
             headline = f"{product_name} 기준 거절사유코드 분포를 확인했습니다."
     explanation = (
-        f"질문 '{query or '기본 질의'}' 는 {representative_label} 기준으로 해석했고, "
         f"상위 고객군집은 {decision} {age_band} · {income_band} · {amount_band} 조합으로 {count}건입니다."
     )
     if avg_income or avg_amount:
@@ -3415,7 +3402,24 @@ def _select_primary_feature_hybrid(
     seen_axis_keys: set[str] = set()
     sorted_candidates = sorted(ranked_payload, key=lambda item: (-float(item.get("hybrid_score") or 0.0), int(item.get("rank") or 0)))
     winning_score = float(winning_candidate.get("hybrid_score") or 0.0)
-    for candidate in sorted_candidates:
+    # 승인률에 중요한 feature 우선 후보군 정의
+    approval_critical_keywords = [
+        "연소득", "소득", "income", "신용점수", "kcb", "nice", "등급", "score", "dsr", "dti", "잔액", "대출잔액", "기존대출", "연체", "부채", "부채비율"
+    ]
+    def is_approval_critical(candidate):
+        fname = (candidate.get("feature_name") or "").lower()
+        fid = (candidate.get("feature_id") or "").lower()
+        desc = (candidate.get("description") or "").lower()
+        return any(k in fname or k in fid or k in desc for k in approval_critical_keywords)
+
+    # 1차: 승인에 중요한 feature만 추출
+    critical_candidates = [c for c in sorted_candidates if is_approval_critical(c)]
+    # 2차: 기존 방식대로 점수 높은 후보
+    fallback_candidates = [c for c in sorted_candidates if c not in critical_candidates]
+    representative_candidates = []
+    seen_axis_keys: set[str] = set()
+    # 승인에 중요한 feature에서 최대 3개
+    for candidate in critical_candidates:
         axis_key = str(candidate.get("axis_key") or "feature")
         candidate_score = float(candidate.get("hybrid_score") or 0.0)
         evidence_count = len(candidate.get("matched_tokens") or []) + len(candidate.get("matched_feature_name_tokens") or []) + int(candidate.get("support_count") or 0)
@@ -3428,8 +3432,18 @@ def _select_primary_feature_hybrid(
             continue
         representative_candidates.append(candidate)
         seen_axis_keys.add(axis_key)
-        if len(representative_candidates) >= min(3, len(sorted_candidates)):
+        if len(representative_candidates) >= 3:
             break
+    # 만약 3개 미만이면 점수순으로 추가
+    if len(representative_candidates) < 3:
+        for candidate in fallback_candidates:
+            axis_key = str(candidate.get("axis_key") or "feature")
+            if axis_key in seen_axis_keys:
+                continue
+            representative_candidates.append(candidate)
+            seen_axis_keys.add(axis_key)
+            if len(representative_candidates) >= 3:
+                break
     if not representative_candidates:
         representative_candidates = [winning_candidate]
     representative_names = [str(item.get("feature_name") or item.get("feature_id") or "") for item in representative_candidates]
@@ -4817,13 +4831,40 @@ def _build_semantic_retrieval_result(
 ) -> dict[str, object]:
     representative_candidates = _resolve_representative_features(primary_feature_selection, selected_feature=selected_feature, limit=3)
     top_candidates = representative_candidates or list((primary_feature_selection or {}).get("top_k") or [])[:3]
+    # top-3 후보 전체를 대표축으로 반환
+    # 도메인/카테고리 우선순위 적용: 직장인은 직업/재직, 카드론은 loan/한도/금리/연체 도메인 feature 우선 포함
+    def is_job_feature(item):
+        name = (item.get("feature_name") or "").lower()
+        category = (item.get("category") or "").lower()
+        return any(token in name or token in category for token in ["직업", "재직", "고용", "직장"])
+
+    def is_loan_core_feature(item):
+        name = (item.get("feature_name") or "").lower()
+        category = (item.get("category") or "").lower()
+        return any(token in name or token in category for token in ["loan", "한도", "금리", "연체", "이자", "대출", "limit", "rate", "delinquency"])
+
+    # 1. 도메인별 우선 feature 추출
+    job_features = [item for item in top_candidates if is_job_feature(item)]
+    loan_features = [item for item in top_candidates if is_loan_core_feature(item)]
+    # 2. top-3에 도메인별 대표 feature가 반드시 포함되도록 보장
+    selected = []
+    for item in (job_features + loan_features):
+        if item not in selected:
+            selected.append(item)
+        if len(selected) >= 3:
+            break
+    for item in top_candidates:
+        if item not in selected:
+            selected.append(item)
+        if len(selected) >= 3:
+            break
     primary_features = [
         {
             "feature_id": str(item.get("feature_id") or ""),
             "feature_name": str(item.get("feature_name") or item.get("feature_id") or ""),
             "score": round(float(item.get("hybrid_score") or item.get("base_score") or 0.0), 4),
         }
-        for item in top_candidates
+        for item in selected[:3]
         if str(item.get("feature_id") or "").strip()
     ]
     if not primary_features and selected_feature:
@@ -5987,13 +6028,49 @@ def _build_feature_workbench_payload(
         conversation_profile=conversation_profile,
     )
     ranked_features.sort(key=lambda item: (-item[0], -(int((item[1].get("coverage") or {}).get("mapping_count") or 0)), str(item[1].get("feature_name") or item[1].get("feature_id") or "")))
+
+    # 도메인/카테고리 우선순위 적용: 직장인은 직업/재직, 카드론은 loan/한도/금리/연체 도메인 feature 우선 포함
+    def is_job_feature(item):
+        name = (item.get("feature_name") or "").lower()
+        category = (item.get("category") or "").lower()
+        return any(token in name or token in category for token in ["직업", "재직", "고용", "직장"])
+
+    def is_loan_core_feature(item):
+        name = (item.get("feature_name") or "").lower()
+        category = (item.get("category") or "").lower()
+        return any(token in name or token in category for token in ["loan", "한도", "금리", "연체", "이자", "대출", "limit", "rate", "delinquency"])
+
+    # 1. 도메인별 우선 feature 추출
+    top_candidates = [item[1] for item in ranked_features[:12]]
+    job_features = [item for item in top_candidates if is_job_feature(item)]
+    loan_features = [item for item in top_candidates if is_loan_core_feature(item)]
+    # 2. top-3에 도메인별 대표 feature가 반드시 포함되도록 보장
+    selected = []
+    for item in (job_features + loan_features):
+        if item not in selected:
+            selected.append(item)
+        if len(selected) >= 3:
+            break
+    for item in top_candidates:
+        if item not in selected:
+            selected.append(item)
+        if len(selected) >= 3:
+            break
+    # top_k 후보를 도메인 우선으로 재정의
+    top_k_candidates = selected[:3]
     if job_id:
         _update_workbench_job(job_id, "mapping", "completed", f"semantic search mode={semantic_search_mode}, 상위 후보 {min(len(ranked_features), 12)}건을 정렬했습니다.", meta={"semantic_search_mode": semantic_search_mode})
 
     if job_id:
         _update_workbench_job(job_id, "ontology", "running", "top-k + intent + graph hybrid 방식으로 대표 축과 related feature 를 계산합니다.")
+    # 도메인 우선 top_k_candidates를 hybrid 대표축 선정에 강제 반영
+    # top_k_candidates가 3개 이상이면 이 후보만으로 대표축 선정
+    if len(top_k_candidates) >= 3:
+        ranked_features_for_hybrid = [(0, item) for item in top_k_candidates]
+    else:
+        ranked_features_for_hybrid = ranked_features
     selected_feature, primary_feature_selection = _select_primary_feature_hybrid(
-        ranked_features,
+        ranked_features_for_hybrid,
         query,
         selected_product,
         all_features=all_features,

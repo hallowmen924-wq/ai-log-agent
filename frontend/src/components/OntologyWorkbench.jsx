@@ -266,14 +266,18 @@ function FinancialToolCard({ tool }) {
   if (!tool) {
     return null;
   }
-  const shapValues = tool.shap_values || [];
-  const clusters = tool.clusters || [];
+  // 영향 feature는 최대 5개, 군집은 최대 2개만 노출
+  const shapValues = (tool.shap_values || []).slice(0, 5);
+  const clusters = (tool.clusters || []).slice(0, 2);
   const conflicts = tool.conflicts || [];
   const metrics = tool.metrics || [];
   const personas = tool.personas || [];
   const visualization = tool.visualization || null;
   const visualizationPoints = visualization?.points || [];
-  const clusterBars = clusters.slice(0, 4).map((item) => ({
+
+  // 승인 vs 거절 비교 탭에서는 군집 시각화 숨김
+  const isApproveVsRejectTab = (tool?.id === 'cluster' && tool?.title?.includes('승인 vs 거절'));
+  const clusterBars = clusters.map((item) => ({
     label: String(item.decision || item.display_label || item.label || '군집').replace(/\s+/g, ' ').slice(0, 12),
     value: Number(item.records || item.count || item.size || 0),
     tone: String(item.decision || '').includes('거절') ? 'reject' : 'approve',
@@ -315,7 +319,7 @@ function FinancialToolCard({ tool }) {
       ) : null}
       {clusters.length ? (
         <div className="tool-mini-grid">
-          {clusters.slice(0, 3).map((item) => (
+          {clusters.map((item) => (
             <div key={item.cluster_id || item.label} className="tool-mini-card">
               <span>{item.decision || '군집'} · {item.records || 0}건</span>
               <strong>{item.display_label || item.label}</strong>
@@ -326,16 +330,22 @@ function FinancialToolCard({ tool }) {
         </div>
       ) : null}
       {clusterBars.length > 1 ? (
-        <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
-          {clusterBars.map((item, index) => (
-            <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
-              <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
-              <b>{item.label}</b>
-            </span>
-          ))}
-        </div>
+        <>
+          <div className="tool-cluster-bar-chart-desc" style={{marginBottom: 4, fontWeight: 500, color: '#2a2a2a'}}>
+            승인/거절 고객군별 주요 분포 비교 (승인률, 인원수 등)
+          </div>
+          <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
+            {clusterBars.map((item, index) => (
+              <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
+                <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
+                <b>{item.label}</b>
+              </span>
+            ))}
+          </div>
+        </>
       ) : null}
-      {visualizationPoints.length ? (
+      {/* 승인 vs 거절 비교 탭에서는 군집 시각화 숨김 */}
+      {visualizationPoints.length && !isApproveVsRejectTab ? (
         <div className="tool-cluster-visual">
           <div className="tool-cluster-visual-head">
             <span>{visualization?.x_label || 'x'}</span>
@@ -1497,7 +1507,19 @@ function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, o
 
   return (
     <motion.div className="prompt-modal-backdrop metric-cube-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-      <motion.section className="prompt-modal metric-cube-modal" initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+      <motion.section
+        className="prompt-modal metric-cube-modal"
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          maxWidth: '1080px',
+          minWidth: '720px',
+          width: '80vw',
+        }}
+      >
         <div className="metric-cube-modal-head">
           <div>
             <span className="panel-kicker">Semantic Metric Layer</span>
