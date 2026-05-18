@@ -13,6 +13,7 @@ import {
   setNewsAgentOllamaEnabled,
   setOllamaGpuEnabled,
   setOntologyQueryPriorityEnabled,
+  setRegulationUploadSummaryEnabled,
   startCardloanDebate,
   uploadRegulationFiles,
 } from './api';
@@ -328,6 +329,7 @@ function initialStatus() {
     last_log_ingest_time: null,
     news_agent_ollama_enabled: false,
     log_agent_ollama_enabled: false,
+    regulation_upload_summary_enabled: false,
     ollama_gpu_enabled: true,
     ontology_query_priority_enabled: true,
   };
@@ -2193,7 +2195,7 @@ function App() {
   const [activeDebateMessageId, setActiveDebateMessageId] = useState(null);
   const [theme, setTheme] = useState(loadStoredTheme);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
-  const [agentOllamaToggleBusy, setAgentOllamaToggleBusy] = useState({ news: false, log: false, gpu: false, ontology: false });
+  const [agentOllamaToggleBusy, setAgentOllamaToggleBusy] = useState({ news: false, log: false, gpu: false, ontology: false, regulationSummary: false });
   const [agentFlowTick, setAgentFlowTick] = useState(0);
   const [selectedGraphTarget, setSelectedGraphTarget] = useState({ kind: 'flow', id: AGENT_FLOW_EDGES[0].id });
   const [agentFlowPanelOpen, setAgentFlowPanelOpen] = useState(false);
@@ -2530,6 +2532,27 @@ function App() {
       setErrorMessage(String(error.message || error));
     } finally {
       setAgentOllamaToggleBusy((previous) => ({ ...previous, [busyKey]: false }));
+    }
+  }
+
+  async function handleToggleRegulationUploadSummary(enabled) {
+    setAgentOllamaToggleBusy((previous) => ({ ...previous, regulationSummary: true }));
+    setStatus((previous) => ({ ...previous, regulation_upload_summary_enabled: Boolean(enabled) }));
+    try {
+      await setRegulationUploadSummaryEnabled(enabled);
+      setActiveToast({
+        id: `regulation-summary-toggle-${Date.now()}`,
+        tone: enabled ? 'completed' : 'running',
+        kicker: 'REGULATION UPLOAD',
+        title: enabled ? '업로드 요약 생성 켜짐' : '업로드 요약 생성 꺼짐',
+        meta: enabled ? '문서 업로드 후 요약 생성 포함' : '문서 업로드 시 요약 단계 생략',
+        message: enabled ? '다음 업로드부터 규제 요약을 생성합니다.' : '다음 업로드부터 요약 생성 없이 벡터 적재만 수행합니다.',
+      });
+    } catch (error) {
+      setStatus((previous) => ({ ...previous, regulation_upload_summary_enabled: !Boolean(enabled) }));
+      setErrorMessage(String(error.message || error));
+    } finally {
+      setAgentOllamaToggleBusy((previous) => ({ ...previous, regulationSummary: false }));
     }
   }
 
@@ -3414,6 +3437,20 @@ function App() {
                     disabled={agentOllamaToggleBusy.gpu}
                   >
                     {agentOllamaToggleBusy.gpu ? '적용 중...' : (status.ollama_gpu_enabled ? 'GPU 끄기' : 'GPU 켜기')}
+                  </button>
+                </div>
+                <div className="theme-agent-ollama-card">
+                  <div className="theme-agent-ollama-copy">
+                    <strong>규제 업로드 요약 생성</strong>
+                    <span>{status.regulation_upload_summary_enabled ? '업로드 후 요약 생성 포함' : '업로드 시 요약 단계 생략(빠른 모드)'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`theme-agent-toggle ${status.regulation_upload_summary_enabled ? 'active' : ''}`}
+                    onClick={() => handleToggleRegulationUploadSummary(!status.regulation_upload_summary_enabled)}
+                    disabled={agentOllamaToggleBusy.regulationSummary}
+                  >
+                    {agentOllamaToggleBusy.regulationSummary ? '적용 중...' : (status.regulation_upload_summary_enabled ? '요약 끄기' : '요약 켜기')}
                   </button>
                 </div>
                 <div className="theme-agent-ollama-card">

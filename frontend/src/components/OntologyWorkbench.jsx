@@ -263,7 +263,7 @@ function RuntimeProgressPanel({
   );
 }
 
-function FinancialToolCard({ tool }) {
+function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   if (!tool) {
     return null;
   }
@@ -273,17 +273,28 @@ function FinancialToolCard({ tool }) {
   const conflicts = tool.conflicts || [];
   const metrics = tool.metrics || [];
   const personas = tool.personas || [];
-  const visualization = tool.visualization || null;
-  const visualizationPoints = visualization?.points || [];
-
-  // 승인 vs 거절 비교 탭에서는 군집 시각화 숨김
-  const isApproveVsRejectTab = (tool?.id === 'cluster' && tool?.title?.includes('승인 vs 거절'));
   const clusterBars = clusters.map((item) => ({
     label: String(item.decision || item.display_label || item.label || '군집').replace(/\s+/g, ' ').slice(0, 12),
     value: Number(item.records || item.count || item.size || 0),
     tone: String(item.decision || '').includes('거절') ? 'reject' : 'approve',
   }));
+  const detailedClusterRows = clusters.map((item) => ({
+    key: item.cluster_id || item.label || `${item.decision || '군집'}-${item.records || 0}`,
+    label: String(item.display_label || item.label || item.decision || '군집'),
+    decision: String(item.decision || '미상'),
+    records: Number(item.records || item.count || 0),
+    approvalRate: Number(item.approval_rate || 0),
+    avgRate: String(item.avg_rate || '-'),
+    avgLimit: String(item.avg_limit || '-'),
+  }));
   const maxClusterBar = Math.max(1, ...clusterBars.map((item) => item.value));
+  const hasClusterBarChart = clusterBars.length > 1;
+  const hasDetailedClusterRows = detailedClusterRows.length > 0;
+  const shouldCollapseClusterExploratory = (
+    collapseExploratoryVisuals
+    && tool?.id === 'cluster'
+    && (hasClusterBarChart || hasDetailedClusterRows)
+  );
   return (
     <motion.article
       className={`financial-tool-card tool-${tool.id || 'generic'}`}
@@ -330,48 +341,68 @@ function FinancialToolCard({ tool }) {
           ))}
         </div>
       ) : null}
-      {clusterBars.length > 1 ? (
+      {shouldCollapseClusterExploratory ? (
+        <details className="tool-exploratory-disclosure">
+          <summary>보조 분석 그래프 보기</summary>
+          {hasClusterBarChart ? (
+            <>
+              <div className="tool-cluster-bar-chart-desc" style={{ marginBottom: 4, fontWeight: 500, color: '#2a2a2a' }}>
+                {tool.cluster_compare_label || '승인/거절 고객군별 주요 분포 비교 (승인률, 인원수 등)'}
+              </div>
+              <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
+                {clusterBars.map((item, index) => (
+                  <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
+                    <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
+                    <b>{item.label}</b>
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : null}
+          {hasDetailedClusterRows ? (
+            <div className="tool-mini-grid" style={{ marginTop: 10 }}>
+              {detailedClusterRows.map((row) => (
+                <div key={`${tool.id}-cluster-detail-${row.key}`} className="tool-mini-card">
+                  <span>{row.decision} · {row.records.toLocaleString()}건</span>
+                  <strong>{row.label}</strong>
+                  <small>승인률 {row.approvalRate.toFixed(1)}% · 평균 금리 {row.avgRate}</small>
+                  <small>평균 한도 {row.avgLimit}</small>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </details>
+      ) : (
         <>
-          <div className="tool-cluster-bar-chart-desc" style={{marginBottom: 4, fontWeight: 500, color: '#2a2a2a'}}>
-            승인/거절 고객군별 주요 분포 비교 (승인률, 인원수 등)
-          </div>
-          <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
-            {clusterBars.map((item, index) => (
-              <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
-                <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
-                <b>{item.label}</b>
-              </span>
-            ))}
-          </div>
+          {hasClusterBarChart ? (
+            <>
+              <div className="tool-cluster-bar-chart-desc" style={{ marginBottom: 4, fontWeight: 500, color: '#2a2a2a' }}>
+                {tool.cluster_compare_label || '승인/거절 고객군별 주요 분포 비교 (승인률, 인원수 등)'}
+              </div>
+              <div className="tool-cluster-bar-chart" aria-label="군집 비교 막대 차트">
+                {clusterBars.map((item, index) => (
+                  <span key={`${tool.id}-cluster-bar-${item.label}-${index}`} className={`is-${item.tone}`}>
+                    <i style={{ height: `${Math.max(18, Math.round((item.value / maxClusterBar) * 100))}%` }} />
+                    <b>{item.label}</b>
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : null}
+          {hasDetailedClusterRows ? (
+            <div className="tool-mini-grid" style={{ marginTop: 10 }}>
+              {detailedClusterRows.map((row) => (
+                <div key={`${tool.id}-cluster-detail-${row.key}`} className="tool-mini-card">
+                  <span>{row.decision} · {row.records.toLocaleString()}건</span>
+                  <strong>{row.label}</strong>
+                  <small>승인률 {row.approvalRate.toFixed(1)}% · 평균 금리 {row.avgRate}</small>
+                  <small>평균 한도 {row.avgLimit}</small>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </>
-      ) : null}
-      {/* 승인 vs 거절 비교 탭에서는 군집 시각화 숨김 */}
-      {visualizationPoints.length && !isApproveVsRejectTab ? (
-        <div className="tool-cluster-visual">
-          <div className="tool-cluster-visual-head">
-            <span>{visualization?.x_label || 'x'}</span>
-            <strong>군집 시각화</strong>
-            <span>{visualization?.y_label || 'y'}</span>
-          </div>
-          <div className="tool-cluster-plot" aria-label="고객군집 분포">
-            {visualizationPoints.map((point, index) => {
-              const left = Math.min(88, Math.max(8, 12 + index * 18));
-              const top = Math.min(82, Math.max(12, 78 - Number(point.y || 0) * 2.8));
-              const size = Math.min(34, Math.max(14, Math.sqrt(Number(point.size || 1)) * 2.1));
-              return (
-                <span
-                  key={point.id || point.label}
-                  className="tool-cluster-dot"
-                  style={{ left: `${left}%`, top: `${top}%`, width: size, height: size }}
-                  title={`${point.label} · ${point.x_display} · ${point.y_display} · 연체/부실 ${point.risk}`}
-                >
-                  {index + 1}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
+      )}
       {conflicts.length ? (
         <div className="tool-mini-list">
           {conflicts.map((item) => <span key={item.title} className={`tool-status-line is-${item.level || 'info'}`}>{item.title}</span>)}
@@ -3202,6 +3233,11 @@ export default function OntologyWorkbench({
     ...(clusterToolCard?.metrics || []).slice(0, 3),
     ...(insightToolCard?.metrics || []).slice(0, 2),
   ].slice(0, 4);
+  const compactQuestionText = String(currentQuestion || '').replace(/\s+/g, '').toLowerCase();
+  const isAverageDistributionQuestion = (
+    (compactQuestionText.includes('평균') || compactQuestionText.includes('avg') || compactQuestionText.includes('average'))
+    && (compactQuestionText.includes('금리') || compactQuestionText.includes('rate') || compactQuestionText.includes('한도') || compactQuestionText.includes('limit'))
+  ) || compactQuestionText.includes('분포');
   const promptDock = (
     <div className="roni-prompt-dock workspace-prompt-dock" style={{ maxWidth: '900px', width: '100%' }}>
       <div className="ontology-chat-input-shell copilot-composer-shell roni-prompt-dock-input-shell">
@@ -3731,7 +3767,7 @@ export default function OntologyWorkbench({
                               </div>
                               <div className="workspace-summary-tools">
                                 {/* Customer Cluster Intelligence Card (군집 카드) */}
-                                {clusterToolCard ? <FinancialToolCard tool={clusterToolCard} /> : null}
+                                {clusterToolCard ? <FinancialToolCard tool={clusterToolCard} collapseExploratoryVisuals={isAverageDistributionQuestion} /> : null}
                                 {insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
                                 {/* 군집/로그/지표가 없을 때 Explainability Agent 결과로 대체 */}
                                 {!clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (

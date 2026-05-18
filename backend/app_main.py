@@ -64,6 +64,7 @@ from backend.services import (
     search_faiss,
     state,
 )
+from backend.explainability_profiles import build_explainability_payload
 from backend.worker import worker
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
@@ -295,6 +296,14 @@ def _persist_regulation_state(payload: dict[str, object]) -> None:
         )
     except Exception:
         return
+
+
+def _persist_regulation_summary_toggle(enabled: bool) -> None:
+    current = _load_persisted_regulation_state()
+    if not isinstance(current, dict):
+        current = {}
+    current["regulation_upload_summary_enabled"] = bool(enabled)
+    _persist_regulation_state(current)
 
 CATEGORY_ENTITY_TYPE_MAP = {
     "applicant": "ApplicantAttribute",
@@ -3900,9 +3909,11 @@ def _build_customer_clusters(records: list[dict], selected_product: str, query: 
         unique_clusters = [item for item in unique_clusters if str(item.get("decision") or "") == decision_focus]
 
     reject_intent = _query_has_reject_intent(query, selected_feature)
+    approval_metric_focus = _query_has_metric_intent(query) and (_query_has_rate_intent(query) or _query_has_limit_intent(query)) and not reject_intent
     unique_clusters.sort(
         key=lambda item: (
-            0 if (reject_intent and str(item.get("decision") or "") == "거절") else (1 if reject_intent else 0),
+            0 if (reject_intent and str(item.get("decision") or "") == "거절")
+            else (0 if approval_metric_focus and str(item.get("decision") or "") == "승인" else 1 if (reject_intent or approval_metric_focus) else 0),
             -_score_customer_cluster(item, query, selected_feature, representative_features=representative_features),
             -int(item.get("count") or 0),
             str(item.get("label") or ""),
@@ -4034,59 +4045,23 @@ def _build_explainability_agent_result(
     customer_clusters: list[dict],
     reject_code_summary: list[dict[str, object]],
 ) -> dict[str, object]:
-    top_cluster = customer_clusters[0] if customer_clusters else {}
-    selected_axis = str((selected_feature or {}).get("feature_name") or (selected_feature or {}).get("feature_id") or "대표 심사 축")
-    if _query_has_reject_intent(query, selected_feature) or _is_cross_product_feature_label(selected_axis, selected_product):
-        selected_axis = "거절사유코드"
-    candidate_impacts: list[dict[str, object]] = []
-    metric_cards: list[dict[str, object]] = []
-    if reject_code_summary:
-        for index, item in enumerate(reject_code_summary[:3]):
-            label = str(item.get("code") or "")
-            description = str(item.get("description") or "").strip()
-            count = int(item.get("count") or 0)
-            try:
-                share_value = f"{float(item.get('share')) * 100:.1f}%"
-            except (TypeError, ValueError):
-                share_value = f"{count:,}건"
-            candidate_impacts.append({
-                "feature": f"{label} {description}".strip(),
-                "impact": [42, 28, 18][index] if index < 3 else 10,
-                "direction": "risk_up",
-                "evidence": f"{count:,}건 · {share_value}",
-            })
-            metric_cards.append({
-                "label": label or f"사유 {index + 1}",
-                "value": f"{count:,}건 · {share_value}",
-                "tone": "warning" if index == 0 else "neutral",
-            })
-    if not candidate_impacts and top_cluster:
-        if top_cluster.get("avg_rate_display"):
-            candidate_impacts.append({"feature": "평균 금리", "impact": 32, "direction": "price_up", "evidence": top_cluster.get("avg_rate_display")})
-        if top_cluster.get("avg_amount_display"):
-            candidate_impacts.append({"feature": "평균 한도", "impact": 26, "direction": "limit_down", "evidence": top_cluster.get("avg_amount_display")})
-        if top_cluster.get("income_band"):
-            candidate_impacts.append({"feature": str(top_cluster.get("income_band")), "impact": 20, "direction": "risk_context", "evidence": "고객군집"})
-    for feature in representative_features[:3]:
-        feature_name = str(feature.get("feature_name") or feature.get("feature_id") or "").strip()
-        if feature_name and all(feature_name not in str(item.get("feature") or "") for item in candidate_impacts):
-            candidate_impacts.append({"feature": feature_name, "impact": 14, "direction": "semantic_axis", "evidence": str(feature.get("category") or "ontology")})
-    impacts = _normalize_percentages(candidate_impacts[:5])
-    return {
-        "id": "explainability",
-        "title": "Explainability Agent",
-        "status": "ready",
-        "summary": f"{_product_display_name(selected_product) or selected_product or '전체'} 기준으로 {selected_axis}를 중심으로 설명합니다.",
-        "method": "tool-first SHAP-ready attribution",
-        "llm_call": False,
-        "primary_axis": selected_axis,
-        "metrics": metric_cards,
-        "shap_values": impacts,
-        "reasoning": [
-            "심사 로그/군집/거절코드 기반으로 영향도를 먼저 계산합니다.",
-            "Ollama는 계산 결과를 자연어로 정리할 때만 사용합니다.",
-        ],
-    }
+    return build_explainability_payload(
+        query=query,
+        selected_product=selected_product,
+        selected_feature=selected_feature,
+        representative_features=representative_features,
+        customer_clusters=customer_clusters,
+        reject_code_summary=reject_code_summary,
+        has_reject_intent=_query_has_reject_intent,
+        has_metric_intent=_query_has_metric_intent,
+        has_rate_intent=_query_has_rate_intent,
+        has_limit_intent=_query_has_limit_intent,
+        asks_cluster_signals=_query_asks_cluster_signals,
+        compact_search_text=_compact_search_text,
+        normalize_percentages=_normalize_percentages,
+        product_display_name=_product_display_name,
+        is_cross_product_feature_label=_is_cross_product_feature_label,
+    )
 
 
 def _format_metric_value(value: object, suffix: str = "") -> str:
@@ -4189,6 +4164,8 @@ def _build_cluster_shap_values(clusters: list[dict[str, object]]) -> list[dict[s
 def _build_cluster_intelligence_result(customer_clusters: list[dict], selected_product: str, query: str = "") -> dict[str, object]:
     clusters: list[dict[str, object]] = []
     metric_question = _query_has_metric_intent(query)
+    reject_intent = _query_has_reject_intent(query, None)
+    approval_metric_focus = metric_question and (_query_has_rate_intent(query) or _query_has_limit_intent(query)) and not reject_intent
     ranked_clusters = sorted(
         customer_clusters,
         key=lambda item: (
@@ -4196,7 +4173,10 @@ def _build_cluster_intelligence_result(customer_clusters: list[dict], selected_p
             -int(item.get("count") or 0),
         ),
     )
-    for item in ranked_clusters[:4]:
+    approved_ranked_clusters = [item for item in ranked_clusters if str(item.get("decision") or "") == "승인"]
+    ranked_source = approved_ranked_clusters if (approval_metric_focus and approved_ranked_clusters) else ranked_clusters
+    analysis_basis = "승인 고객군 기준" if ranked_source is approved_ranked_clusters else "전체 고객군 기준"
+    for item in ranked_source[:4]:
         count = int(item.get("count") or 0)
         approval_rate = 100.0 if str(item.get("decision") or "") == "승인" else 0.0
         product_label = _product_display_name(str(item.get("product") or selected_product or "")) or str(item.get("product") or selected_product or "전체")
@@ -4223,7 +4203,11 @@ def _build_cluster_intelligence_result(customer_clusters: list[dict], selected_p
             "model_score_source": item.get("top_model_score_source") or "",
             "delinquency_rate": delinquency_display,
             "delinquency_source": item.get("top_delinquency_rate_source") or ("연체/부실 로그 proxy" if item.get("delinquency_proxy_rate_display") else ""),
-            "risk_pattern": _format_cluster_reject_reason_summary(item) or "소득/한도/연령 패턴",
+            "risk_pattern": (
+                "승인군 금리/한도/소득 패턴"
+                if str(item.get("decision") or "") == "승인"
+                else (_format_cluster_reject_reason_summary(item) or "소득/한도/연령 패턴")
+            ),
         })
     return {
         "id": "cluster",
@@ -4231,15 +4215,16 @@ def _build_cluster_intelligence_result(customer_clusters: list[dict], selected_p
         "status": "ready" if clusters else "empty",
         "summary": (
             f"{_product_display_name(selected_product) or selected_product or '전체'} 기준으로 "
-            f"{len(clusters)}개 고객군을 비교했습니다."
+            f"{len(clusters)}개 고객군을 비교했습니다. ({analysis_basis})"
             if clusters
             else "조건에 맞는 고객군을 찾지 못했습니다."
         ),
         "llm_call": False,
-        "metrics": _cluster_metric_cards(ranked_clusters[:4]),
+        "analysis_basis": analysis_basis,
+        "metrics": _cluster_metric_cards(ranked_source[:4]),
         "clusters": clusters,
-        "shap_values": _build_cluster_shap_values(ranked_clusters[:4]),
-        "visualization": _build_cluster_visualization(ranked_clusters[:4]),
+        "shap_values": _build_cluster_shap_values(ranked_source[:4]),
+        "visualization": _build_cluster_visualization(ranked_source[:4]),
     }
 
 
@@ -6988,6 +6973,9 @@ def app_startup() -> None:
     persisted_regulation = _load_persisted_regulation_state()
     if persisted_regulation:
         with state.lock:
+            state.regulation_upload_summary_enabled = bool(
+                persisted_regulation.get("regulation_upload_summary_enabled", False)
+            )
             summary = str(persisted_regulation.get("summary") or "").strip()
             updated_at = str(persisted_regulation.get("updated_at") or "").strip()
             detail = str(persisted_regulation.get("detail") or "").strip()
@@ -7279,6 +7267,18 @@ def settings_log_agent_ollama(payload: AgentOllamaToggleRequest) -> dict:
     return {
         "status": "ok",
         "log_agent_ollama_enabled": bool(state.log_agent_ollama_enabled),
+    }
+
+
+@app.post("/settings/regulation-upload-summary")
+def settings_regulation_upload_summary(payload: AgentOllamaToggleRequest) -> dict:
+    enabled = bool(payload.enabled)
+    with state.lock:
+        state.regulation_upload_summary_enabled = enabled
+    _persist_regulation_summary_toggle(enabled)
+    return {
+        "status": "ok",
+        "regulation_upload_summary_enabled": bool(state.regulation_upload_summary_enabled),
     }
 
 
@@ -7695,31 +7695,37 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
         before_count = int(get_vector_count() or 0)
         after_count = ingest_files(files_data, doc_type="regulation")
         added_count = max(0, after_count - before_count)
-        _, _, rules_found = search_context("규제", k=6)
-        rule_context = "\n\n".join(rules_found)
         summary = ""
-        summary_mode = "llm"
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(
-                    regulation_agent,
-                    rule_context,
-                    "",
-                    "업로드된 규제 문서 분석 및 요약을 작성하라",
-                )
-                summary = str(future.result(timeout=45) or "").strip()
-        except concurrent.futures.TimeoutError:
-            summary_mode = "fallback-timeout"
-        except Exception:
-            summary_mode = "fallback-error"
+        with state.lock:
+            summary_enabled = bool(state.regulation_upload_summary_enabled)
+        summary_mode = "disabled"
+        if summary_enabled:
+            _, _, rules_found = search_context("규제", k=6)
+            rule_context = "\n\n".join(rules_found)
+            summary_mode = "llm"
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        regulation_agent,
+                        rule_context,
+                        "",
+                        "업로드된 규제 문서 분석 및 요약을 작성하라",
+                    )
+                    summary = str(future.result(timeout=45) or "").strip()
+            except concurrent.futures.TimeoutError:
+                summary_mode = "fallback-timeout"
+            except Exception:
+                summary_mode = "fallback-error"
 
-        if not summary:
-            context_preview = [str(item or "").strip() for item in rules_found[:3] if str(item or "").strip()]
-            summary = "규제 문서가 업로드되어 벡터 인덱스에 반영되었습니다. "
-            if context_preview:
-                summary += "핵심 근거: " + " | ".join(text[:90] for text in context_preview)
-            else:
-                summary += "현재 추출 가능한 규제 컨텍스트가 부족해 요약은 축약되었습니다."
+            if not summary:
+                context_preview = [str(item or "").strip() for item in rules_found[:3] if str(item or "").strip()]
+                summary = "규제 문서가 업로드되어 벡터 인덱스에 반영되었습니다. "
+                if context_preview:
+                    summary += "핵심 근거: " + " | ".join(text[:90] for text in context_preview)
+                else:
+                    summary += "현재 추출 가능한 규제 컨텍스트가 부족해 요약은 축약되었습니다."
+        else:
+            summary = "규제 문서를 벡터에 적재했습니다. (요약 생성 꺼짐)"
 
         updated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -7744,6 +7750,7 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
                 "vector_count": after_count,
                 "added_count": added_count,
                 "summary_mode": summary_mode,
+                "regulation_upload_summary_enabled": summary_enabled,
             }
         )
 

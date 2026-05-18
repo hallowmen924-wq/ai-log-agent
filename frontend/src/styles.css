@@ -1247,6 +1247,27 @@ textarea {
   background: rgba(255, 255, 255, 0.58);
 }
 
+.tool-exploratory-disclosure {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px dashed rgba(115, 163, 202, 0.35);
+  background: rgba(247, 251, 255, 0.75);
+}
+
+.tool-exploratory-disclosure > summary {
+  cursor: pointer;
+  color: var(--ontology-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  list-style: none;
+}
+
+.tool-exploratory-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
 .tool-cluster-visual-head {
   display: grid;
   grid-template-columns: 1fr auto 1fr;

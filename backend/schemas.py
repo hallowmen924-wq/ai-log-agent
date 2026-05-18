@@ -125,6 +125,7 @@ class FullAnalysisResponse(BaseModel):
     news_prompt_template_override: str | None = None
     news_agent_ollama_enabled: bool = True
     log_agent_ollama_enabled: bool = True
+    regulation_upload_summary_enabled: bool = False
     ollama_gpu_enabled: bool = False
     ontology_query_priority_enabled: bool = False
     latest_regulation_analysis: str | None = None

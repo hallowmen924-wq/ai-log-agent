@@ -232,6 +232,7 @@ class BackendState:
         self.news_prompt_template_override: str | None = None
         self.news_agent_ollama_enabled = False
         self.log_agent_ollama_enabled = False
+        self.regulation_upload_summary_enabled = False
         self.ollama_gpu_enabled = True
         self.ontology_query_priority_enabled = True
         self.latest_regulation_analysis: str | None = None
@@ -373,6 +374,7 @@ class BackendState:
                 "news_prompt_template_override": self.news_prompt_template_override,
                 "news_agent_ollama_enabled": bool(self.news_agent_ollama_enabled),
                 "log_agent_ollama_enabled": bool(self.log_agent_ollama_enabled),
+                "regulation_upload_summary_enabled": bool(self.regulation_upload_summary_enabled),
                 "ollama_gpu_enabled": bool(self.ollama_gpu_enabled),
                 "ontology_query_priority_enabled": bool(self.ontology_query_priority_enabled),
                 "latest_regulation_analysis": self.latest_regulation_analysis,

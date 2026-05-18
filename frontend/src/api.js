@@ -161,6 +161,14 @@ export function setOntologyQueryPriorityEnabled(enabled) {
   });
 }
 
+export function setRegulationUploadSummaryEnabled(enabled) {
+  return request('/settings/regulation-upload-summary', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: Boolean(enabled) }),
+  });
+}
+
 export function fetchFaissEntries(limit = 120, storeName = '') {
   return request('/faiss/entries', {
     method: 'GET',
