@@ -9,6 +9,7 @@ import os
 import pathlib
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import sys
 import threading
@@ -18,6 +19,7 @@ import uuid
 import numpy as np
 from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -120,6 +122,10 @@ def get_embeddings(*args, **kwargs):
 
 def ingest_files(*args, **kwargs):
     return _vector_db_module().ingest_files(*args, **kwargs)
+
+
+def ingest_files_with_report(*args, **kwargs):
+    return _vector_db_module().ingest_files_with_report(*args, **kwargs)
 
 
 def search_context(*args, **kwargs):
@@ -257,10 +263,11 @@ FEATURE_EMBEDDING_CACHE_LIMIT = 8
 SEMANTIC_REFRESH_INTERVAL_SECONDS = _env_int("SEMANTIC_REFRESH_INTERVAL_SECONDS", 120, minimum=30)
 AUTO_START_WORKER = _env_flag("AUTO_START_WORKER", False)
 AUTO_START_SEMANTIC_REFRESH = _env_flag("AUTO_START_SEMANTIC_REFRESH", False)
-WORKER_START_INTERVAL_SECONDS = _env_int("WORKER_START_INTERVAL_SECONDS", 5, minimum=1)
+WORKER_START_INTERVAL_SECONDS = _env_int("WORKER_START_INTERVAL_SECONDS", 30, minimum=1)
 HEALTH_CHECK_OLLAMA = _env_flag("HEALTH_CHECK_OLLAMA", False)
 WORKBENCH_OLLAMA_TIMEOUT_SECONDS = 8
 REGULATION_STATE_PATH = ROOT / "data" / "regulation_state.json"
+REGULATION_UPLOAD_DIR = ROOT / "data" / "regulation_uploads"
 PRODUCT_QUERY_ALIASES = {
     "C6": ["이지신용대출", "이지신용 대출", "신용대출"],
     "C9": ["카드론", "이지론", "card loan"],
@@ -310,6 +317,19 @@ def _persist_regulation_summary_toggle(enabled: bool) -> None:
         current = {}
     current["regulation_upload_summary_enabled"] = bool(enabled)
     _persist_regulation_state(current)
+
+
+def _resolve_regulation_uploaded_file(file_name: str) -> pathlib.Path:
+    safe_name = pathlib.Path(str(file_name or "")).name.strip()
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="invalid file name")
+    base_dir = REGULATION_UPLOAD_DIR.resolve()
+    target_path = (base_dir / safe_name).resolve()
+    if base_dir not in target_path.parents and target_path != base_dir:
+        raise HTTPException(status_code=400, detail="invalid file path")
+    if not target_path.exists() or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="regulation file not found")
+    return target_path
 
 CATEGORY_ENTITY_TYPE_MAP = {
     "applicant": "ApplicantAttribute",
@@ -4261,6 +4281,8 @@ def _build_policy_conflict_result(
     answer_summary: dict[str, object],
 ) -> dict[str, object]:
     citations = list((answer_summary.get("citations") or [])[:3])
+    if not citations and regulation_evidence:
+        citations = [_normalize_regulation_citation(item) for item in regulation_evidence[:3]]
     conflicts: list[dict[str, object]] = []
     if citations:
         conflicts.append({
@@ -5302,6 +5324,16 @@ def _query_has_regulation_intent(query: str) -> bool:
     if not normalized:
         return False
     spaced = str(query or "").lower()
+    # Keep a short explicit override list for high-frequency policy queries that
+    # users type in many surface variations.
+    explicit_terms = {
+        "금리인하요구권",
+        "금리 인하 요구권",
+        "interest rate reduction request",
+        "rate reduction request",
+    }
+    if any(term in normalized or term in spaced for term in explicit_terms):
+        return True
     return any(term in normalized or term in spaced for term in REGULATION_RELEVANCE_TERMS)
 
 
@@ -5494,9 +5526,14 @@ def _select_regulation_first_evidence(
 
 
 def _normalize_regulation_citation(item: dict[str, object]) -> dict[str, object]:
+    file_name = str(item.get("document_name") or item.get("name") or item.get("title") or "regulation.pdf").strip()
     return {
         "name": str(item.get("name") or item.get("title") or "regulation document"),
+        "file_name": file_name,
+        "pdf_url": f"/regulation/files/{urllib.parse.quote(file_name)}",
         "chunk_index": int(item.get("chunk_index") or 0),
+        "page": int(item.get("page") or 0) if str(item.get("page") or "").strip() else 0,
+        "article": str(item.get("article") or "").strip(),
         "score": round(float(item.get("score") or 0.0), 4),
         "snippet": str(item.get("snippet") or item.get("text") or item.get("content") or "").strip()[:700],
         "feature_hits": list(item.get("feature_hits") or []),
@@ -5505,7 +5542,14 @@ def _normalize_regulation_citation(item: dict[str, object]) -> dict[str, object]
 
 
 def _format_regulation_citation_value(citation: dict[str, object]) -> str:
-    return f"{citation.get('name')} chunk #{int(citation.get('chunk_index') or 0)}"
+    name = str(citation.get("name") or "regulation document").strip()
+    page = int(citation.get("page") or 0)
+    article = str(citation.get("article") or "").strip()
+    if article:
+        return f"{name} ({article})"
+    if page > 0:
+        return f"{name} (p.{page})"
+    return name
 
 
 def _unique_regulation_citation_values(citations: list[dict[str, object]], limit: int = 2) -> list[str]:
@@ -6501,26 +6545,9 @@ def _build_feature_workbench_payload(
         ollama_runtime["updated_at"] = _iso_now()
     elif regulation_first_route and regulation_evidence:
         prompt_pack = _build_regulation_first_prompt_pack(query, regulation_evidence, prompt_pack)
-        answer_summary = _build_regulation_first_answer_summary(query, regulation_evidence)
-        ollama_runtime = {
-            "enabled": False,
-            "status": "skipped",
-            "model": str(prompt_pack.get("model") or OLLAMA_LIGHTWEIGHT_MODEL),
-            "input": {
-                "answer_mode": "regulation_document_grounding",
-                "query": query,
-                "citations": list(answer_summary.get("citations") or []),
-            },
-            "output": {
-                "response_text": "",
-                "response_preview": "",
-            },
-            "error": "",
-            "duration_ms": 0,
-            "updated_at": _iso_now(),
-            "used_in_final_answer": False,
-            "guardrail": "regulation_document_grounding",
-        }
+        grounded_summary = _build_regulation_first_answer_summary(query, regulation_evidence)
+        ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, grounded_summary, job_id=job_id)
+        answer_summary["citations"] = list(grounded_summary.get("citations") or [])
     elif regulation_first_route:
         prompt_pack = _build_general_fallback_prompt_pack(query, prompt_pack)
         ollama_runtime, answer_summary = _run_general_ollama_fallback(query, prompt_pack, job_id=job_id)
@@ -6571,6 +6598,11 @@ def _build_feature_workbench_payload(
         }
     else:
         ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, server_answer_summary, job_id=job_id)
+    if not list(answer_summary.get("citations") or []) and regulation_evidence:
+        answer_summary["citations"] = [
+            _normalize_regulation_citation(item)
+            for item in regulation_evidence[:4]
+        ]
     if evidence_gate.get("allowed"):
         answer_summary = decorate_grounded_answer_summary(answer_summary, evidence_gate)
     reject_code_line = _format_reject_code_summary(reject_code_summary)
@@ -7079,6 +7111,18 @@ def app_startup() -> None:
             summary = str(persisted_regulation.get("summary") or "").strip()
             updated_at = str(persisted_regulation.get("updated_at") or "").strip()
             detail = str(persisted_regulation.get("detail") or "").strip()
+            persisted_files = persisted_regulation.get("files") or []
+            state.regulation_files = [
+                str(item).strip()
+                for item in persisted_files
+                if str(item).strip()
+            ]
+            persisted_file_stats = persisted_regulation.get("file_stats") or []
+            state.regulation_file_stats = [
+                item
+                for item in persisted_file_stats
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            ]
             if summary:
                 state.latest_regulation_analysis = summary
             if updated_at:
@@ -7161,6 +7205,7 @@ def build_ws_snapshot(snapshot: dict) -> dict:
         "news_crawl_failure_count": snapshot.get("news_crawl_failure_count"),
         "last_news_crawl_time": snapshot.get("last_news_crawl_time"),
         "last_news_crawl_error": snapshot.get("last_news_crawl_error"),
+        "news_pipeline_stats": snapshot.get("news_pipeline_stats", {}),
         "last_faiss_time": snapshot.get("last_faiss_time"),
         "backend_diagnostics": snapshot.get("backend_diagnostics", {}),
     }
@@ -7524,6 +7569,89 @@ def faiss_entry(doc_id: str):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/news/evidence-detail")
+def news_evidence_detail(
+    link: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+) -> dict:
+    try:
+        from rag.vector_db import get_vector_by_id, list_vectors
+
+        normalized_link = str(link or "").strip().lower()
+        normalized_title = str(title or "").strip().lower()
+        normalized_summary = str(summary or "").strip()
+
+        candidates = list_vectors(limit=1600, store_name="news")
+        best_item: dict[str, Any] | None = None
+        best_score = -1.0
+
+        for candidate in candidates:
+            doc_id = str(candidate.get("id") or "").strip()
+            if not doc_id:
+                continue
+            full_item = get_vector_by_id(doc_id)
+            if not full_item:
+                continue
+            metadata = dict(full_item.get("metadata") or {})
+            meta_link = str(metadata.get("link") or "").strip().lower()
+            meta_title = str(metadata.get("title") or metadata.get("name") or "").strip().lower()
+            page_content = str(full_item.get("page_content") or "")
+            doc_type = str(metadata.get("type") or full_item.get("type") or "").strip().lower()
+            if doc_type not in {"news", "signal_news", "generated_news"}:
+                continue
+
+            score = 0.0
+            if normalized_link and meta_link and normalized_link == meta_link:
+                score += 1.0
+            if normalized_title and meta_title:
+                if normalized_title == meta_title:
+                    score += 0.9
+                elif normalized_title in meta_title or meta_title in normalized_title:
+                    score += 0.6
+            if normalized_title and normalized_title in page_content.lower():
+                score += 0.3
+            if score > best_score:
+                best_score = score
+                best_item = full_item
+
+        metadata = dict((best_item or {}).get("metadata") or {})
+        snippet = str((best_item or {}).get("page_content") or "")
+        resolved_summary = (
+            str(metadata.get("summary") or "").strip()
+            or normalized_summary
+            or str(metadata.get("evidence_sentence") or "").strip()
+        )
+        evidence_sentences = metadata.get("evidence_sentences")
+        if not isinstance(evidence_sentences, list) or not evidence_sentences:
+            single = str(metadata.get("evidence_sentence") or "").strip()
+            evidence_sentences = [single] if single else []
+
+        scored_metadata = {
+            "rule_score": float(metadata.get("rule_score") or metadata.get("low_cost_score") or 0.0),
+            "embed_score": float(metadata.get("embed_score") or metadata.get("embed_relevance") or 0.0),
+            "importance_score": float(metadata.get("importance_score") or 0.0),
+            "impact_cardloan": str(metadata.get("impact_cardloan") or ""),
+            "impact_product": str(metadata.get("impact_product") or ""),
+            "sentiment": str(metadata.get("sentiment") or metadata.get("impact_direction") or "neutral"),
+            "evidence_sentences": evidence_sentences,
+            "source": str(metadata.get("source") or metadata.get("publisher") or ""),
+            "published_at": str(metadata.get("published_at") or ""),
+            "link": str(metadata.get("link") or ""),
+            "title": str(metadata.get("title") or ""),
+            "chunk_id": str(metadata.get("chunk_id") or ""),
+        }
+        return {
+            "status": "ok",
+            "matched": bool(best_item),
+            "summary": resolved_summary,
+            "metadata": scored_metadata,
+            "snippet": snippet[:2000],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/faiss/stats")
 def faiss_stats() -> dict:
     """Compute per-product aggregates from FAISS stored vectors.
@@ -7785,16 +7913,23 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
 
     files_data: list[tuple[str, bytes]] = []
     file_names: list[str] = []
+    REGULATION_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     for upload in files:
         raw_bytes = await upload.read()
         file_name = str(upload.filename or "unknown").strip() or "unknown"
         files_data.append((file_name, raw_bytes))
         file_names.append(file_name)
+        try:
+            safe_name = pathlib.Path(file_name).name
+            (REGULATION_UPLOAD_DIR / safe_name).write_bytes(raw_bytes)
+        except Exception:
+            pass
 
     try:
-        before_count = int(get_vector_count() or 0)
-        after_count = ingest_files(files_data, doc_type="regulation")
-        added_count = max(0, after_count - before_count)
+        ingest_report = dict(ingest_files_with_report(files_data, doc_type="regulation") or {})
+        after_count = int(ingest_report.get("vector_count") or 0)
+        added_count = int(ingest_report.get("added_count") or 0)
+        file_stats = list(ingest_report.get("file_stats") or [])
         summary = ""
         with state.lock:
             summary_enabled = bool(state.regulation_upload_summary_enabled)
@@ -7838,6 +7973,8 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
             }
             state.agent_statuses = statuses
             state.latest_regulation_analysis = summary
+            state.regulation_files = list(file_names)
+            state.regulation_file_stats = list(file_stats)
             state.last_regulation_analysis_time = datetime.datetime.fromisoformat(updated_at)
 
         _persist_regulation_state(
@@ -7851,13 +7988,14 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
                 "added_count": added_count,
                 "summary_mode": summary_mode,
                 "regulation_upload_summary_enabled": summary_enabled,
+                "file_stats": file_stats,
             }
         )
 
         record_vector_event(
             "regulation_agent",
             "upload",
-            before_count,
+            max(0, int(after_count) - int(added_count)),
             after_count,
             f"규제 문서 {len(file_names)}건 벡터 적재",
         )
@@ -7875,6 +8013,7 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
             summary=summary,
             updated_at=updated_at,
             files=file_names,
+            file_stats=file_stats,
         )
     except Exception as error:
         failed_at = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -7893,6 +8032,16 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
             update_status=True,
         )
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.get("/regulation/files/{file_name:path}")
+def regulation_uploaded_file(file_name: str) -> FileResponse:
+    target_path = _resolve_regulation_uploaded_file(file_name)
+    return FileResponse(
+        str(target_path),
+        media_type="application/pdf",
+        filename=target_path.name,
+    )
 
 
 @app.websocket("/ws/faiss")

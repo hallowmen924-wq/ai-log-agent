@@ -75,6 +75,48 @@ _BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
+# NOTE:
+# If source encoding gets corrupted on some environments, the literal Korean
+# strings above may become mojibake. Re-declare the core query/keyword sets
+# explicitly to guarantee stable runtime behavior.
+DEFAULT_NEWS_SEARCH_QUERIES = [
+    "카드론 심사",
+    "카드론 연체 금리",
+    "신용대출 심사 강화",
+    "2금융권 카드대출",
+    "저축은행 대출 심사",
+    "대출 규제 카드론",
+    "DSR 카드론 신용대출",
+    "중저신용 카드론",
+]
+
+_CARDLOAN_RELEVANCE_TERMS = (
+    "카드론",
+    "신용대출",
+    "2금융",
+    "2금융권",
+    "저축은행",
+    "캐피탈",
+    "대환대출",
+    "중금리대출",
+    "가계대출",
+    "대출 심사",
+    "심사 강화",
+    "dsr",
+    "연체",
+    "금리",
+    "부실",
+    "한도",
+)
+
+_CARDLOAN_PRIORITY_TERMS = (
+    "카드론",
+    "신용대출",
+    "2금융권",
+    "저축은행",
+    "대출 심사",
+)
+
 
 def _extract_first_href(text: str) -> str:
     if not text:
@@ -423,6 +465,18 @@ def collect_news(
                 return collected
 
     return collected
+
+
+def probe_news_connectivity(timeout: int = 5) -> str | None:
+    """Return connectivity error detail for upstream news source, if any."""
+    probe_url = "https://search.naver.com/search.naver?where=news&query=" + requests.utils.quote("카드론")
+    try:
+        resp = requests.get(probe_url, timeout=timeout, headers=_BROWSER_HEADERS, allow_redirects=True)
+        if resp.status_code != 200:
+            return f"naver_news_http_{resp.status_code}"
+        return None
+    except Exception as error:
+        return f"naver_news_connect_error: {error}"
 
 
 def analyze_news(news):

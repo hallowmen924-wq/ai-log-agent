@@ -47,9 +47,16 @@ const VECTOR_TYPE_OPTIONS = [
   { label: 'generated_customer', value: 'generated_customer' },
 ];
 
-const THEME_OPTIONS = [
+const LEGACY_THEME_OPTIONS = [
   { value: 'midnight', label: '미드나잇', description: '현재 다크 컨트롤 타워 톤' },
   { value: 'cute', label: '서머 블루', description: '밝고 부드러운 코파일럿 스타일 톤' },
+];
+
+const THEME_OPTIONS = [
+  { value: 'cute', label: '금융솔루션부', description: '현재 블루 테마' },
+  { value: 'mint', label: '신용기획부', description: '연한 초록 테마' },
+  { value: 'lemon', label: '금융영업부', description: '연한 노랑 테마' },
+  { value: 'orange', label: 'IT개발자', description: '연한 주황 테마' },
 ];
 
 const SECTION_RAIL_ITEMS = [
@@ -312,6 +319,8 @@ function initialStatus() {
     latest_log_briefing: '',
     latest_news_briefing: '',
     latest_regulation_analysis: '',
+    regulation_files: [],
+    regulation_file_stats: [],
     agent_statuses: {},
     agent_activity_log: [],
     vector_events: [],
@@ -2167,6 +2176,20 @@ function saveStoredTheme(theme) {
   window.localStorage.setItem('app_theme', theme);
 }
 
+function mapDepartmentToTheme(departmentId) {
+  switch (String(departmentId || '').toLowerCase()) {
+    case 'credit':
+      return 'mint';
+    case 'sales':
+      return 'lemon';
+    case 'it':
+      return 'orange';
+    case 'solution':
+    default:
+      return 'cute';
+  }
+}
+
 function App() {
   const prefersReducedMotion = useReducedMotion();
   const [status, setStatus] = useState(initialStatus);
@@ -2183,6 +2206,7 @@ function App() {
   const [vectorSearchBusy, setVectorSearchBusy] = useState(false);
   const [regulationFiles, setRegulationFiles] = useState([]);
   const [regulationBusy, setRegulationBusy] = useState(false);
+  const [showRegulationUploadModal, setShowRegulationUploadModal] = useState(false);
   const [debateBusy, setDebateBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [reviewerPrompts, setReviewerPrompts] = useState(loadStoredPrompts);
@@ -2617,12 +2641,15 @@ function App() {
     }
     try {
       setRegulationBusy(true);
+      setShowRegulationUploadModal(true);
       setRegulationFiles(filesToUpload);
       const result = await uploadRegulationFiles(filesToUpload);
       setStatus((previous) => ({
         ...previous,
         vector_count: result.vector_count,
         latest_regulation_analysis: result.summary,
+        regulation_files: Array.isArray(result.files) ? result.files : (previous.regulation_files || []),
+        regulation_file_stats: Array.isArray(result.file_stats) ? result.file_stats : (previous.regulation_file_stats || []),
         agent_statuses: {
           ...(previous.agent_statuses || {}),
           regulation_agent: { status: 'completed', detail: result.detail, updated_at: result.updated_at },
@@ -2651,6 +2678,14 @@ function App() {
       return;
     }
     regulationInputRef.current?.click();
+  }
+
+  function openRegulationUploadModal() {
+    setShowRegulationUploadModal(true);
+  }
+
+  function handleAddRegulationFiles() {
+    openRegulationFilePicker();
   }
 
   async function handleStartDebate() {
@@ -2684,6 +2719,7 @@ function App() {
   const selectedReviewerSetting = selectedReviewer ? (reviewerSettings[selectedReviewer.id] || buildDefaultReviewerSetting(selectedReviewer.id)) : null;
 
   const plotPalette = getPlotPalette(theme);
+  const currentThemeOption = THEME_OPTIONS.find((item) => item.value === theme) || THEME_OPTIONS[0];
   const selectedFlowId = selectedGraphTarget.kind === 'flow' ? selectedGraphTarget.id : '';
   const selectedNodeId = selectedGraphTarget.kind === 'node' ? selectedGraphTarget.id : '';
   const agentFlowFigure = buildAgentFlowFigure(status, plotPalette, agentFlowTick, selectedFlowId, flowActivityMap, selectedNodeId);
@@ -2708,7 +2744,10 @@ function App() {
       ? vectorSearchMatches
       : summaryItems
   ).slice(0, 24);
-  const latestNewsItem = (status.news || []).find((item) => String(item?.content || item?.summary || '').trim()) || (status.news || [])[0] || null;
+  const effectiveNewsItems = (status.news && status.news.length)
+    ? status.news
+    : (status.recent_news_fallback || []);
+  const latestNewsItem = effectiveNewsItems.find((item) => String(item?.content || item?.summary || '').trim()) || effectiveNewsItems[0] || null;
   const latestNewsSignal = latestNewsItem
     ? {
       id: `${latestNewsItem.link || latestNewsItem.title || 'news'}::${status.last_new_item_time || ''}`,
@@ -2717,7 +2756,7 @@ function App() {
       time: status.last_new_item_time || status.last_news_time || latestNewsItem.published_at || latestNewsItem.collected_at || '',
     }
     : null;
-  const latestNewsItems = (status.news || [])
+  const latestNewsItems = (effectiveNewsItems || [])
     .filter((item) => String(item?.title || item?.summary || item?.content || '').trim())
     .slice(0, 6)
     .map((item, index) => ({
@@ -2725,6 +2764,11 @@ function App() {
       title: truncate(item.title || `뉴스 ${index + 1}`, 72),
       summary: truncate(item.summary || item.content || '요약 정보가 없습니다.', 120),
       time: item.published_at || item.collected_at || status.last_news_time || '',
+      rawTitle: String(item.title || '').trim(),
+      rawSummary: String(item.summary || item.content || '').trim(),
+      link: String(item.link || '').trim(),
+      publisher: String(item.publisher || '').trim(),
+      publishedAt: String(item.published_at || item.published || item.collected_at || '').trim(),
     }));
   const visibleDebate = debateSessionActive
     ? (status.cardloan_debate || { status: 'idle', round_results: [] })
@@ -2750,6 +2794,16 @@ function App() {
       time: formatTime(item.timestamp),
     })),
   };
+  ontologyOperationsSummary.newsHealth = {
+    newsAgentOllamaEnabled: Boolean(status.news_agent_ollama_enabled),
+    newsCount: Number((effectiveNewsItems || []).length || 0),
+    lastNewsTime: String(status.last_news_time || ''),
+    crawlRunning: Boolean(status.news_crawl_running),
+    crawlSuccessCount: Number(status.news_crawl_success_count || 0),
+    crawlFailureCount: Number(status.news_crawl_failure_count || 0),
+    lastNewsBriefingTime: String(status.last_news_briefing_time || ''),
+    latestNewsBriefing: String(status.latest_news_briefing || ''),
+  };
   const ontologyDebateSummary = {
     status: visibleDebate?.status || 'idle',
     currentStage: visibleDebate?.current_stage || '대기',
@@ -2763,6 +2817,9 @@ function App() {
       time: item.completed_at ? formatTime(item.completed_at) : '진행 중',
     })),
   };
+  const uploadedRegulationFiles = Array.isArray(status.regulation_files) ? status.regulation_files : [];
+  const uploadedRegulationFileStats = Array.isArray(status.regulation_file_stats) ? status.regulation_file_stats : [];
+  const regulationAgentStatus = String(status.agent_statuses?.regulation_agent?.status || (regulationBusy ? 'running' : 'pending'));
   const debateChatMessages = buildDebateChatMessages({ ...status, cardloan_debate: visibleDebate, ollama_runtime: visibleOllamaRuntime }, debateRunId);
   const sortedDebateMessageIds = debateChatMessages
     .map((message, index) => ({ id: message.id, priority: Number(message.priority || 0), index }))
@@ -3208,10 +3265,14 @@ function App() {
         >
           <OntologyWorkbench
             theme={theme}
+            onDepartmentThemeChange={(departmentId) => {
+              const mappedTheme = mapDepartmentToTheme(departmentId);
+              setTheme(mappedTheme);
+            }}
             reduceMotion={prefersReducedMotion}
             onError={(message) => setErrorMessage(message)}
             onToast={(toast) => setActiveToast(toast)}
-            onRequestRegulationUpload={openRegulationFilePicker}
+            onRequestRegulationUpload={openRegulationUploadModal}
             regulationBusy={regulationBusy}
             regulationStatus={status.agent_statuses?.regulation_agent?.status || 'pending'}
             regulationUpdatedAt={status.agent_statuses?.regulation_agent?.updated_at || ''}
@@ -3365,10 +3426,10 @@ function App() {
           aria-haspopup="menu"
           aria-expanded={themeMenuOpen}
         >
-          <span className="theme-toggle-emoji" aria-hidden="true">{theme === 'cute' ? '☁' : '🌙'}</span>
+          <span className="theme-toggle-emoji" aria-hidden="true">🎨</span>
           <span className="theme-toggle-copy">
             <strong>옵션</strong>
-            <small>{theme === 'cute' ? '서머 블루 테마' : '미드나잇 테마'}</small>
+            <small>{currentThemeOption?.description || '부서 테마'}</small>
           </span>
         </button>
         <AnimatePresence>
@@ -3494,6 +3555,60 @@ function App() {
               {selectedVectorEntry.error ? <div className="error-banner">FULLTEXT 조회 실패: {selectedVectorEntry.error}</div> : null}
               <div className="vector-fulltext-shell">
                 <pre>{selectedVectorEntry.page_content || (selectedVectorEntry.loading ? '본문을 불러오는 중입니다.' : '표시할 full text가 없습니다.')}</pre>
+              </div>
+            </motion.section>
+          </motion.div>
+        ) : null}
+        {showRegulationUploadModal ? (
+          <motion.div
+            className="prompt-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => { if (!regulationBusy) setShowRegulationUploadModal(false); }}
+          >
+            <motion.section
+              className="prompt-modal regulation-upload-modal"
+              initial={{ opacity: 0, y: 20, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 14, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="prompt-modal-head">
+                <div>
+                  <div className="panel-kicker">Regulation Upload</div>
+                  <h3>규제 문서 관리</h3>
+                  <p>{regulationBusy ? '문서 적재/학습 진행 중입니다.' : '현재 업로드된 문서 목록입니다.'}</p>
+                </div>
+                <button className="secondary-button" type="button" onClick={() => setShowRegulationUploadModal(false)} disabled={regulationBusy}>닫기</button>
+              </div>
+              <div className="detail-meta-row">
+                <span className={`sample-pill ${regulationBusy ? 'is-running' : ''}`}>상태 {regulationAgentStatus}</span>
+                <span className="sample-pill">문서 {uploadedRegulationFiles.length}건</span>
+              </div>
+              <div className={`regulation-upload-live ${regulationBusy ? 'is-running' : ''}`}>
+                <span />
+                <span />
+                <span />
+              </div>
+              <div className="regulation-upload-file-list">
+                {(uploadedRegulationFileStats.length || uploadedRegulationFiles.length) ? (
+                  (uploadedRegulationFileStats.length
+                    ? uploadedRegulationFileStats
+                    : uploadedRegulationFiles.map((name) => ({ name, chunk_count: 0, page_count: 0, status: 'unknown' })))
+                    .map((item, index) => (
+                      <div key={`${item.name || 'regulation-file'}-${index}`} className="regulation-upload-file-item">
+                        <strong>{item.name || `문서 ${index + 1}`}</strong>
+                        <small>{`페이지 ${Number(item.page_count || 0)} · 청크 ${Number(item.chunk_count || 0)} · ${String(item.status || 'unknown')}`}</small>
+                      </div>
+                    ))
+                ) : (
+                  <div className="empty-box compact">업로드된 규제 문서가 없습니다.</div>
+                )}
+              </div>
+              <div className="prompt-modal-actions">
+                <button className="primary-button" type="button" onClick={handleAddRegulationFiles} disabled={regulationBusy}>추가</button>
               </div>
             </motion.section>
           </motion.div>

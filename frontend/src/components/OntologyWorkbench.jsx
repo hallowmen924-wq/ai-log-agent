@@ -8,7 +8,7 @@ import './OntologyWorkbench.local.css';
 import regulationDocumentAnimation from '../assets/regulation-document.json';
 import promptSubmitAnimation from '../assets/prompt-submit.json';
 import cardLoanNewsAnimation from '../assets/card-loan-news.json';
-import { createProductDevelopmentAgendas, createProductDevelopmentDebate, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchOntologyState, startFeatureOntologyRuntimeJob } from '../api';
+import { API_BASE_URL, createProductDevelopmentAgendas, createProductDevelopmentDebate, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, startFeatureOntologyRuntimeJob } from '../api';
 import { RUNTIME_STAGES, useOntologyRuntimeStore } from './ontologyRuntimeStore';
 
 const ONTOLOGY_PROMPT_EXAMPLES = [
@@ -278,6 +278,17 @@ function parseDisplayNumber(value) {
   return matched ? Number(matched[0]) : 0;
 }
 
+function formatRelativeTime(value) {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return date.toLocaleTimeString('ko-KR', { hour12: false });
+}
+
 function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   if (!tool) {
     return null;
@@ -286,6 +297,7 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   const shapValues = (tool.shap_values || []).slice(0, 5);
   const clusters = (tool.clusters || []).slice(0, 2);
   const conflicts = tool.conflicts || [];
+  const toolCitations = tool.citations || [];
   const metrics = tool.metrics || [];
   const personas = tool.personas || [];
   const detailedClusterRows = clusters.map((item) => ({
@@ -420,6 +432,28 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
       {conflicts.length ? (
         <div className="tool-mini-list">
           {conflicts.map((item) => <span key={item.title} className={`tool-status-line is-${item.level || 'info'}`}>{item.title}</span>)}
+        </div>
+      ) : null}
+      {toolCitations.length ? (
+        <div className="tool-mini-list">
+          {toolCitations.slice(0, 3).map((item, index) => {
+            const citationPdfUrl = `${API_BASE_URL}/regulation/files/${encodeURIComponent(item.file_name || item.name || '')}`;
+            const citationMeta = item.article ? item.article : (item.page ? `p.${item.page}` : 'PDF');
+            return (
+              <a
+                key={`${tool.id || 'tool'}-citation-${index}`}
+                className="tool-citation-link"
+                href={citationPdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`${item.name || 'regulation'} PDF 보기`}
+              >
+                <span aria-hidden="true">📄</span>
+                <b>{item.name || 'regulation'}</b>
+                <small>{citationMeta}</small>
+              </a>
+            );
+          })}
         </div>
       ) : null}
       {personas.length ? (
@@ -1371,6 +1405,25 @@ const PRODUCT_DEBATE_WARMUP_LINES = Object.freeze([
 ]);
 
 const MEMO_STORAGE_KEY = 'ontology-workbench-memo-preferences';
+const ONBOARDING_STORAGE_KEY = 'ontology-workbench-department-onboarding-v1';
+const DEPARTMENT_SURVEY_QUESTIONS = Object.freeze({
+  solution: [
+    { id: 'goal', prompt: '이번 분기에 가장 중요한 목표는?', choices: ['신상품 속도', '규제 대응', '고객경험 개선'] },
+    { id: 'guard', prompt: '의사결정에서 특히 민감한 항목은?', choices: ['시장 반응', '정책 리스크', '내부 승인 절차'] },
+  ],
+  credit: [
+    { id: 'goal', prompt: '심사에서 가장 먼저 지키는 기준은?', choices: ['연체 리스크', '거절 사유 일관성', 'DSR/규정 준수'] },
+    { id: 'guard', prompt: '이번에 가장 조심할 구간은?', choices: ['씬파일', '고금리 구간', '소득 변동 고객'] },
+  ],
+  sales: [
+    { id: 'goal', prompt: '영업 관점의 우선 KPI는?', choices: ['승인률', '실행액', '재방문 전환'] },
+    { id: 'guard', prompt: '상담 단계에서 중요한 메시지는?', choices: ['조건 명확성', '속도', '금리/한도 예측'] },
+  ],
+  it: [
+    { id: 'goal', prompt: '개발 관점의 최우선은?', choices: ['배포 안정성', '데이터 정합성', '연계 속도'] },
+    { id: 'guard', prompt: '이번에 가장 큰 기술 리스크는?', choices: ['외부기관 연계', '품질 검증', '운영 모니터링'] },
+  ],
+});
 function normalizeSearchText(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -2027,6 +2080,7 @@ function ProductDevelopmentWorkspace({
 
 export default function OntologyWorkbench({
   reduceMotion = false,
+  onDepartmentThemeChange,
   onToast,
   onError,
   onRequestRegulationUpload,
@@ -2096,6 +2150,22 @@ export default function OntologyWorkbench({
   const [activeNewsBubble, setActiveNewsBubble] = useState(null);
   const [showPromptExamples, setShowPromptExamples] = useState(false);
   const [showMetricCubeModal, setShowMetricCubeModal] = useState(false);
+  const [showDepartmentOnboarding, setShowDepartmentOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState('department');
+  const [onboardingMode, setOnboardingMode] = useState('general');
+  const [onboardingDepartment, setOnboardingDepartment] = useState('');
+  const [onboardingQuestionIndex, setOnboardingQuestionIndex] = useState(0);
+  const [onboardingAnswers, setOnboardingAnswers] = useState({});
+  const [onboardingFreeText, setOnboardingFreeText] = useState('');
+  const [showNewsDetailModal, setShowNewsDetailModal] = useState(false);
+  const [newsDetailState, setNewsDetailState] = useState({
+    loading: false,
+    error: '',
+    item: null,
+    faissMetadata: null,
+    faissSnippet: '',
+    summary: '',
+  });
   const [metricCubeTab, setMetricCubeTab] = useState('cube');
   const [metricCubeState, setMetricCubeState] = useState({ loading: false, error: '', data: null });
   const [semanticRefreshState, setSemanticRefreshState] = useState({ loading: true, error: '', refresh: null });
@@ -2152,8 +2222,22 @@ export default function OntologyWorkbench({
   }, []);
 
   useEffect(() => {
+    setShowDepartmentOnboarding(true);
+  }, []);
+
+  useEffect(() => {
     setMemoNotes(memoDepartmentNotes[memoDepartment] || '');
   }, [memoDepartment, memoDepartmentNotes]);
+
+  useEffect(() => {
+    if (!memoDepartment) {
+      return;
+    }
+    if (showDepartmentOnboarding && onboardingDepartment) {
+      return;
+    }
+    onDepartmentThemeChange?.(memoDepartment);
+  }, [memoDepartment, onDepartmentThemeChange, showDepartmentOnboarding, onboardingDepartment]);
 
   const departmentConcepts = useMemo(() => {
     const concepts = {};
@@ -2231,12 +2315,102 @@ export default function OntologyWorkbench({
   const hasSubmittedRuntimeQuery = Number(queryRunNonce || 0) > 0;
   const selectedProductLabel = getProductDisplayName(selectedProductCode);
   const newsBadgeCount = latestNewsItems.length;
+  const newsHealth = operationsSummary?.newsHealth || {};
+  const newsChecklist = [
+    { label: '뉴스 에이전트', value: newsHealth.newsAgentOllamaEnabled ? 'ON' : 'OFF' },
+    { label: '수집 건수', value: `${Number(newsHealth.newsCount || 0)}건` },
+    { label: '크롤링 상태', value: newsHealth.crawlRunning ? '실행 중' : '대기/완료' },
+    { label: '최근 수집', value: newsHealth.lastNewsTime ? formatRelativeTime(newsHealth.lastNewsTime) : '-' },
+    { label: '브리핑 시각', value: newsHealth.lastNewsBriefingTime ? formatRelativeTime(newsHealth.lastNewsBriefingTime) : '-' },
+  ];
   const operationMetrics = operationsSummary?.metrics || [];
   const operationBriefs = operationsSummary?.briefs || [];
   const operationTimeline = operationsSummary?.timeline || [];
   const debateRounds = debateSummary?.roundResults || [];
   const debateStatus = debateSummary?.status || 'idle';
   const conversationStatus = backendState.error ? '오류' : backendState.loading ? '분석 중' : '답변 준비됨';
+  const onboardingQuestions = DEPARTMENT_SURVEY_QUESTIONS[onboardingDepartment] || [];
+  const activeOnboardingQuestion = onboardingQuestions[onboardingQuestionIndex] || null;
+
+  function handleOnboardingAnswerPick(questionId, choice) {
+    setOnboardingAnswers((previous) => ({ ...previous, [questionId]: choice }));
+  }
+
+  function handleCloseOnboarding(markDone = true) {
+    setShowDepartmentOnboarding(false);
+    if (!markDone) return;
+  }
+
+  function handleSubmitOnboarding() {
+    const selectedDepartment = MEMO_DEPARTMENTS.find((item) => item.id === onboardingDepartment);
+    const lines = [
+      onboardingAnswers.goal ? `목표: ${onboardingAnswers.goal}` : '',
+      onboardingAnswers.guard ? `민감 항목: ${onboardingAnswers.guard}` : '',
+      onboardingFreeText ? `추가 기준: ${onboardingFreeText}` : '',
+    ].filter(Boolean);
+    const merged = lines.join('\n');
+    if (selectedDepartment) {
+      if (merged) {
+        setMemoDepartmentNotes((previous) => ({ ...previous, [selectedDepartment.id]: merged }));
+        setMemoNotes(merged);
+      }
+      setMemoDepartment(selectedDepartment.id);
+      onDepartmentThemeChange?.(selectedDepartment.id);
+    }
+    setAnswerMode(onboardingMode);
+    handleCloseOnboarding(true);
+  }
+
+  function handleRestartOnboarding() {
+    try {
+      window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+    } catch {
+      // ignore storage failures and still try to open the modal
+    }
+    setOnboardingStep('department');
+    setOnboardingMode(answerMode === 'product' ? 'product' : 'general');
+    setOnboardingDepartment('');
+    setOnboardingQuestionIndex(0);
+    setOnboardingAnswers({});
+    setOnboardingFreeText('');
+    setShowDepartmentOnboarding(true);
+  }
+
+  async function handleOpenNewsDetail(item) {
+    const selectedItem = item || null;
+    if (!selectedItem) {
+      return;
+    }
+    setShowNewsDetailModal(true);
+    setNewsDetailState({
+      loading: true,
+      error: '',
+      item: selectedItem,
+      faissMetadata: null,
+      faissSnippet: '',
+    });
+    try {
+      const payload = await fetchNewsEvidenceDetail({
+        link: selectedItem.link || '',
+        title: selectedItem.rawTitle || selectedItem.title || '',
+        summary: selectedItem.rawSummary || selectedItem.summary || '',
+      });
+      setNewsDetailState({
+        loading: false,
+        error: '',
+        item: selectedItem,
+        faissMetadata: payload?.metadata || null,
+        faissSnippet: String(payload?.snippet || '').trim(),
+        summary: String(payload?.summary || '').trim(),
+      });
+    } catch (error) {
+      setNewsDetailState((previous) => ({
+        ...previous,
+        loading: false,
+        error: String(error?.message || error || '뉴스 상세 정보를 불러오지 못했습니다.'),
+      }));
+    }
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -3237,14 +3411,23 @@ export default function OntologyWorkbench({
       : '큐브와 군집을 함께 갱신';
   const runtimeToolMap = Object.fromEntries(runtimeToolCards.map((tool) => [String(tool?.id || '').toLowerCase(), tool]));
   const activeToolIds = new Set(runtimeToolCards.map((tool) => String(tool?.id || '').toLowerCase()).filter(Boolean));
+  const hasRegulationCitations = (resolvedAnswerSummary?.citations || []).length > 0;
+  const isRegulationGroundedAnswer = hasRegulationCitations
+    || String(resolvedAnswerSummary?.source || '').toLowerCase().includes('regulation');
   const workspaceToolTabs = hasResolvedRuntimeAnswer
     ? [
         { id: 'summary', label: '요약' },
-        !isEvidenceBlockedAnswer && (activeToolIds.has('explainability') || runtimeToolCards.length > 0)
+        !isRegulationGroundedAnswer
+        && !isEvidenceBlockedAnswer
+        && (activeToolIds.has('explainability') || runtimeToolCards.length > 0)
           ? { id: 'insight', label: '상세 인사이트' }
           : null,
         !isEvidenceBlockedAnswer && activeToolIds.has('policy') ? { id: 'policy', label: '정책/규제 영향' } : null,
-        !isEvidenceBlockedAnswer && activeToolIds.has('strategy') ? { id: 'strategy', label: '상품 시뮬레이션' } : null,
+        !isRegulationGroundedAnswer
+        && !isEvidenceBlockedAnswer
+        && activeToolIds.has('strategy')
+          ? { id: 'strategy', label: '상품 시뮬레이션' }
+          : null,
       ].filter(Boolean)
     : [];
   const selectedWorkspaceResultTab = workspaceToolTabs.some((tab) => tab.id === activeWorkspaceResultTab)
@@ -3359,7 +3542,7 @@ export default function OntologyWorkbench({
                     key={department.id}
                     type="button"
                     className={`memo-department-chip ${memoDepartment === department.id ? 'active' : ''}`}
-                    onClick={() => setMemoDepartment(department.id)}
+                    onClick={() => { setMemoDepartment(department.id); onDepartmentThemeChange?.(department.id); }}
                   >
                     <span aria-hidden="true">{department.icon}</span>
                     <strong>{department.label}</strong>
@@ -3420,6 +3603,7 @@ export default function OntologyWorkbench({
                 <span className="roni-news-lottie-frame" aria-hidden="true">
                   <DotLottieReact className="roni-news-lottie" data={cardLoanNewsAnimation} loop autoplay />
                 </span>
+                <span className="roni-news-counter-label">대출뉴스</span>
                 <strong className="roni-news-counter-count" aria-label={`카드론 뉴스 ${newsBadgeCount}건`}>{newsBadgeCount}</strong>
                 <AnimatePresence>
                   {isNewsBadgeHovered ? (
@@ -3428,12 +3612,20 @@ export default function OntologyWorkbench({
                         <span className="panel-kicker">Collected News</span>
                         <span className="sample-pill">{newsBadgeCount}건</span>
                       </div>
+                      <div className="roni-news-health-checklist">
+                        {newsChecklist.map((item) => (
+                          <div key={item.label} className="roni-news-health-item">
+                            <span>{item.label}</span>
+                            <strong>{item.value}</strong>
+                          </div>
+                        ))}
+                      </div>
                       <div className="roni-news-counter-list">
                         {latestNewsItems.length ? latestNewsItems.map((item) => (
-                          <article key={item.id} className="roni-news-counter-item">
+                          <button key={item.id} type="button" className="roni-news-counter-item" onClick={() => handleOpenNewsDetail(item)}>
                             <strong>{item.title}</strong>
                             <p>{item.summary}</p>
-                          </article>
+                          </button>
                         )) : <div className="empty-box compact">표시할 수집 뉴스가 없습니다.</div>}
                       </div>
                     </motion.aside>
@@ -3611,7 +3803,7 @@ export default function OntologyWorkbench({
                               key={department.id}
                               type="button"
                               className={`memo-department-chip ${memoDepartment === department.id ? 'active' : ''}`}
-                              onClick={() => setMemoDepartment(department.id)}
+                              onClick={() => { setMemoDepartment(department.id); onDepartmentThemeChange?.(department.id); }}
                             >
                               <span aria-hidden="true">{department.icon}</span>
                               <strong>{department.label}</strong>
@@ -3815,17 +4007,18 @@ export default function OntologyWorkbench({
                               </div>
                               {!isEvidenceBlockedAnswer ? (
                               <div className="workspace-summary-tools">
-                                {strategyToolCard ? <FinancialToolCard tool={strategyToolCard} /> : null}
+                                {!isRegulationGroundedAnswer && strategyToolCard ? <FinancialToolCard tool={strategyToolCard} /> : null}
+                                {(isRegulationGroundedAnswer || !strategyToolCard) && policyToolCard ? <FinancialToolCard tool={policyToolCard} /> : null}
                                 {/* Customer Cluster Intelligence Card (군집 카드) */}
-                                {!strategyToolCard && clusterToolCard ? <FinancialToolCard tool={clusterToolCard} collapseExploratoryVisuals={isAverageDistributionQuestion} /> : null}
-                                {!strategyToolCard && insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
+                                {!isRegulationGroundedAnswer && !strategyToolCard && clusterToolCard ? <FinancialToolCard tool={clusterToolCard} collapseExploratoryVisuals={isAverageDistributionQuestion} /> : null}
+                                {!isRegulationGroundedAnswer && !strategyToolCard && insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
                                 {/* 군집/로그/지표가 없을 때 Explainability Agent 결과로 대체 */}
-                                {!strategyToolCard && !clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
+                                {!isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
                                   !insightToolCard
                                     ? <div className="empty-box compact">조건에 맞는 고객군, 로그, 지표가 없습니다.<br />상품, 연령, 기간 등 필터를 넓혀보세요.</div>
                                     : null
                                 ) : null}
-                                {!strategyToolCard && !clusterToolCard && clusterInsightItems.length ? (
+                                {!isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && clusterInsightItems.length ? (
                                   <div className="tool-mini-grid">
                                     {clusterInsightItems.map((cluster) => (
                                       <div key={cluster.cluster_id || cluster.label} className="tool-mini-card">
@@ -4009,17 +4202,31 @@ export default function OntologyWorkbench({
 
                       {isLatest
                         && !backendState.loading
-                        && Number(backendState.workbench?.regulation_evidence_meta?.shown_count ?? ((backendState.workbench?.semantic_context?.regulation_citations || []).length)) > 0
                         && (resolvedAnswerSummary?.citations || []).length > 0 && (
                         <div className="ontology-citation-block">
                           <span className="ontology-citation-label">Regulation Citations</span>
                           <div className="ontology-citation-list">
                             {(resolvedAnswerSummary?.citations || []).slice(0, 3).map((item, index) => {
                               const highlightedSentences = buildCitationHighlights(item, currentQuestion);
+                              const citationPdfUrl = `${API_BASE_URL}/regulation/files/${encodeURIComponent(item.file_name || item.name || '')}`;
                               return (
                                 <article key={`${turn.id}-citation-${index}`} className="ontology-citation-item">
-                                  <strong>{item.name || 'regulation'}</strong>
-                                  <span className="sample-pill">chunk #{item.chunk_index || 0}</span>
+                                  <div className="ontology-citation-head">
+                                    <strong>{item.name || 'regulation'}</strong>
+                                    <a
+                                      className="ontology-citation-pdf-link"
+                                      href={citationPdfUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title="PDF 보기"
+                                      aria-label="PDF 보기"
+                                    >
+                                      <span aria-hidden="true">📄</span>
+                                    </a>
+                                  </div>
+                                  <span className="sample-pill">
+                                    {item.article ? item.article : (item.page ? `PDF p.${item.page}` : 'PDF 근거')}
+                                  </span>
                                   {highlightedSentences.length ? (
                                     <div className="ontology-citation-highlight-box">
                                       <span>참조 문장</span>
@@ -4128,6 +4335,160 @@ export default function OntologyWorkbench({
                       <pre className="ontology-ollama-debug-pre">{answerTraceTab === 'input' ? ollamaFullInput : ollamaFullOutput}</pre>
                     </aside>
                   </div>
+                ) : null}
+              </div>
+            </motion.section>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showNewsDetailModal ? (
+          <motion.div className="prompt-modal-backdrop news-detail-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowNewsDetailModal(false)}>
+            <motion.section className="prompt-modal news-detail-modal" initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.2, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+              <div className="news-detail-modal-head">
+                <div>
+                  <span className="panel-kicker">Loan News Detail</span>
+                  <h3>{newsDetailState?.item?.rawTitle || newsDetailState?.item?.title || '뉴스 상세'}</h3>
+                  <p>{newsDetailState?.item?.publishedAt || newsDetailState?.item?.time || '-'}</p>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => setShowNewsDetailModal(false)}>닫기</button>
+              </div>
+              <div className="news-detail-modal-body">
+                {newsDetailState.loading ? <div className="empty-box compact">FAISS metadata를 조회하는 중입니다.</div> : null}
+                {newsDetailState.error ? <div className="empty-box compact">{newsDetailState.error}</div> : null}
+                {!newsDetailState.loading ? (
+                  <>
+                    <article className="ontology-detail-card">
+                      <span>뉴스 요약</span>
+                      <strong>{newsDetailState.summary || newsDetailState?.item?.rawSummary || newsDetailState?.item?.summary || '요약 정보가 없습니다.'}</strong>
+                      {newsDetailState?.item?.link ? (
+                        <a href={newsDetailState.item.link} target="_blank" rel="noreferrer">원문 링크 열기</a>
+                      ) : null}
+                    </article>
+                    <article className="ontology-detail-card">
+                      <span>FAISS Metadata</span>
+                      <div className="news-score-grid">
+                        <div><small>rule_score</small><strong>{Number(newsDetailState?.faissMetadata?.rule_score || 0).toFixed(3)}</strong></div>
+                        <div><small>embed_score</small><strong>{Number(newsDetailState?.faissMetadata?.embed_score || 0).toFixed(3)}</strong></div>
+                        <div><small>importance_score</small><strong>{Number(newsDetailState?.faissMetadata?.importance_score || 0).toFixed(3)}</strong></div>
+                        <div><small>impact_cardloan</small><strong>{newsDetailState?.faissMetadata?.impact_cardloan || '-'}</strong></div>
+                        <div><small>impact_product</small><strong>{newsDetailState?.faissMetadata?.impact_product || '-'}</strong></div>
+                        <div><small>sentiment</small><strong>{newsDetailState?.faissMetadata?.sentiment || '-'}</strong></div>
+                      </div>
+                      <pre className="news-detail-metadata-pre">
+                        {JSON.stringify({
+                          source: newsDetailState?.faissMetadata?.source || newsDetailState?.item?.publisher || '-',
+                          published_at: newsDetailState?.faissMetadata?.published_at || newsDetailState?.item?.publishedAt || newsDetailState?.item?.time || '-',
+                          evidence_sentences: newsDetailState?.faissMetadata?.evidence_sentences || [],
+                        }, null, 2)}
+                      </pre>
+                    </article>
+                    <article className="ontology-detail-card">
+                      <span>FAISS Chunk Snippet</span>
+                      <p>{newsDetailState.faissSnippet || newsDetailState?.item?.rawSummary || '저장된 snippet이 없습니다.'}</p>
+                    </article>
+                  </>
+                ) : null}
+              </div>
+            </motion.section>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDepartmentOnboarding ? (
+          <motion.div className="prompt-modal-backdrop department-onboarding-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => handleCloseOnboarding(true)}>
+            <motion.section className="prompt-modal department-onboarding-modal" initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+              <div className="department-onboarding-head">
+                <div>
+                  <span className="panel-kicker">Team Setup</span>
+                  <h3>게임 캐릭터 고르듯, 오늘의 부서 관점을 선택해요</h3>
+                  <p>{onboardingStep === 'department' ? '먼저 메인 부서를 캐릭터처럼 선택해볼까요?' : onboardingStep === 'mode' ? '이 부서 관점으로 사용할 모드를 고릅니다.' : '선택한 부서 관점으로 짧은 설문을 이어갑니다.'}</p>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => handleCloseOnboarding(true)}>나중에</button>
+              </div>
+              {onboardingStep === 'department' ? (
+                <div className="department-onboarding-character-grid">
+                  {MEMO_DEPARTMENTS.map((department) => (
+                    <button key={department.id} type="button" className={`department-character-card ${onboardingDepartment === department.id ? 'active' : ''}`} onClick={() => { setOnboardingDepartment(department.id); onDepartmentThemeChange?.(department.id); }}>
+                      <span aria-hidden="true">{department.icon}</span>
+                      <strong>{department.label}</strong>
+                      <p>{department.defaultConcept}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {onboardingStep === 'mode' ? (
+                <div className="department-onboarding-mode-grid">
+                  {ANSWER_MODES.filter((mode) => mode.id !== 'memo').map((mode) => (
+                    <button key={mode.id} type="button" className={`department-mode-card ${onboardingMode === mode.id ? 'active' : ''}`} onClick={() => setOnboardingMode(mode.id)}>
+                      <span>{mode.icon}</span>
+                      <strong>{mode.label}</strong>
+                      <small>{mode.hint}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {onboardingStep === 'survey' ? (
+                <div className="department-onboarding-survey">
+                  <div className="department-onboarding-survey-head">
+                    <strong>{MEMO_DEPARTMENTS.find((item) => item.id === onboardingDepartment)?.label || '부서'} 설문 {onboardingQuestionIndex + 1}/{Math.max(1, onboardingQuestions.length)}</strong>
+                    <p>{activeOnboardingQuestion?.prompt || '마지막으로 추가로 중요하게 보는 기준을 남겨주세요.'}</p>
+                  </div>
+                  {activeOnboardingQuestion ? (
+                    <div className="department-onboarding-choice-row">
+                      {(activeOnboardingQuestion.choices || []).map((choice) => (
+                        <button key={choice} type="button" className={`department-onboarding-choice ${onboardingAnswers[activeOnboardingQuestion.id] === choice ? 'active' : ''}`} onClick={() => handleOnboardingAnswerPick(activeOnboardingQuestion.id, choice)}>
+                          {choice}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <textarea
+                    className="department-onboarding-textarea"
+                    rows={3}
+                    value={onboardingFreeText}
+                    onChange={(event) => setOnboardingFreeText(event.target.value)}
+                    placeholder="예: 30대 승인률은 올리되, DSR 초과군은 보수적으로 보자"
+                  />
+                </div>
+              ) : null}
+              <div className="department-onboarding-actions">
+                {onboardingStep !== 'department' ? (
+                  <button type="button" className="secondary-button" onClick={() => {
+                    if (onboardingStep === 'survey') {
+                      if (onboardingQuestionIndex > 0) {
+                        setOnboardingQuestionIndex((prev) => Math.max(0, prev - 1));
+                      } else {
+                        setOnboardingStep('mode');
+                      }
+                    } else {
+                      setOnboardingStep('department');
+                    }
+                  }}>이전</button>
+                ) : <span />}
+                {onboardingStep === 'department' ? (
+                  <button type="button" className="primary-button" disabled={!onboardingDepartment} onClick={() => {
+                    setOnboardingStep('mode');
+                  }}>다음</button>
+                ) : null}
+                {onboardingStep === 'mode' ? (
+                  <button type="button" className="primary-button" onClick={() => {
+                    setOnboardingQuestionIndex(0);
+                    setOnboardingAnswers({});
+                    setOnboardingFreeText('');
+                    setOnboardingStep('survey');
+                  }}>설문 시작</button>
+                ) : null}
+                {onboardingStep === 'survey' ? (
+                  <button type="button" className="primary-button" onClick={() => {
+                    if (onboardingQuestionIndex < onboardingQuestions.length - 1) {
+                      setOnboardingQuestionIndex((prev) => prev + 1);
+                      return;
+                    }
+                    handleSubmitOnboarding();
+                  }}>{onboardingQuestionIndex < onboardingQuestions.length - 1 ? '다음 질문' : '설정 완료'}</button>
                 ) : null}
               </div>
             </motion.section>

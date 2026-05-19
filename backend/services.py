@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from agent.log_generator import append_synthetic_log
-from agent.news_agent import analyze_news, collect_news
+from agent.news_agent import analyze_news, collect_news, probe_news_connectivity
 from analyzer.log_analyzer import analyze_logs
 from analyzer.risk_analyzer import calculate_risk
 from rag.product_pattern_summary import DEFAULT_SUMMARY_PATH, write_product_pattern_summary
@@ -198,6 +198,10 @@ def search_news_context(*args, **kwargs):
     return _vector_db_module().search_news_context(*args, **kwargs)
 
 
+def get_last_news_pipeline_stats(*args, **kwargs):
+    return _vector_db_module().get_last_news_pipeline_stats(*args, **kwargs)
+
+
 def warmup_embeddings(*args, **kwargs):
     return _vector_db_module().warmup_embeddings(*args, **kwargs)
 
@@ -233,6 +237,8 @@ class BackendState:
         self.news_agent_ollama_enabled = False
         self.log_agent_ollama_enabled = False
         self.regulation_upload_summary_enabled = False
+        self.regulation_files: list[str] = []
+        self.regulation_file_stats: list[dict[str, object]] = []
         self.ollama_gpu_enabled = True
         self.ontology_query_priority_enabled = True
         self.latest_regulation_analysis: str | None = None
@@ -308,6 +314,12 @@ class BackendState:
             except Exception:
                 cached_faiss_items = []
         with self.lock:
+            news_pipeline_stats = safe_serialize(get_last_news_pipeline_stats() or {})
+            recent_news_fallback = (
+                _build_recent_news_fallback_from_vectors(cached_faiss_items, limit=6)
+                if not (self.news or [])
+                else []
+            )
             return {
                 "running": self.running,
                 "results": self.results,
@@ -378,6 +390,8 @@ class BackendState:
                 "ollama_gpu_enabled": bool(self.ollama_gpu_enabled),
                 "ontology_query_priority_enabled": bool(self.ontology_query_priority_enabled),
                 "latest_regulation_analysis": self.latest_regulation_analysis,
+                "regulation_files": list(self.regulation_files or []),
+                "regulation_file_stats": list(self.regulation_file_stats or []),
                 "last_regulation_analysis_time": (
                     self.last_regulation_analysis_time.isoformat()
                     if self.last_regulation_analysis_time
@@ -409,6 +423,8 @@ class BackendState:
                     else None
                 ),
                 "last_news_crawl_error": self.last_news_crawl_error,
+                "news_pipeline_stats": news_pipeline_stats,
+                "recent_news_fallback": safe_serialize(recent_news_fallback),
             }
 
 
@@ -908,6 +924,47 @@ def _build_news_signal_candidates(limit: int = 60) -> list[dict[str, Any]]:
         )
     candidates.sort(key=lambda row: row.get("composite_score", 0), reverse=True)
     return candidates[:5]
+
+
+def _build_recent_news_fallback_from_vectors(
+    items: list[dict[str, Any]] | None,
+    limit: int = 6,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in list(items or []):
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type not in {"news", "signal_news", "generated_news"}:
+            continue
+        metadata = item.get("metadata") or {}
+        features = item.get("features") or {}
+        title = str(
+            item.get("name")
+            or metadata.get("title")
+            or metadata.get("document_name")
+            or ""
+        ).strip()
+        summary = str(
+            metadata.get("summary")
+            or features.get("signal_summary")
+            or item.get("snippet")
+            or ""
+        ).strip()
+        if not (title or summary):
+            continue
+        rows.append(
+            {
+                "id": str(item.get("id") or title or summary)[:200],
+                "title": title or "뉴스",
+                "summary": summary or "요약 정보가 없습니다.",
+                "link": str(metadata.get("link") or metadata.get("source") or "").strip(),
+                "publisher": str(metadata.get("publisher") or metadata.get("source") or "").strip(),
+                "published_at": str(metadata.get("published_at") or metadata.get("published") or "").strip(),
+                "source_type": item_type,
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def _resolve_case_decision(item: dict[str, Any]) -> str:
@@ -1754,6 +1811,10 @@ def collect_news_bundle(
         added_news_items = list(news)
 
     issues = analyze_news(effective_news)
+    if not effective_news:
+        connectivity_issue = probe_news_connectivity()
+        if connectivity_issue:
+            issues = [*issues, connectivity_issue]
     collected_at = datetime.datetime.now()
 
     with state.lock:

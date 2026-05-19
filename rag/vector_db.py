@@ -44,8 +44,14 @@ from rag.faiss_news_db import (
     NEWS_LIKE_TYPES,
     RULE_LIKE_TYPES,
     build_news_documents,
+    get_last_news_pipeline_stats as _get_last_news_pipeline_stats,
     split_news_search_results,
 )
+from rag.regulation_retrieval import (
+    format_retrieval_debug_info,
+    retrieve_relevant_documents,
+)
+from rag.regulation_metadata import build_upload_documents
 
 import io
 import json
@@ -981,6 +987,9 @@ def search_regulation_evidence(
     avoided_feature_ids: list[str] | None = None,
     expansion_feature_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    # Retrieval pipeline (no extra LLM call):
+    # FAISS retriever + BM25 retriever -> Ensemble -> deduplicate -> top-k
+    # MultiQueryRetriever is intentionally left as TODO hook in rag/regulation_retrieval.py.
     normalized_query = str(query or "").strip()
     if not normalized_query:
         return []
@@ -996,12 +1005,24 @@ def search_regulation_evidence(
     }
     target_feature_set = preferred_set | expansion_set
 
-    docs = _similarity_search(
-        FAISS_STORE_DOCUMENT,
-        normalized_query,
-        max(12, int(k or 6) * 5),
-        RULE_LIKE_TYPES,
+    local_db = _get_loaded_db(FAISS_STORE_DOCUMENT)
+    raw_docs = _iter_docstore_documents(local_db)
+    candidate_docs = [
+        doc for doc in raw_docs
+        if str((getattr(doc, "metadata", {}) or {}).get("type") or "").strip().lower() in RULE_LIKE_TYPES
+    ]
+    docs = retrieve_relevant_documents(
+        query=normalized_query,
+        local_db=local_db,
+        candidate_documents=candidate_docs,
+        faiss_k=10,
+        bm25_k=10,
+        top_k=max(6, int(k or 6) * 2),
     )
+    try:
+        ingest_logger.info(format_retrieval_debug_info(docs, normalized_query))
+    except Exception:
+        pass
     query_tokens = set(_tokenize_entity_text(normalized_query))
     scored: list[dict[str, Any]] = []
 
@@ -1036,9 +1057,15 @@ def search_regulation_evidence(
         scored.append(
             {
                 "score": round(float(score), 4),
-                "name": str(metadata.get("name") or "regulation"),
+                "retriever_type": "ensemble(faiss+bm25)",
+                "name": str(metadata.get("document_name") or metadata.get("name") or "regulation"),
+                "document_name": str(metadata.get("document_name") or metadata.get("name") or "regulation"),
                 "doc_type": str(metadata.get("type") or ""),
                 "chunk_index": int(metadata.get("chunk_index") or 0),
+                "chunk_id": str(metadata.get("chunk_id") or metadata.get("chunk_index") or ""),
+                "page": metadata.get("page"),
+                "article": metadata.get("article"),
+                "effective_date": metadata.get("effective_date"),
                 "feature_hits": sorted(set(feature_ids) & target_feature_set),
                 "linked_hits": sorted(set(linked_feature_ids) & target_feature_set),
                 "source": str(metadata.get("source") or ""),
@@ -1158,13 +1185,32 @@ def append_news_documents(news_items: list[dict[str, Any]]) -> tuple[int, int]:
     if not news_items:
         return 0, get_vector_count(FAISS_STORE_NEWS)
 
+    local_news_db = _get_loaded_db(FAISS_STORE_NEWS)
+    existing_news_docs = [
+        doc
+        for doc in _iter_docstore_documents(local_news_db)
+        if str((getattr(doc, "metadata", {}) or {}).get("type") or "").strip().lower() == "news"
+    ]
     documents = build_news_documents(
         news_items,
         ingest_logger,
         clean_text=clean_faiss_text,
         store_name=FAISS_STORE_NEWS,
+        embeddings=get_embeddings(),
+        existing_news_docs=existing_news_docs,
     )
+    try:
+        ingest_logger.info(
+            "news pipeline snapshot: %s",
+            json.dumps(_get_last_news_pipeline_stats(), ensure_ascii=False),
+        )
+    except Exception:
+        pass
     return len(documents), _append_documents_to_store(FAISS_STORE_NEWS, documents)
+
+
+def get_last_news_pipeline_stats() -> dict[str, Any]:
+    return dict(_get_last_news_pipeline_stats() or {})
 
 
 def save_generated_documents(items, store_name: str | None = None):
@@ -1219,17 +1265,17 @@ def save_generated_documents(items, store_name: str | None = None):
     return get_vector_count()
 
 
-def ingest_files(
+def ingest_files_with_report(
     files_data: list[tuple[str, bytes]],
     doc_type: str = "regulation",
     store_name: str | None = None,
-) -> int:
+) -> dict[str, Any]:
     """
     files_data: list of (name, raw_bytes)
     Adds split chunks of provided files into the FAISS DB with metadata type `doc_type`.
     Returns number of vectors after ingest.
     """
-    documents = []
+    documents: list[Document] = []
     target_store = normalize_store_name(store_name) if store_name else infer_store_from_doc_type(doc_type)
     for name, raw in files_data:
         text = ""
@@ -1260,6 +1306,17 @@ def ingest_files(
         except Exception:
             ingest_logger.info("---- RAG INGEST: uploaded file ---- %s", name)
 
+        # Metadata-rich document builder (page/article/effective_date/document_name).
+        documents.extend(
+            build_upload_documents(
+                name=name,
+                raw=raw,
+                doc_type=doc_type,
+                target_store=target_store,
+            )
+        )
+        continue
+
         # create Document
         documents.append(
             Document(
@@ -1274,12 +1331,39 @@ def ingest_files(
         )
 
     if not documents:
-        return get_vector_count()
+        return {
+            "vector_count": get_vector_count(target_store),
+            "added_count": 0,
+            "chunk_count": 0,
+            "file_stats": [],
+        }
+
+    before_count = int(get_vector_count(target_store) or 0)
+    page_counts_by_file: dict[str, int] = {}
+    for doc in documents:
+        metadata = dict(getattr(doc, "metadata", {}) or {})
+        file_name = str(metadata.get("document_name") or metadata.get("name") or "").strip()
+        if not file_name:
+            continue
+        page_counts_by_file[file_name] = int(page_counts_by_file.get(file_name, 0)) + 1
 
     split_docs = _split_documents(documents)
 
     if not split_docs:
-        return get_vector_count(target_store)
+        return {
+            "vector_count": get_vector_count(target_store),
+            "added_count": 0,
+            "chunk_count": 0,
+            "file_stats": [
+                {
+                    "name": file_name,
+                    "page_count": int(page_counts_by_file.get(file_name, 0)),
+                    "chunk_count": 0,
+                    "status": "empty",
+                }
+                for file_name in sorted(page_counts_by_file.keys())
+            ],
+        }
 
     if target_store == FAISS_STORE_DOCUMENT and str(doc_type or "").strip().lower() in RULE_LIKE_TYPES:
         for chunk_index, chunk_doc in enumerate(split_docs):
@@ -1289,11 +1373,26 @@ def ingest_files(
             )
             metadata = dict(getattr(chunk_doc, "metadata", {}) or {})
             metadata["chunk_index"] = int(chunk_index)
+            metadata["chunk_id"] = str(
+                metadata.get("chunk_id")
+                or f"{metadata.get('document_name') or metadata.get('name') or 'regulation'}#{chunk_index}"
+            )
+            metadata["document_name"] = str(
+                metadata.get("document_name") or metadata.get("name") or "regulation"
+            )
             metadata["ontology_feature_ids"] = "|".join(item["feature_id"] for item in entities)
             metadata["ontology_feature_names"] = "|".join(item["feature_name"] for item in entities)
             metadata["ontology_linked_feature_ids"] = "|".join(linked_feature_ids[:20])
             metadata["ontology_entity_count"] = int(len(entities))
             chunk_doc.metadata = metadata
+
+    chunk_counts_by_file: dict[str, int] = {}
+    for chunk_doc in split_docs:
+        metadata = dict(getattr(chunk_doc, "metadata", {}) or {})
+        file_name = str(metadata.get("document_name") or metadata.get("name") or "").strip()
+        if not file_name:
+            continue
+        chunk_counts_by_file[file_name] = int(chunk_counts_by_file.get(file_name, 0)) + 1
 
     count_after = _append_split_documents_to_store(target_store, split_docs)
     try:
@@ -1306,7 +1405,59 @@ def ingest_files(
     ingest_logger.info(
         "Ingested %d chunks for %d files", len(split_docs), len(files_data)
     )
-    return count_after
+    try:
+        preview_items = []
+        for doc in split_docs[:2]:
+            meta = dict(getattr(doc, "metadata", {}) or {})
+            preview_items.append(
+                {
+                    "document_name": meta.get("document_name") or meta.get("name"),
+                    "source": meta.get("source"),
+                    "page": meta.get("page"),
+                    "article": meta.get("article"),
+                    "effective_date": meta.get("effective_date"),
+                    "chunk_id": meta.get("chunk_id") or meta.get("chunk_index"),
+                }
+            )
+        ingest_logger.info(
+            "Regulation metadata preview: %s",
+            json.dumps(preview_items, ensure_ascii=False),
+        )
+    except Exception:
+        pass
+    all_files = sorted(
+        set(page_counts_by_file.keys())
+        | set(chunk_counts_by_file.keys())
+        | {str(name).strip() for name, _ in files_data if str(name).strip()}
+    )
+    file_stats = [
+        {
+            "name": file_name,
+            "page_count": int(page_counts_by_file.get(file_name, 0)),
+            "chunk_count": int(chunk_counts_by_file.get(file_name, 0)),
+            "status": "indexed" if int(chunk_counts_by_file.get(file_name, 0)) > 0 else "empty",
+        }
+        for file_name in all_files
+    ]
+    return {
+        "vector_count": int(count_after),
+        "added_count": max(0, int(count_after) - int(before_count)),
+        "chunk_count": int(len(split_docs)),
+        "file_stats": file_stats,
+    }
+
+
+def ingest_files(
+    files_data: list[tuple[str, bytes]],
+    doc_type: str = "regulation",
+    store_name: str | None = None,
+) -> int:
+    report = ingest_files_with_report(
+        files_data=files_data,
+        doc_type=doc_type,
+        store_name=store_name,
+    )
+    return int(report.get("vector_count") or 0)
 
 
 def _qualify_doc_id(store_name: str, doc_id: str) -> str:

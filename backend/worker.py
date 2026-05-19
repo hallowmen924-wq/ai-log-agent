@@ -24,7 +24,7 @@ from backend.services import (
 
 
 class NewsVectorWorker:
-    def __init__(self, interval_seconds: int = 10) -> None:
+    def __init__(self, interval_seconds: int = 30) -> None:
         self.interval_seconds = max(1, interval_seconds)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -56,7 +56,12 @@ class NewsVectorWorker:
             max(600, base * 120),
             minimum=180,
         )
-        self.faiss_log_rebuild_threshold = max(24, self.log_burst_count * 8)
+        # Batch FAISS update for logs: default 10 records, tunable via env.
+        self.faiss_log_rebuild_threshold = _env_int(
+            "WORKER_FAISS_LOG_REBUILD_THRESHOLD",
+            10,
+            minimum=10,
+        )
 
     def _should_run(self, last_run_at: float, cadence_seconds: int, now: float) -> bool:
         return last_run_at <= 0 or (now - last_run_at) >= cadence_seconds
@@ -311,4 +316,4 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
         return max(minimum, default)
 
 
-worker = NewsVectorWorker(interval_seconds=_env_int("WORKER_BASE_INTERVAL_SECONDS", 5))
+worker = NewsVectorWorker(interval_seconds=_env_int("WORKER_BASE_INTERVAL_SECONDS", 30))

@@ -184,6 +184,10 @@ export function fetchFaissEntry(docId) {
   return request(buildPath('/faiss/entry', { doc_id: docId }));
 }
 
+export function fetchNewsEvidenceDetail({ link = '', title = '', summary = '' } = {}) {
+  return request(buildPath('/news/evidence-detail', { link, title, summary }));
+}
+
 export function fetchSimilarLogVectors(query, limit = 8) {
   return request(buildPath('/faiss/similar_logs', { query, limit }));
 }

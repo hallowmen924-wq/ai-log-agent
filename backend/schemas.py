@@ -81,7 +81,7 @@ class CardloanDebateResponse(BaseModel):
 
 
 class WorkerConfigRequest(BaseModel):
-    interval_seconds: int = 1
+    interval_seconds: int = 30
 
 
 class RegulationUploadResponse(BaseModel):
@@ -92,6 +92,7 @@ class RegulationUploadResponse(BaseModel):
     summary: str = ""
     updated_at: str | None = None
     files: list[str] = Field(default_factory=list)
+    file_stats: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProductSummaryResponse(BaseModel):
@@ -137,6 +138,7 @@ class FullAnalysisResponse(BaseModel):
     ollama_runtime: dict[str, Any] = Field(default_factory=dict)
     cardloan_debate: dict[str, Any] = Field(default_factory=dict)
     backend_diagnostics: dict[str, Any] = Field(default_factory=dict)
+    news_pipeline_stats: dict[str, Any] = Field(default_factory=dict)
 
 
 class GenericMessage(BaseModel):

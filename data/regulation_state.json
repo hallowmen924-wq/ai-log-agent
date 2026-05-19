@@ -1,12 +1,21 @@
 {
   "status": "ok",
-  "detail": "문서 1건 분석 완료 · 벡터 0건 추가 · summary=fallback-timeout",
-  "summary": "규제 문서가 업로드되어 벡터 인덱스에 반영되었습니다. 핵심 근거: 금융감독원 책임자 국  장김형원(02-3145-8020)\n은행감독국 가계신용분석팀 담당자 팀  장이윤선(02-3145-8040)\n한국은행 책임자 팀  장김정호(0 | 제목: regulation_test_policy.txt\n내용: 카드론 심사 운영 가이드 v1.0\r\n\r\n1) 기본 원칙\r\n- 신청자 연령(applicant.age) | 제목: regulation_test_policy.txt\n내용: 카드론 심사 운영 가이드 v1.0\r\n\r\n1) 기본 원칙\r\n- 신청자 연령(applicant.age)",
-  "updated_at": "2026-05-18T12:57:29",
+  "detail": "문서 1건 분석 완료 · 벡터 43건 추가 · summary=disabled",
+  "summary": "규제 문서를 벡터에 적재했습니다. (요약 생성 꺼짐)",
+  "updated_at": "2026-05-19T13:35:50",
   "files": [
     "KB금융브리프 2026-18호(4.27-30).pdf"
   ],
-  "vector_count": 41,
-  "added_count": 0,
-  "summary_mode": "fallback-timeout"
+  "vector_count": 100,
+  "added_count": 43,
+  "summary_mode": "disabled",
+  "regulation_upload_summary_enabled": false,
+  "file_stats": [
+    {
+      "name": "KB금융브리프 2026-18호(4.27-30).pdf",
+      "page_count": 43,
+      "chunk_count": 43,
+      "status": "indexed"
+    }
+  ]
 }

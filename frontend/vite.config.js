@@ -1,8 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-import { resolve } from 'path';
-
 const NGROK_DEV_HOST = 'wrath-studied-mushy.ngrok-free.dev';
 
 export default defineConfig({
@@ -16,8 +14,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: {
-        main:  resolve(__dirname, 'index.html'),
-        bunny: resolve(__dirname, 'bunny.html'),
+        main: 'index.html',
+        bunny: 'bunny.html',
       },
       output: {
         manualChunks(id) {
