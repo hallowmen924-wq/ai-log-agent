@@ -25,7 +25,10 @@ def build_faiss_retriever(local_db: Any, k: int = 10):
 def build_bm25_retriever(documents: list[Document], k: int = 10):
     if BM25Retriever is None or not documents:
         return None
-    retriever = BM25Retriever.from_documents(documents)
+    try:
+        retriever = BM25Retriever.from_documents(documents)
+    except ImportError:
+        return None
     retriever.k = max(1, int(k))
     return retriever
 

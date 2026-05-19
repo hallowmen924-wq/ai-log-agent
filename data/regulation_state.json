@@ -1,20 +1,20 @@
 {
   "status": "ok",
-  "detail": "문서 1건 분석 완료 · 벡터 43건 추가 · summary=disabled",
+  "detail": "문서 1건 분석 완료 · 벡터 1건 추가 · summary=disabled",
   "summary": "규제 문서를 벡터에 적재했습니다. (요약 생성 꺼짐)",
-  "updated_at": "2026-05-19T13:35:50",
+  "updated_at": "2026-05-19T22:08:02",
   "files": [
-    "KB금융브리프 2026-18호(4.27-30).pdf"
+    "251024_(보도참고) 규제지역 내 주택담보대출의 대환대출시 해당 주택담보대출 취급 시점의 LTV 규제비율을 적용합니다.pdf"
   ],
-  "vector_count": 100,
-  "added_count": 43,
+  "vector_count": 101,
+  "added_count": 1,
   "summary_mode": "disabled",
   "regulation_upload_summary_enabled": false,
   "file_stats": [
     {
-      "name": "KB금융브리프 2026-18호(4.27-30).pdf",
-      "page_count": 43,
-      "chunk_count": 43,
+      "name": "251024_(보도참고) 규제지역 내 주택담보대출의 대환대출시 해당 주택담보대출 취급 시점의 LTV 규제비율을 적용합니다.pdf",
+      "page_count": 1,
+      "chunk_count": 1,
       "status": "indexed"
     }
   ]

@@ -385,6 +385,107 @@ _feature_embedding_cache: dict[str, object] = {
 }
 _feature_embedding_cache_lock = threading.Lock()
 
+INTENT_CLASSIFIER_PROTOTYPES: dict[str, dict[str, object]] = {
+    "approval_factor": {
+        "label": "Approval factor",
+        "description": "Approval drivers, important features, influence factors, and explainability questions.",
+        "output_categories": ["answer_summary", "feature_explainability", "cluster_analysis"],
+        "examples": [
+            "40대 직장인의 카드론 승인에 중요한 요인은?",
+            "승인 가능성에 영향을 주는 feature를 알려줘",
+            "이지신용대출 신청자의 승인 요인을 설명해줘",
+            "승인 고객군에서 공통으로 강한 신호는?",
+            "어떤 특성이 심사 결과에 가장 큰 영향을 줘?",
+            "approval factor important feature explainability",
+        ],
+    },
+    "reject_reason": {
+        "label": "Reject reason",
+        "description": "Rejected cases, reject reason codes, knock-out causes, and decline explanations.",
+        "output_categories": ["answer_summary", "reject_code_analysis", "feature_explainability"],
+        "examples": [
+            "40대 카드론 신청자들의 평균 탈락 사유는?",
+            "이지론 거절 고객군에서 가장 자주 연결되는 reject reason은?",
+            "거절 사유 코드 K코드를 보여줘",
+            "부결 원인과 관련 feature를 같이 설명해줘",
+            "knock-out reject code decline reason",
+            "탈락 사유와 거절 고객 패턴을 알려줘",
+        ],
+    },
+    "rate_limit": {
+        "label": "Rate and limit",
+        "description": "Average rate, approved limit, amount, distribution, delinquency, and metric questions.",
+        "output_categories": ["answer_summary", "metric_summary", "cluster_analysis"],
+        "examples": [
+            "이지신용대출 평균 금리와 한도는?",
+            "승인 고객의 평균 금리와 승인 한도 분포를 알려줘",
+            "평균 한도와 소득 구간 관계를 비교해줘",
+            "연체율과 금리 분포를 보여줘",
+            "average rate approved limit distribution metric",
+            "한도 금리 부실률 지표를 요약해줘",
+        ],
+    },
+    "cluster_vector": {
+        "label": "Cluster and vector",
+        "description": "Customer clusters, vector similarity, FAISS, embeddings, and segment comparisons.",
+        "output_categories": ["answer_summary", "cluster_analysis", "feature_explainability"],
+        "examples": [
+            "이지신용대출 고객군집에서 승인과 거절 군집을 비교해줘",
+            "40대 신청자 군집을 소득, 한도, 거절 사유 기준으로 나눠줘",
+            "feature_customer_clusters 기준 반복 관계를 설명해줘",
+            "FAISS 벡터에서 유사한 고객 패턴을 찾아줘",
+            "embedding similarity cluster vector search",
+            "군집별 공통 신호를 비교해줘",
+        ],
+    },
+    "regulation_policy": {
+        "label": "Regulation and policy",
+        "description": "Regulation documents, policy, DSR, stress rules, citations, and compliance evidence.",
+        "output_categories": ["answer_summary", "policy_regulation", "citation_answer"],
+        "examples": [
+            "규제 문서 기준으로 카드론 심사 정책을 설명해줘",
+            "DSR 규제와 스트레스 금리 시행 내용을 알려줘",
+            "첨부 문서 근거로 정책 영향을 요약해줘",
+            "규제 강화 가능성과 심사 기준 변경점을 알려줘",
+            "policy regulation compliance citation evidence",
+            "금융 규제 문서에서 관련 근거를 찾아줘",
+        ],
+    },
+    "strategy_simulation": {
+        "label": "Strategy simulation",
+        "description": "What-if simulations, pricing changes, product strategy, conversion, and scenario analysis.",
+        "output_categories": ["answer_summary", "strategy_simulation", "product_strategy"],
+        "examples": [
+            "이지신용대출 금리를 올리면 승인률과 수익은 어떻게 될까?",
+            "이지론 금리를 1%p 낮추면 고객군별 리스크가 어떻게 바뀔까?",
+            "한도를 늘리면 승인 전환과 부실률은 어떻게 변할까?",
+            "상품 전략 시뮬레이션을 해줘",
+            "what if simulation strategy product conversion",
+            "거절 고객을 승인 전환하려면 어떤 전략이 필요해?",
+        ],
+    },
+    "general_fallback": {
+        "label": "General fallback",
+        "description": "General questions that do not clearly map to financial ontology evidence.",
+        "output_categories": ["answer_summary", "general_answer"],
+        "examples": [
+            "전체 내용을 간단히 설명해줘",
+            "무엇을 할 수 있는지 알려줘",
+            "요약해줘",
+            "일반적인 답변을 해줘",
+            "general answer summarize",
+        ],
+    },
+}
+
+_intent_embedding_cache: dict[str, object] = {
+    "signature": "",
+    "intent_ids": [],
+    "example_counts": {},
+    "matrix": None,
+}
+_intent_embedding_cache_lock = threading.Lock()
+
 WORKBENCH_RUNTIME_STAGES = [
     {
         "key": "extraction",
@@ -2731,6 +2832,231 @@ def _normalize_matrix(matrix: np.ndarray) -> np.ndarray:
     return matrix / norms
 
 
+def _intent_classifier_signature() -> str:
+    digest = hashlib.sha1()
+    for intent_id in sorted(INTENT_CLASSIFIER_PROTOTYPES):
+        spec = INTENT_CLASSIFIER_PROTOTYPES[intent_id]
+        digest.update(intent_id.encode("utf-8"))
+        digest.update(str(spec.get("description") or "").encode("utf-8"))
+        for example in spec.get("examples") or []:
+            digest.update(str(example).encode("utf-8"))
+            digest.update(b"\x1e")
+    return digest.hexdigest()
+
+
+def _build_intent_embedding_bundle() -> tuple[list[str], dict[str, int], np.ndarray | None]:
+    signature = _intent_classifier_signature()
+    with _intent_embedding_cache_lock:
+        cached_matrix = _intent_embedding_cache.get("matrix")
+        if (
+            _intent_embedding_cache.get("signature") == signature
+            and isinstance(cached_matrix, np.ndarray)
+        ):
+            return (
+                list(_intent_embedding_cache.get("intent_ids") or []),
+                dict(_intent_embedding_cache.get("example_counts") or {}),
+                cached_matrix,
+            )
+
+    intent_ids: list[str] = []
+    documents: list[str] = []
+    example_counts: dict[str, int] = {}
+    for intent_id, spec in INTENT_CLASSIFIER_PROTOTYPES.items():
+        examples = [str(item).strip() for item in (spec.get("examples") or []) if str(item).strip()]
+        example_counts[intent_id] = len(examples)
+        for example in examples:
+            intent_ids.append(intent_id)
+            documents.append(
+                " ".join([
+                    str(spec.get("label") or ""),
+                    str(spec.get("description") or ""),
+                    example,
+                ]).strip()
+            )
+
+    if not documents:
+        return [], {}, None
+
+    try:
+        embeddings = get_embeddings()
+        matrix = np.asarray(embeddings.embed_documents(documents), dtype=np.float32)
+        matrix = _normalize_matrix(matrix)
+    except Exception:
+        matrix = None
+
+    with _intent_embedding_cache_lock:
+        _intent_embedding_cache["signature"] = signature
+        _intent_embedding_cache["intent_ids"] = list(intent_ids)
+        _intent_embedding_cache["example_counts"] = dict(example_counts)
+        _intent_embedding_cache["matrix"] = matrix
+    return intent_ids, example_counts, matrix
+
+
+def _score_intents_with_embeddings(query: str) -> list[dict[str, object]]:
+    normalized_query = str(query or "").strip()
+    if not normalized_query:
+        return []
+    intent_ids, _example_counts, matrix = _build_intent_embedding_bundle()
+    if matrix is None or matrix.size == 0 or not intent_ids:
+        return []
+    try:
+        embeddings = get_embeddings()
+        query_vector = np.asarray(embeddings.embed_query(normalized_query), dtype=np.float32)
+        query_norm = float(np.linalg.norm(query_vector))
+        if math.isclose(query_norm, 0.0):
+            return []
+        query_vector = query_vector / query_norm
+        similarities = matrix @ query_vector
+    except Exception:
+        return []
+
+    scores_by_intent: dict[str, list[float]] = {intent_id: [] for intent_id in INTENT_CLASSIFIER_PROTOTYPES}
+    for index, intent_id in enumerate(intent_ids):
+        scores_by_intent.setdefault(intent_id, []).append(float(similarities[index]))
+
+    ranked: list[dict[str, object]] = []
+    for intent_id, scores in scores_by_intent.items():
+        if not scores:
+            continue
+        max_score = max(scores)
+        avg_top_score = sum(sorted(scores, reverse=True)[:3]) / min(3, len(scores))
+        combined_score = max_score * 0.7 + avg_top_score * 0.3
+        ranked.append(
+            {
+                "intent": intent_id,
+                "label": str((INTENT_CLASSIFIER_PROTOTYPES.get(intent_id) or {}).get("label") or intent_id),
+                "score": round(float(combined_score), 4),
+                "max_score": round(float(max_score), 4),
+            }
+        )
+    ranked.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return ranked
+
+
+def _query_has_cluster_vector_intent(query: str) -> bool:
+    compact_query = _compact_search_text(query)
+    markers = [
+        "군집", "벡터", "유사", "유사도", "faiss", "vector", "embedding", "similarity",
+        "cluster", "segment", "세그먼트",
+    ]
+    return _query_asks_cluster_signals(query) or any(marker in compact_query for marker in markers)
+
+
+def _rule_based_query_intent(
+    query: str,
+    selected_feature: dict | None,
+    *,
+    regulation_first_route: bool = False,
+    strategy_simulation_route: bool = False,
+) -> str:
+    if not str(query or "").strip():
+        return "general_fallback"
+    if regulation_first_route:
+        return "regulation_policy"
+    if strategy_simulation_route:
+        return "strategy_simulation"
+    if _query_has_reject_intent(query, selected_feature):
+        return "reject_reason"
+    if _query_asks_average_metrics(query) or query_has_segment_metric_intent(query):
+        return "rate_limit"
+    if _query_has_cluster_vector_intent(query):
+        return "cluster_vector"
+    if _query_asks_influence_features(query):
+        return "approval_factor"
+    return ""
+
+
+def _classify_query_intent(
+    query: str,
+    selected_feature: dict | None,
+    *,
+    regulation_first_route: bool = False,
+    strategy_simulation_route: bool = False,
+) -> dict[str, object]:
+    embedding_candidates = _score_intents_with_embeddings(query)
+    rule_intent = _rule_based_query_intent(
+        query,
+        selected_feature,
+        regulation_first_route=regulation_first_route,
+        strategy_simulation_route=strategy_simulation_route,
+    )
+    embedding_intent = str((embedding_candidates[0] or {}).get("intent") or "") if embedding_candidates else ""
+    embedding_score = float((embedding_candidates[0] or {}).get("score") or 0.0) if embedding_candidates else 0.0
+
+    if rule_intent:
+        intent = rule_intent
+        method = "rule+embedding" if embedding_candidates else "rule"
+        confidence = max(0.72, embedding_score if embedding_intent == rule_intent else 0.0)
+    elif embedding_intent and embedding_score >= 0.18:
+        intent = embedding_intent
+        method = "embedding"
+        confidence = embedding_score
+    else:
+        intent = "general_fallback"
+        method = "fallback"
+        confidence = embedding_score
+
+    spec = INTENT_CLASSIFIER_PROTOTYPES.get(intent) or {}
+    return {
+        "intent": intent,
+        "label": str(spec.get("label") or intent),
+        "confidence": round(float(confidence), 4),
+        "method": method,
+        "rule_intent": rule_intent,
+        "embedding_intent": embedding_intent,
+        "top_candidates": embedding_candidates[:4],
+        "output_categories": list(spec.get("output_categories") or []),
+    }
+
+
+def _classify_output_categories(
+    *,
+    input_intent: str,
+    answer_summary: dict[str, object],
+    agentic_workspace: dict[str, object],
+    ollama_runtime: dict[str, object],
+    regulation_evidence: list[dict[str, object]],
+    reject_code_summary: list[dict[str, object]],
+) -> dict[str, object]:
+    categories = ["answer_summary"]
+    configured = list((INTENT_CLASSIFIER_PROTOTYPES.get(input_intent) or {}).get("output_categories") or [])
+    categories.extend(str(item) for item in configured)
+
+    source = str(answer_summary.get("source") or "").strip().lower()
+    guardrail = str(ollama_runtime.get("guardrail") or "").strip().lower()
+    active_tools = [
+        str(tool.get("id") or "").strip().lower()
+        for tool in (((agentic_workspace.get("version_1") or {}).get("active_tools") or []))
+        if isinstance(tool, dict)
+    ]
+    if reject_code_summary or guardrail == "reject_code_grounding":
+        categories.append("reject_code_analysis")
+    if regulation_evidence or "regulation" in guardrail:
+        categories.extend(["policy_regulation", "citation_answer"])
+    if "average_metric" in guardrail:
+        categories.append("metric_summary")
+    if "cluster_signal" in guardrail:
+        categories.append("cluster_analysis")
+    if "strategy" in active_tools or input_intent == "strategy_simulation":
+        categories.extend(["strategy_simulation", "product_strategy"])
+    if "explainability" in active_tools:
+        categories.append("feature_explainability")
+    if "ollama" in source:
+        categories.append("llm_generated_answer")
+    if "evidence-blocked" in source:
+        categories.append("evidence_blocked")
+
+    deduped = _dedupe_text_items([item for item in categories if item], limit=12)
+    primary = next((item for item in deduped if item != "answer_summary"), "answer_summary")
+    return {
+        "primary": primary,
+        "categories": deduped,
+        "source": str(answer_summary.get("source") or ""),
+        "guardrail": str(ollama_runtime.get("guardrail") or ""),
+        "active_tools": active_tools,
+    }
+
+
 def _prepare_feature_embedding_payload(features: list[dict]) -> tuple[list[str], list[str], str]:
     feature_ids: list[str] = []
     documents: list[str] = []
@@ -4321,6 +4647,14 @@ def _build_strategy_simulation_result(
     estimated_profit = round(total_records * estimated_uplift * 0.018, 1)
     estimated_risk = round(min(4.8, max(0.4, estimated_uplift * 0.32)), 1)
     compact_query = _compact_search_text(query)
+    weighted_count = max(1, total_records)
+    weighted_rate_values = [
+        (_to_number(str(item.get("avg_rate") or "")) or 0.0) * int(item.get("count") or 0)
+        for item in customer_clusters
+        if item.get("avg_rate") is not None
+    ]
+    baseline_rate = sum(weighted_rate_values) / weighted_count if weighted_rate_values else 12.0
+    baseline_approval_rate = round(max(0.0, min(100.0, ((total_records - rejected_records) / weighted_count) * 100)), 1)
     if any(token in compact_query for token in ["금리", "rate", "이자"]):
         rate_direction = "인상" if any(token in compact_query for token in ["올리", "인상", "상향", "높이"]) else ("인하" if any(token in compact_query for token in ["낮추", "내리", "인하", "하향"]) else "조정")
         summary = f"금리 {rate_direction} 시 승인률, 예상 이자수익, 부실률 변화를 고객군 기준으로 가정합니다."
@@ -4335,6 +4669,65 @@ def _build_strategy_simulation_result(
         summary = "질문에 포함된 전략 조건을 바꿨을 때 승인률, 수익, 리스크 변화를 빠르게 가정합니다."
         scenario = "전략 조건 민감도 시뮬레이션"
         metric_labels = ["승인률 변화", "예상 수익 변화", "부실률 변화"]
+    rate_question = any(token in compact_query for token in ["금리", "湲덈━", "rate", "?댁옄"])
+    limit_question = any(token in compact_query for token in ["한도", "?쒕룄", "limit"])
+    rate_down = any(token in compact_query for token in ["내리", "내리면", "인하", "하향", "낮추", "낮추면"])
+    limit_down = any(token in compact_query for token in ["줄이", "줄이면", "축소", "감액", "낮추", "낮추면"])
+    scenario_rows: list[dict[str, object]] = []
+    if rate_question:
+        signed_steps = [-0.2, -0.5, -1.0] if rate_down else [0.2, 0.5, 1.0]
+        for step in signed_steps:
+            approval_delta = round((-0.9 * step) if step > 0 else abs(step) * 1.1, 1)
+            profit_delta = round(((step / max(1.0, baseline_rate)) * 100) + (approval_delta * 0.45), 1)
+            risk_delta = round((0.45 * step) if step > 0 else abs(step) * 0.35, 1)
+            scenario_rows.append({
+                "label": f"{step:+.1f}%p",
+                "change": round(step, 1),
+                "change_type": "rate_pp",
+                "approval_delta": approval_delta,
+                "profit_delta": profit_delta,
+                "risk_delta": risk_delta,
+                "approval_rate_after": round(max(0.0, min(100.0, baseline_approval_rate + approval_delta)), 1),
+                "note": "금리 인하" if step < 0 else "금리 인상",
+            })
+        scenario = "금리 인하 구간별 시뮬레이션" if rate_down else "금리 인상 구간별 시뮬레이션"
+        summary = "금리 조정 폭별로 승인률, 예상 이자수익, 부실률 변화를 고객군 기준으로 가정합니다."
+    elif limit_question:
+        signed_steps = [-5, -10, -20] if limit_down else [5, 10, 20]
+        for step in signed_steps:
+            approval_delta = round((0.08 * step) if step > 0 else -0.05 * abs(step), 1)
+            profit_delta = round((0.62 * step) if step > 0 else -0.42 * abs(step), 1)
+            risk_delta = round((0.1 * step) if step > 0 else -0.06 * abs(step), 1)
+            scenario_rows.append({
+                "label": f"{step:+.0f}%",
+                "change": round(step, 1),
+                "change_type": "limit_pct",
+                "approval_delta": approval_delta,
+                "profit_delta": profit_delta,
+                "risk_delta": risk_delta,
+                "approval_rate_after": round(max(0.0, min(100.0, baseline_approval_rate + approval_delta)), 1),
+                "note": "한도 축소" if step < 0 else "한도 확대",
+            })
+        scenario = "한도 축소 구간별 시뮬레이션" if limit_down else "한도 확대 구간별 시뮬레이션"
+        summary = "한도 조정 폭별로 승인 전환, 예상 이자수익, 부실률 변화를 고객군 기준으로 가정합니다."
+    if scenario_rows:
+        selected_row = scenario_rows[-1]
+        estimated_uplift = float(selected_row.get("approval_delta") or 0.0)
+        estimated_profit = float(selected_row.get("profit_delta") or 0.0)
+        estimated_risk = float(selected_row.get("risk_delta") or 0.0)
+    segment_impacts: list[dict[str, object]] = []
+    for cluster in customer_clusters[:3]:
+        cluster_count = int(cluster.get("count") or 0)
+        cluster_share = round((cluster_count / weighted_count) * 100, 1)
+        segment_impacts.append({
+            "label": str(cluster.get("label") or cluster.get("cluster_id") or "고객군"),
+            "decision": str(cluster.get("decision") or "미상"),
+            "records": cluster_count,
+            "share": cluster_share,
+            "avg_rate": str(cluster.get("avg_rate_display") or cluster.get("avg_rate") or "-"),
+            "avg_limit": str(cluster.get("avg_amount_display") or cluster.get("avg_limit") or "-"),
+            "manager_note": "표본 비중이 커서 전체 수익 민감도에 영향이 큼" if cluster_share >= 25 else "보조 고객군으로 방향성 확인",
+        })
     return {
         "id": "strategy",
         "title": "Strategy Simulation",
@@ -4343,10 +4736,17 @@ def _build_strategy_simulation_result(
         "llm_call": True,
         "scenario": scenario,
         "baseline_rejected_records": rejected_records,
+        "baseline": {
+            "approval_rate": baseline_approval_rate,
+            "avg_rate": round(baseline_rate, 2),
+            "record_count": total_records,
+        },
+        "scenario_rows": scenario_rows,
+        "segment_impacts": segment_impacts,
         "metrics": [
-            {"label": metric_labels[0], "value": f"+{estimated_uplift}%", "tone": "positive"},
-            {"label": metric_labels[1], "value": f"+{estimated_profit} index", "tone": "positive"},
-            {"label": metric_labels[2], "value": f"+{estimated_risk}%", "tone": "warning"},
+            {"label": metric_labels[0], "value": f"{estimated_uplift:+.1f}%", "tone": "positive" if estimated_uplift >= 0 else "warning"},
+            {"label": metric_labels[1], "value": f"{estimated_profit:+.1f} index", "tone": "positive" if estimated_profit >= 0 else "warning"},
+            {"label": metric_labels[2], "value": f"{estimated_risk:+.1f}%", "tone": "warning" if estimated_risk >= 0 else "positive"},
         ],
     }
 
@@ -5684,7 +6084,9 @@ def _build_strategy_simulation_prompt_pack(
 ) -> dict[str, object]:
     pack = dict(base_prompt_pack or {})
     system_prompt = str(pack.get("system_prompt") or "").strip()
-    user_prompt = str(pack.get("user_prompt") or "").strip()
+    semantic_context = dict(pack.get("semantic_context") or {})
+    cluster_summary = dict(semantic_context.get("cluster_summary") or {})
+    user_prompt = ""
     strategy_rules = [
         "[STRATEGY SIMULATION MODE]",
         "- 반드시 Ollama가 고객군/승인률/금리/한도/부실률 근거를 함께 해석해 답변한다.",
@@ -5702,11 +6104,86 @@ def _build_strategy_simulation_prompt_pack(
         f"[SELECTED PRODUCT] {selected_product}",
         "이 질문은 예측/시뮬레이션 질문입니다. 위 근거 안에서 변경 조건별 영향만 답하세요.",
     ]).strip()
+    pack["user_prompt"] = "\n".join([
+        f"[SIMULATION QUESTION] {query}",
+        f"[SELECTED PRODUCT] {selected_product}",
+        "[CURRENT DATA SNAPSHOT]",
+        json.dumps(
+            {
+                "query": query,
+                "selected_product": selected_product,
+                "cluster_summary": cluster_summary,
+                "top_axes": list((semantic_context.get("top_axes") or [])[:5]) if isinstance(semantic_context.get("top_axes"), list) else [],
+                "retrieval_evidence": list((semantic_context.get("retrieval_evidence") or [])[:5]) if isinstance(semantic_context.get("retrieval_evidence"), list) else [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        "",
+        "이 질문은 예측/시뮬레이션 질문입니다.",
+        "답변은 반드시 금리 변경 조건이 승인률, 이자수익, 리스크/부실률에 주는 방향성으로 작성하세요.",
+        "최빈 reject reason, K코드, 거절 사유를 최종 결론으로 삼지 마세요. 필요한 경우 리스크 보조 근거로만 짧게 언급하세요.",
+    ]).strip()
     pack["context_preview"] = [
         *list(pack.get("context_preview") or []),
         f"strategy simulation required: {query[:120]}",
     ]
     return pack
+
+
+def _build_strategy_simulation_answer_summary(
+    query: str,
+    selected_product: str,
+    customer_clusters: list[dict],
+    reject_code_summary: list[dict[str, object]],
+) -> dict[str, object]:
+    strategy = _build_strategy_simulation_result(customer_clusters, reject_code_summary, query=query)
+    metrics = list(strategy.get("metrics") or [])
+    product_name = _product_display_name(selected_product) or selected_product or "선택 상품"
+    scenario = str(strategy.get("scenario") or "전략 조건 시뮬레이션")
+    compact_query = _compact_search_text(query)
+    rate_up = any(token in compact_query for token in ["올리", "올리면", "인상", "상향", "높이", "높이면"])
+    rate_down = any(token in compact_query for token in ["내리", "내리면", "인하", "하향", "낮추", "낮추면"])
+    if rate_up:
+        metrics = [
+            {"label": "승인률 방향", "value": "하락 가능", "tone": "warning"},
+            {"label": "이자수익 방향", "value": "건당 수익 상승, 총수익은 승인 감소와 상쇄", "tone": "positive"},
+            {"label": "리스크 방향", "value": "저수익/고위험군 이탈 가능, 고금리 부담은 점검", "tone": "neutral"},
+        ]
+        scenario = "금리 인상 민감도 시뮬레이션"
+    elif rate_down:
+        metrics = [
+            {"label": "승인률 방향", "value": "상승 가능", "tone": "positive"},
+            {"label": "이자수익 방향", "value": "건당 수익 하락, 승인 증가로 일부 보전", "tone": "warning"},
+            {"label": "리스크 방향", "value": "유입 확대에 따른 부실률 점검 필요", "tone": "warning"},
+        ]
+        scenario = "금리 인하 민감도 시뮬레이션"
+    metric_text = ", ".join(
+        f"{item.get('label')}: {item.get('value')}"
+        for item in metrics[:3]
+        if isinstance(item, dict)
+    )
+    explanation = (
+        f"{product_name}에 대해 '{query}' 조건을 시뮬레이션 질문으로 해석했습니다. "
+        f"{scenario} 기준으로 승인률, 이자수익, 리스크 방향을 함께 봐야 합니다. "
+        f"현재 데이터 기반 민감도 초안은 {metric_text or '계산 가능한 지표가 제한적입니다'} 입니다. "
+        "정확한 확정 예측이 아니라 고객군집과 현재 심사 로그를 이용한 방향성 추정입니다."
+    )
+    return {
+        "headline": f"{product_name} 금리/조건 변경 시뮬레이션",
+        "explanation": explanation,
+        "highlights": [
+            {"label": "Question Type", "value": "Strategy Simulation"},
+            {"label": "Scenario", "value": scenario},
+            *[
+                {"label": str(item.get("label") or f"Metric {index + 1}"), "value": str(item.get("value") or "-")}
+                for index, item in enumerate(metrics[:3])
+                if isinstance(item, dict)
+            ],
+        ],
+        "source": "strategy-simulation-grounding",
+        "citations": [],
+    }
 
 
 def _run_general_ollama_fallback(
@@ -6467,6 +6944,12 @@ def _build_feature_workbench_payload(
     raw_regulation_evidence_count = len(raw_regulation_evidence)
     regulation_first_route = _query_requires_regulation_first(query)
     strategy_simulation_route = _query_requires_strategy_simulation(query)
+    intent_classification = _classify_query_intent(
+        query,
+        selected_feature,
+        regulation_first_route=regulation_first_route,
+        strategy_simulation_route=strategy_simulation_route,
+    )
     if regulation_first_route:
         regulation_evidence, regulation_evidence_reason = _select_regulation_first_evidence(
             query,
@@ -6553,7 +7036,13 @@ def _build_feature_workbench_payload(
         ollama_runtime, answer_summary = _run_general_ollama_fallback(query, prompt_pack, job_id=job_id)
     elif strategy_simulation_route:
         prompt_pack = _build_strategy_simulation_prompt_pack(query, selected_product, prompt_pack)
-        ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, server_answer_summary, job_id=job_id)
+        strategy_answer_summary = _build_strategy_simulation_answer_summary(
+            query,
+            selected_product,
+            customer_clusters,
+            reject_code_summary,
+        )
+        ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, strategy_answer_summary, job_id=job_id)
     elif _query_asks_average_metrics(query) or query_has_segment_metric_intent(query):
         answer_summary = _build_average_metric_answer_summary(query, selected_product, profiles, customer_clusters)
         ollama_runtime = {
@@ -6606,7 +7095,7 @@ def _build_feature_workbench_payload(
     if evidence_gate.get("allowed"):
         answer_summary = decorate_grounded_answer_summary(answer_summary, evidence_gate)
     reject_code_line = _format_reject_code_summary(reject_code_summary)
-    if reject_code_line and _query_has_reject_intent(query, selected_feature):
+    if reject_code_line and not strategy_simulation_route and _query_has_reject_intent(query, selected_feature):
         reject_code_scope_note = _format_reject_code_scope_note(reject_code_summary, selected_product)
         explanation_text = str(server_answer_summary.get("explanation") or answer_summary.get("explanation") or "").strip()
         if not all(str(item.get("code") or "") in explanation_text for item in reject_code_summary[:3]):
@@ -6649,6 +7138,14 @@ def _build_feature_workbench_payload(
         regulation_evidence_reason=regulation_evidence_reason,
         answer_summary=answer_summary,
     )
+    output_classification = _classify_output_categories(
+        input_intent=str(intent_classification.get("intent") or ""),
+        answer_summary=answer_summary,
+        agentic_workspace=agentic_workspace,
+        ollama_runtime=ollama_runtime,
+        regulation_evidence=regulation_evidence,
+        reject_code_summary=reject_code_summary,
+    )
 
     return {
         "status": "ok",
@@ -6658,6 +7155,8 @@ def _build_feature_workbench_payload(
             "product_resolution": product_resolution,
             "query": query,
             "feature_id": feature_id,
+            "intent": str(intent_classification.get("intent") or ""),
+            "intent_confidence": float(intent_classification.get("confidence") or 0.0),
         },
         "summary": {
             "feature_count": len(features),
@@ -6687,7 +7186,12 @@ def _build_feature_workbench_payload(
             "cluster_cache_built_at": str((customer_cluster_cache.get("meta") or {}).get("built_at") or ""),
             "clarification_needed": bool(clarification.get("needed")),
             "products": sorted({str(record.get("product") or "").strip() for record in records if str(record.get("product") or "").strip()}),
+            "intent": str(intent_classification.get("intent") or ""),
+            "intent_confidence": float(intent_classification.get("confidence") or 0.0),
+            "output_category": str(output_classification.get("primary") or ""),
         },
+        "intent_classification": intent_classification,
+        "output_classification": output_classification,
         "search_results": [
             {
                 "score": round(float(score), 4),
@@ -7179,6 +7683,7 @@ def app_shutdown() -> None:
 def build_ws_snapshot(snapshot: dict) -> dict:
     return {
         "news": snapshot.get("news", []),
+        "recent_news_fallback": snapshot.get("recent_news_fallback", []),
         "issues": snapshot.get("issues", []),
         "vector_count": snapshot.get("vector_count"),
         "vector_events": snapshot.get("vector_events", []),

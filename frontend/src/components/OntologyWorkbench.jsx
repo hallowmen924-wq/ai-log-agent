@@ -300,6 +300,18 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   const toolCitations = tool.citations || [];
   const metrics = tool.metrics || [];
   const personas = tool.personas || [];
+  const scenarioRows = (tool.scenario_rows || []).slice(0, 6);
+  const segmentImpacts = (tool.segment_impacts || []).slice(0, 3);
+  const isStrategyTool = tool?.id === 'strategy';
+  const hasStrategyScenario = isStrategyTool && scenarioRows.length > 0;
+  const maxScenarioAbs = Math.max(
+    1,
+    ...scenarioRows.flatMap((item) => [
+      Math.abs(Number(item.approval_delta || 0)),
+      Math.abs(Number(item.profit_delta || 0)),
+      Math.abs(Number(item.risk_delta || 0)),
+    ]),
+  );
   const detailedClusterRows = clusters.map((item) => ({
     key: item.cluster_id || item.label || `${item.decision || '군집'}-${item.records || 0}`,
     label: String(item.display_label || item.label || item.decision || '군집'),
@@ -333,6 +345,59 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
         </div>
         <span className="sample-pill">{tool.status || 'ready'}</span>
       </div>
+      {hasStrategyScenario ? (
+        <div className="strategy-simulation-chart" aria-label="구간별 전략 시뮬레이션 차트">
+          <div className="strategy-simulation-legend">
+            <span className="is-approval">승인률</span>
+            <span className="is-profit">예상 이자수익</span>
+            <span className="is-risk">부실률</span>
+          </div>
+          <div className="strategy-simulation-bars">
+            {scenarioRows.map((row) => {
+              const approval = Number(row.approval_delta || 0);
+              const profit = Number(row.profit_delta || 0);
+              const risk = Number(row.risk_delta || 0);
+              return (
+                <section key={`${tool.id}-${row.label}`} className="strategy-simulation-row">
+                  <div className="strategy-simulation-row-head">
+                    <strong>{row.label}</strong>
+                    <span>{row.note || row.change_type || '조건 조정'}</span>
+                  </div>
+                  <div className="strategy-simulation-series">
+                    <div className="is-approval">
+                      <span>승인률</span>
+                      <i><b style={{ width: `${Math.max(4, Math.min(100, (Math.abs(approval) / maxScenarioAbs) * 100))}%` }} /></i>
+                      <em>{approval > 0 ? '+' : ''}{approval.toFixed(1)}%</em>
+                    </div>
+                    <div className="is-profit">
+                      <span>이자수익</span>
+                      <i><b style={{ width: `${Math.max(4, Math.min(100, (Math.abs(profit) / maxScenarioAbs) * 100))}%` }} /></i>
+                      <em>{profit > 0 ? '+' : ''}{profit.toFixed(1)} idx</em>
+                    </div>
+                    <div className="is-risk">
+                      <span>부실률</span>
+                      <i><b style={{ width: `${Math.max(4, Math.min(100, (Math.abs(risk) / maxScenarioAbs) * 100))}%` }} /></i>
+                      <em>{risk > 0 ? '+' : ''}{risk.toFixed(1)}%</em>
+                    </div>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+          {segmentImpacts.length ? (
+            <div className="strategy-segment-grid">
+              {segmentImpacts.map((item) => (
+                <div key={`${tool.id}-${item.label}`} className="strategy-segment-card">
+                  <span>{item.decision} · {Number(item.records || 0).toLocaleString('ko-KR')}건 · {item.share}%</span>
+                  <strong>{item.label}</strong>
+                  <small>금리 {item.avg_rate || '-'} · 한도 {item.avg_limit || '-'}</small>
+                  <p>{item.manager_note}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {shouldRenderClusterSummaryChart ? (
         <div className="tool-cluster-summary-chart" aria-label="군집 요약 차트">
           {detailedClusterRows.map((row) => {
@@ -2787,6 +2852,11 @@ export default function OntologyWorkbench({
   const primarySelectionCards = primaryFeatureSelection?.graph_result_explanation || [];
   const primaryGraphSupports = selectedPrimaryCandidate?.graph_edges || [];
   const questionTokenMappings = backendState.workbench?.question_token_mappings || [];
+  const intentClassification = backendState.workbench?.intent_classification || {};
+  const outputClassification = backendState.workbench?.output_classification || {};
+  const intentLabel = intentClassification?.label || intentClassification?.intent || resultSummary.intent || '분류 대기';
+  const intentConfidence = Number(intentClassification?.confidence || resultSummary.intent_confidence || 0);
+  const outputCategoryLabel = outputClassification?.primary || resultSummary.output_category || 'answer_summary';
   const topClusterRejectDescriptions = (resultTopCluster?.top_reject_descriptions || []).slice(0, 3);
   const topClusterRejectCodes = ((resultTopCluster?.top_reject_codes || []).slice(0, 3)).map((item) => item.code).filter(Boolean);
   const selectedFeatureIsRejectDriven = isRejectDrivenFeature(selectedFeature);
@@ -3411,9 +3481,14 @@ export default function OntologyWorkbench({
       : '큐브와 군집을 함께 갱신';
   const runtimeToolMap = Object.fromEntries(runtimeToolCards.map((tool) => [String(tool?.id || '').toLowerCase(), tool]));
   const activeToolIds = new Set(runtimeToolCards.map((tool) => String(tool?.id || '').toLowerCase()).filter(Boolean));
+  const isStrategySimulationAnswer = activeToolIds.has('strategy')
+    || String(intentClassification?.intent || resultSummary.intent || '').toLowerCase() === 'strategy_simulation'
+    || String(outputCategoryLabel || '').toLowerCase() === 'strategy_simulation';
   const hasRegulationCitations = (resolvedAnswerSummary?.citations || []).length > 0;
-  const isRegulationGroundedAnswer = hasRegulationCitations
-    || String(resolvedAnswerSummary?.source || '').toLowerCase().includes('regulation');
+  const isRegulationGroundedAnswer = !isStrategySimulationAnswer && (
+    hasRegulationCitations
+    || String(resolvedAnswerSummary?.source || '').toLowerCase().includes('regulation')
+  );
   const workspaceToolTabs = hasResolvedRuntimeAnswer
     ? [
         { id: 'summary', label: '요약' },
@@ -3423,9 +3498,8 @@ export default function OntologyWorkbench({
           ? { id: 'insight', label: '상세 인사이트' }
           : null,
         !isEvidenceBlockedAnswer && activeToolIds.has('policy') ? { id: 'policy', label: '정책/규제 영향' } : null,
-        !isRegulationGroundedAnswer
-        && !isEvidenceBlockedAnswer
-        && activeToolIds.has('strategy')
+        !isEvidenceBlockedAnswer
+        && (activeToolIds.has('strategy') || isStrategySimulationAnswer)
           ? { id: 'strategy', label: '상품 시뮬레이션' }
           : null,
       ].filter(Boolean)
@@ -3438,7 +3512,7 @@ export default function OntologyWorkbench({
   const clusterToolCard = runtimeToolMap.cluster;
   const insightToolCard = runtimeToolMap.explainability;
   const policyToolCard = runtimeToolMap.policy;
-  const strategyToolCard = runtimeToolMap.strategy;
+  const strategyToolCard = runtimeToolMap.strategy || strategyPanels.find((tool) => String(tool?.id || '').toLowerCase() === 'strategy') || null;
   const clusterInsightItems = customerClusters.slice(0, 3);
   const metricInsightItems = [
     ...(clusterToolCard?.metrics || []).slice(0, 3),
@@ -3962,6 +4036,8 @@ export default function OntologyWorkbench({
                                         <span className="panel-kicker">Answer</span>
                                         <div className="detail-chip-row">
                                           <span className="sample-pill">{currentAnswerSourceTag}</span>
+                                          <span className="sample-pill">Intent {intentLabel}{intentConfidence ? ` ${(intentConfidence * 100).toFixed(0)}%` : ''}</span>
+                                          <span className="sample-pill">Output {outputCategoryLabel}</span>
                                           {shouldShowProductChip(selectedProductCode || backendState.workbench?.input?.product, currentAnswerSourceTag) ? (
                                             <span className="sample-pill">상품 {getProductDisplayName(selectedProductCode || backendState.workbench?.input?.product)}</span>
                                           ) : null}
@@ -4289,6 +4365,21 @@ export default function OntologyWorkbench({
                     <article className="ontology-detail-card">
                       <span>질문 토큰</span>
                       <div className="detail-chip-row">{questionTokens.map((item) => <span key={item} className="reason-chip">{item}</span>)}</div>
+                    </article>
+                    <article className="ontology-detail-card">
+                      <span>Embedding intent</span>
+                      <strong>{intentLabel}{intentConfidence ? ` · ${(intentConfidence * 100).toFixed(0)}%` : ''}</strong>
+                      <p>{intentClassification?.method || '분류 대기'} 방식으로 입력 intent를 정하고, rule intent와 embedding 후보를 함께 보관합니다.</p>
+                      <div className="detail-chip-row">
+                        {(intentClassification?.top_candidates || []).slice(0, 4).map((item) => (
+                          <span key={item.intent} className="reason-chip">{item.intent} {Number(item.score || 0).toFixed(2)}</span>
+                        ))}
+                      </div>
+                    </article>
+                    <article className="ontology-detail-card">
+                      <span>Output category</span>
+                      <strong>{outputCategoryLabel}</strong>
+                      <p>{(outputClassification?.categories || []).join(', ') || 'answer_summary'}</p>
                     </article>
                     {querySignalCards.map((item) => <article key={item.id} className="ontology-detail-card"><span>{item.token}</span><strong>{item.label}</strong><p>{item.reason}</p></article>)}
                     <article className="ontology-detail-card ontology-ollama-box">

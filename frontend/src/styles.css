@@ -1339,6 +1339,14 @@ textarea {
   .tool-impact-row {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .strategy-simulation-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .strategy-segment-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tool-impact-meta {
@@ -1415,6 +1423,144 @@ textarea {
 .tool-metric strong {
   color: var(--ontology-ink);
   font-size: 0.86rem;
+}
+
+.strategy-simulation-chart {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(115, 163, 202, 0.16);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.strategy-simulation-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ontology-muted);
+  font-size: 0.72rem;
+}
+
+.strategy-simulation-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.strategy-simulation-legend span::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  content: "";
+}
+
+.strategy-simulation-legend .is-approval::before,
+.strategy-simulation-series .is-approval b {
+  background: #4f8cff;
+}
+
+.strategy-simulation-legend .is-profit::before,
+.strategy-simulation-series .is-profit b {
+  background: #20b486;
+}
+
+.strategy-simulation-legend .is-risk::before,
+.strategy-simulation-series .is-risk b {
+  background: #ff8a4f;
+}
+
+.strategy-simulation-bars {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-simulation-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.strategy-simulation-row-head {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.strategy-simulation-row-head strong {
+  color: var(--ontology-ink);
+  font-size: 0.9rem;
+}
+
+.strategy-simulation-row-head span,
+.strategy-simulation-series span,
+.strategy-simulation-series em,
+.strategy-segment-card span,
+.strategy-segment-card small,
+.strategy-segment-card p {
+  color: var(--ontology-muted);
+  font-size: 0.72rem;
+}
+
+.strategy-simulation-series {
+  display: grid;
+  gap: 6px;
+}
+
+.strategy-simulation-series > div {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.strategy-simulation-series i {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(135, 177, 210, 0.18);
+}
+
+.strategy-simulation-series b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  animation: toolBarGrow 0.7s ease both;
+}
+
+.strategy-simulation-series em {
+  font-style: normal;
+  text-align: right;
+}
+
+.strategy-segment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-segment-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(115, 163, 202, 0.14);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.strategy-segment-card strong {
+  overflow: hidden;
+  color: var(--ontology-ink);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategy-segment-card p {
+  margin: 0;
 }
 
 .tool-cluster-bar-chart {

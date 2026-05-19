@@ -108,6 +108,7 @@ class FullAnalysisResponse(BaseModel):
     issues: list[str] = Field(default_factory=list)
     results: list[dict[str, Any]] = Field(default_factory=list)
     news: list[dict[str, Any]] = Field(default_factory=list)
+    recent_news_fallback: list[dict[str, Any]] = Field(default_factory=list)
     last_news_time: str | None = None
     last_new_item_time: str | None = None
     last_run_time: str | None = None
@@ -139,6 +140,12 @@ class FullAnalysisResponse(BaseModel):
     cardloan_debate: dict[str, Any] = Field(default_factory=dict)
     backend_diagnostics: dict[str, Any] = Field(default_factory=dict)
     news_pipeline_stats: dict[str, Any] = Field(default_factory=dict)
+    news_crawl_running: bool | None = None
+    news_crawl_target_count: int | None = None
+    news_crawl_success_count: int | None = None
+    news_crawl_failure_count: int | None = None
+    last_news_crawl_time: str | None = None
+    last_news_crawl_error: str | None = None
 
 
 class GenericMessage(BaseModel):

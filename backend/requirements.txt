@@ -13,6 +13,7 @@ langchain-huggingface
 langchain-openai
 langchain-core
 langchain-text-splitters
+rank-bm25
 sentence-transformers>=5.4.1
 feedparser
 openpyxl

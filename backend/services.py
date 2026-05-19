@@ -306,24 +306,34 @@ class BackendState:
                 cached_faiss_items = safe_serialize(self.full_faiss_items)
         if include_faiss_items and vector_count > 0 and not cached_faiss_items:
             try:
-                from rag.vector_db import list_vectors
+                from rag.vector_db import list_vectors as vector_list_vectors
 
-                cached_faiss_items = safe_serialize(list_vectors(limit=1000))
+                cached_faiss_items = safe_serialize(vector_list_vectors(limit=1000))
                 with self.lock:
                     self.full_faiss_items = cached_faiss_items
             except Exception:
                 cached_faiss_items = []
         with self.lock:
             news_pipeline_stats = safe_serialize(get_last_news_pipeline_stats() or {})
-            recent_news_fallback = (
-                _build_recent_news_fallback_from_vectors(cached_faiss_items, limit=6)
-                if not (self.news or [])
-                else []
-            )
+            news_items = list(self.news or [])
+            recent_news_fallback: list[dict[str, Any]] = []
+            if not news_items:
+                fallback_vector_items = cached_faiss_items
+                if not fallback_vector_items:
+                    try:
+                        fallback_vector_items = safe_serialize(
+                            list_vectors(limit=80, store_name=FAISS_STORE_NEWS)
+                        )
+                    except Exception:
+                        fallback_vector_items = []
+                recent_news_fallback = _build_recent_news_fallback_from_vectors(
+                    fallback_vector_items,
+                    limit=6,
+                )
             return {
                 "running": self.running,
                 "results": self.results,
-                "news": self.news,
+                "news": news_items,
                 "issues": self.issues,
                 "file_count": self.file_count,
                 "vector_count": vector_count,
