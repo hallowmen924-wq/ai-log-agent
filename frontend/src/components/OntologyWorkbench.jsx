@@ -4816,7 +4816,7 @@ export default function OntologyWorkbench({
                 );
               }) : null}
             </div>
-            {answerMode === 'product' && hasResolvedRuntimeAnswer ? (
+            {answerMode !== 'product' && hasResolvedRuntimeAnswer ? (
               <StrategyWorkspace panels={strategyPanels} workflow={agentWorkflow} semanticLayer={semanticFinancialLayer} />
             ) : null}
             {promptDock}
