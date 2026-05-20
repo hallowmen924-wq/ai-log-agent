@@ -2561,7 +2561,6 @@ export default function OntologyWorkbench({
   const [onboardingAnswers, setOnboardingAnswers] = useState({});
   const [onboardingFreeText, setOnboardingFreeText] = useState('');
   const [showNewsDetailModal, setShowNewsDetailModal] = useState(false);
-  const onboardingVantaRef = useRef(null);
   const [newsDetailState, setNewsDetailState] = useState({
     loading: false,
     error: '',
@@ -2642,52 +2641,6 @@ export default function OntologyWorkbench({
     }
     onDepartmentThemeChange?.(memoDepartment);
   }, [memoDepartment, onDepartmentThemeChange, showDepartmentOnboarding, onboardingDepartment]);
-
-  useEffect(() => {
-    const shouldShowClouds = showDepartmentOnboarding && onboardingStep === 'department';
-    if (!shouldShowClouds) {
-      if (onboardingVantaRef.current && typeof onboardingVantaRef.current.destroy === 'function') {
-        onboardingVantaRef.current.destroy();
-      }
-      onboardingVantaRef.current = null;
-      return;
-    }
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const target = document.getElementById('department-onboarding-clouds');
-    if (!target || !window.VANTA || !window.VANTA.CLOUDS2) {
-      return;
-    }
-    if (onboardingVantaRef.current && typeof onboardingVantaRef.current.destroy === 'function') {
-      onboardingVantaRef.current.destroy();
-      onboardingVantaRef.current = null;
-    }
-    onboardingVantaRef.current = window.VANTA.CLOUDS2({
-      el: '#department-onboarding-clouds',
-      mouseControls: true,
-      touchControls: true,
-      gyroControls: false,
-      minHeight: 200.0,
-      minWidth: 200.0,
-      scale: 1.0,
-      scaleMobile: 1.0,
-      backgroundColor: 0xdfefff,
-      skyColor: 0x89bdf3,
-      cloudColor: 0xbde3ff,
-      cloudShadowColor: 0x6ea9df,
-      sunColor: 0xa8d9ff,
-      sunGlareColor: 0xc8ebff,
-      sunlightColor: 0x9ccff3,
-      speed: 0.8,
-    });
-    return () => {
-      if (onboardingVantaRef.current && typeof onboardingVantaRef.current.destroy === 'function') {
-        onboardingVantaRef.current.destroy();
-      }
-      onboardingVantaRef.current = null;
-    };
-  }, [showDepartmentOnboarding, onboardingStep]);
 
   const departmentConcepts = useMemo(() => {
     const concepts = {};
@@ -5029,7 +4982,6 @@ export default function OntologyWorkbench({
       <AnimatePresence>
         {showDepartmentOnboarding ? (
           <motion.div className="prompt-modal-backdrop department-onboarding-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => handleCloseOnboarding(true)}>
-            {onboardingStep === 'department' ? <div id="department-onboarding-clouds" className="department-onboarding-clouds" aria-hidden="true" /> : null}
             <motion.section className="prompt-modal department-onboarding-modal" initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
               <div className="department-onboarding-head">
                 <div>
@@ -5053,7 +5005,18 @@ export default function OntologyWorkbench({
               {onboardingStep === 'mode' ? (
                 <div className="department-onboarding-mode-grid">
                   {ANSWER_MODES.filter((mode) => mode.id !== 'memo').map((mode) => (
-                    <button key={mode.id} type="button" className={`department-mode-card ${onboardingMode === mode.id ? 'active' : ''}`} onClick={() => setOnboardingMode(mode.id)}>
+                    <button
+                      key={mode.id}
+                      type="button"
+                      className={`department-mode-card department-character-card-poker ${onboardingMode === mode.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setOnboardingMode(mode.id);
+                        setOnboardingQuestionIndex(0);
+                        setOnboardingAnswers({});
+                        setOnboardingFreeText('');
+                        setOnboardingStep('survey');
+                      }}
+                    >
                       <span>{mode.icon}</span>
                       <strong>{mode.label}</strong>
                       <small>{mode.hint}</small>
@@ -5070,7 +5033,19 @@ export default function OntologyWorkbench({
                   {activeOnboardingQuestion ? (
                     <div className="department-onboarding-choice-row">
                       {(activeOnboardingQuestion.choices || []).map((choice) => (
-                        <button key={choice} type="button" className={`department-onboarding-choice ${onboardingAnswers[activeOnboardingQuestion.id] === choice ? 'active' : ''}`} onClick={() => handleOnboardingAnswerPick(activeOnboardingQuestion.id, choice)}>
+                        <button
+                          key={choice}
+                          type="button"
+                          className={`department-onboarding-choice department-character-card-poker ${onboardingAnswers[activeOnboardingQuestion.id] === choice ? 'active' : ''}`}
+                          onClick={() => {
+                            handleOnboardingAnswerPick(activeOnboardingQuestion.id, choice);
+                            if (onboardingQuestionIndex < onboardingQuestions.length - 1) {
+                              setOnboardingQuestionIndex((prev) => prev + 1);
+                              return;
+                            }
+                            handleSubmitOnboarding();
+                          }}
+                        >
                           {choice}
                         </button>
                       ))}
@@ -5100,23 +5075,8 @@ export default function OntologyWorkbench({
                   }}>이전</button>
                 ) : <span />}
                 {onboardingStep === 'department' ? null : null}
-                {onboardingStep === 'mode' ? (
-                  <button type="button" className="primary-button" onClick={() => {
-                    setOnboardingQuestionIndex(0);
-                    setOnboardingAnswers({});
-                    setOnboardingFreeText('');
-                    setOnboardingStep('survey');
-                  }}>설문 시작</button>
-                ) : null}
-                {onboardingStep === 'survey' ? (
-                  <button type="button" className="primary-button" onClick={() => {
-                    if (onboardingQuestionIndex < onboardingQuestions.length - 1) {
-                      setOnboardingQuestionIndex((prev) => prev + 1);
-                      return;
-                    }
-                    handleSubmitOnboarding();
-                  }}>{onboardingQuestionIndex < onboardingQuestions.length - 1 ? '다음 질문' : '설정 완료'}</button>
-                ) : null}
+                {onboardingStep === 'mode' ? null : null}
+                {onboardingStep === 'survey' ? null : null}
               </div>
             </motion.section>
           </motion.div>

@@ -5585,12 +5585,6 @@ textarea {
   border-radius: 16px;
 }
 
-.department-onboarding-clouds {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
 .department-onboarding-head {
   display: flex;
   align-items: flex-start;
@@ -5704,16 +5698,19 @@ textarea {
 }
 
 .department-onboarding-choice-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .department-onboarding-choice {
-  padding: 8px 12px;
-  border-radius: 999px;
+  padding: 12px;
+  min-height: 110px;
+  border-radius: 12px;
   border: 1px solid rgba(134, 178, 246, 0.35);
   background: rgba(255, 255, 255, 0.85);
+  text-align: left;
+  line-height: 1.45;
   cursor: pointer;
 }
 
