@@ -8,7 +8,7 @@ import './OntologyWorkbench.local.css';
 import regulationDocumentAnimation from '../assets/regulation-document.json';
 import promptSubmitAnimation from '../assets/prompt-submit.json';
 import cardLoanNewsAnimation from '../assets/card-loan-news.json';
-import { API_BASE_URL, createProductDevelopmentAgendas, createProductDevelopmentDebate, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, startFeatureOntologyRuntimeJob } from '../api';
+import { API_BASE_URL, createProductDevelopmentAgendas, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, fetchProductDevelopmentDebateJob, startFeatureOntologyRuntimeJob, startProductDevelopmentDebateJob } from '../api';
 import { RUNTIME_STAGES, useOntologyRuntimeStore } from './ontologyRuntimeStore';
 
 const ONTOLOGY_PROMPT_EXAMPLES = [
@@ -1467,6 +1467,13 @@ const PRODUCT_DEBATE_WARMUP_LINES = Object.freeze([
   { id: 'smalltalk-3', speaker: '영프로', department: '금융영업부', tone: 'sales', message: '그럼 고객 안내 문구도 중요하겠네요. “조건부 승인”처럼 이해하기 쉬운 언어가 필요합니다.' },
   { id: 'smalltalk-4', speaker: '아프로', department: 'IT개발자', tone: 'tech', message: '실시간 소득/재직 확인이 들어가면 개발 공수가 늘어납니다. 대신 룰이 명확하면 배치 검증부터 작게 시작할 수 있어요.' },
   { id: 'debate-1', speaker: '금프로', department: '금융솔루션부', tone: 'solution', message: '좋아요. 신상품 후보와 기존 상품 보완안을 분리해서, 최종 산출물은 실험 상품 1개와 룰 개선안으로 묶겠습니다.' },
+  { id: 'debate-2', speaker: '신프로', department: '신용기획부', tone: 'risk', message: '우선 상환능력 구간을 3단계로 나눠서 한도 캡을 다르게 두죠. 고위험 구간은 자동 차단으로 명확히 갑시다.' },
+  { id: 'debate-3', speaker: '영프로', department: '금융영업부', tone: 'sales', message: '고객 안내 문구는 승인 가능 조건을 먼저 보여주는 쪽이 좋습니다. 상담사가 바로 설명 가능한 구조로요.' },
+  { id: 'debate-4', speaker: '아프로', department: 'IT개발자', tone: 'tech', message: '지금 기준으로는 룰 매핑 테이블까지는 바로 가능하고, 외부 연계 지연 구간은 비동기 보강으로 분리하겠습니다.' },
+  { id: 'debate-5', speaker: '금프로', department: '금융솔루션부', tone: 'solution', message: '좋습니다. 신상품은 소액-단기 실험으로, 기존 상품은 거절코드 재분류 룰 개선으로 투트랙 진행하죠.' },
+  { id: 'debate-6', speaker: '신프로', department: '신용기획부', tone: 'risk', message: '합의 직전 점검합니다. 연체민감 구간은 조건부 승인으로만 열고, 관찰 KPI를 반드시 붙이는 조건으로 갑니다.' },
+  { id: 'debate-7', speaker: '영프로', department: '금융영업부', tone: 'sales', message: '현장 적용성 확인 완료. 메시지/조건/제외대상만 명확하면 바로 시범 운영 가능하겠습니다.' },
+  { id: 'debate-8', speaker: '아프로', department: 'IT개발자', tone: 'tech', message: '결과 JSON 정리 대기 중입니다. 최종안 수신 즉시 상품안/룰개선안 카드로 반영하겠습니다.' },
 ]);
 
 const MEMO_STORAGE_KEY = 'ontology-workbench-memo-preferences';
@@ -1661,7 +1668,20 @@ function formatSemanticRefreshTime(value) {
   return text.slice(11, 16) || text;
 }
 
-function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, onClose, onRefresh }) {
+function MetricCubeModal({
+  open,
+  data,
+  loading,
+  error,
+  activeTab,
+  onTabChange,
+  onClose,
+  onRefresh,
+  isProductMode = false,
+  selectedDepartment = null,
+  selectedDepartmentMemo = '',
+  productDebatePayload = null,
+}) {
   if (!open) {
     return null;
   }
@@ -1674,10 +1694,39 @@ function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, o
   const queryExamples = data?.query_examples || [];
   const clusterSummary = data?.cluster_summary || {};
   const clusterProducts = clusterSummary?.products || [];
-  const tabs = [
-    { id: 'cube', label: '통계 큐브', detail: '평균/승인률/연체위험' },
-    { id: 'cluster', label: '군집 분석', detail: '고객군 캐시' },
-  ];
+  const tabs = isProductMode
+    ? [
+        { id: 'persona', label: '부서 페르소나', detail: '선택 부서 관점' },
+        { id: 'ollama', label: 'Ollama Trace', detail: '입력/출력 흐름' },
+      ]
+    : [
+        { id: 'cube', label: '통계 큐브', detail: '평균/승인률/연체위험' },
+        { id: 'cluster', label: '군집 분석', detail: '고객군 캐시' },
+      ];
+  const debateLlm = productDebatePayload?.llm || {};
+  const traceItems = Array.isArray(debateLlm?.traces) ? debateLlm.traces : [];
+  const ollamaInputTrace = traceItems
+    .map((item, index) => {
+      const agent = String(item?.agent || `agent-${index + 1}`);
+      const prompt = String(item?.prompt || '').trim();
+      if (!prompt) {
+        return '';
+      }
+      return `[${agent}]\n${prompt}`;
+    })
+    .filter(Boolean)
+    .join('\n\n--------------------\n\n');
+  const ollamaOutputTrace = traceItems
+    .map((item, index) => {
+      const agent = String(item?.agent || `agent-${index + 1}`);
+      const response = String(item?.response || '').trim();
+      if (!response) {
+        return '';
+      }
+      return `[${agent}]\n${response}`;
+    })
+    .filter(Boolean)
+    .join('\n\n--------------------\n\n');
 
   return (
     <motion.div className="prompt-modal-backdrop metric-cube-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
@@ -1697,8 +1746,8 @@ function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, o
         <div className="metric-cube-modal-head">
           <div>
             <span className="panel-kicker">Semantic Metric Layer</span>
-            <h2>통계 큐브와 군집분석 맵</h2>
-            <p>평균, 승인률, 연체위험 질문은 통계 큐브에서 바로 찾고, 고객군 해석은 군집분석 캐시에서 봅니다.</p>
+            <h2>{isProductMode ? '선택 부서 페르소나와 Ollama 토론 흐름' : '통계 큐브와 군집분석 맵'}</h2>
+            <p>{isProductMode ? '상품개발 토론에서 선택 부서 관점이 어떻게 Ollama 입력으로 들어가고, 어떤 출력으로 정리됐는지 확인합니다.' : '평균, 승인률, 연체위험 질문은 통계 큐브에서 바로 찾고, 고객군 해석은 군집분석 캐시에서 봅니다.'}</p>
           </div>
           <div className="metric-cube-modal-actions">
             <button type="button" className="secondary-button" onClick={onRefresh} disabled={loading}>새로고침</button>
@@ -1718,7 +1767,7 @@ function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, o
         {loading ? <div className="empty-box metric-cube-loading">통계 큐브와 군집 캐시를 읽는 중입니다.</div> : null}
         {error ? <div className="error-banner metric-cube-error">통계 큐브를 불러오지 못했습니다: {error}</div> : null}
 
-        {!loading && !error && activeTab === 'cube' ? (
+        {!loading && !error && !isProductMode && activeTab === 'cube' ? (
           <div className="metric-cube-modal-body">
             <div className="metric-cube-summary-grid">
               <article>
@@ -1817,7 +1866,7 @@ function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, o
           </div>
         ) : null}
 
-        {!loading && !error && activeTab === 'cluster' ? (
+        {!loading && !error && !isProductMode && activeTab === 'cluster' ? (
           <div className="metric-cube-modal-body">
             <div className="metric-cube-summary-grid">
               <article>
@@ -1855,6 +1904,69 @@ function MetricCubeModal({ open, data, loading, error, activeTab, onTabChange, o
                   </div>
                 </article>
               ))}
+            </div>
+          </div>
+        ) : null}
+
+        {!loading && !error && isProductMode && activeTab === 'persona' ? (
+          <div className="metric-cube-modal-body">
+            <div className="metric-cube-summary-grid">
+              <article>
+                <span>선택 부서</span>
+                <strong>{selectedDepartment?.icon || '🧩'} {selectedDepartment?.label || '금융솔루션부'}</strong>
+                <p>상품개발모드 기준 토론 관점</p>
+              </article>
+              <article>
+                <span>부서 메모</span>
+                <strong>{selectedDepartmentMemo ? '사용자 지정' : '기본 컨셉'}</strong>
+                <p>{selectedDepartmentMemo ? '메모모드에서 저장한 기준 반영' : '부서 기본 컨셉 반영'}</p>
+              </article>
+              <article>
+                <span>토론 실행</span>
+                <strong>{productDebatePayload?.source || '-'}</strong>
+                <p>{productDebatePayload?.llm?.mode || '-'}</p>
+              </article>
+            </div>
+            <section className="metric-cube-panel">
+              <div className="metric-cube-section-head">
+                <span className="panel-kicker">Persona Prompt Context</span>
+                <strong>부서 관점 입력 정보</strong>
+              </div>
+              <pre className="ontology-ollama-debug-pre">{JSON.stringify({
+                department: selectedDepartment?.label || '금융솔루션부',
+                icon: selectedDepartment?.icon || '🧩',
+                default_concept: selectedDepartment?.defaultConcept || '',
+                memo_override: selectedDepartmentMemo || '',
+                source: productDebatePayload?.source || '',
+                llm_mode: productDebatePayload?.llm?.mode || '',
+              }, null, 2)}</pre>
+            </section>
+          </div>
+        ) : null}
+
+        {!loading && !error && isProductMode && activeTab === 'ollama' ? (
+          <div className="metric-cube-modal-body">
+            <div className="ontology-answer-detail-layout">
+              <aside className="ontology-ollama-debug-panel">
+                <div className="ontology-ollama-debug-head">
+                  <div>
+                    <span className="panel-kicker">Ollama Input</span>
+                    <strong>토론 중 전달된 Prompt</strong>
+                  </div>
+                  <span className="sample-pill">{traceItems.length}개 호출</span>
+                </div>
+                <pre className="ontology-ollama-debug-pre">{ollamaInputTrace || '아직 기록된 입력이 없습니다.'}</pre>
+              </aside>
+              <aside className="ontology-ollama-debug-panel">
+                <div className="ontology-ollama-debug-head">
+                  <div>
+                    <span className="panel-kicker">Ollama Output</span>
+                    <strong>토론 중 생성된 응답</strong>
+                  </div>
+                  <span className="sample-pill">{productDebatePayload?.llm?.model || '-'}</span>
+                </div>
+                <pre className="ontology-ollama-debug-pre">{ollamaOutputTrace || '아직 기록된 출력이 없습니다.'}</pre>
+              </aside>
             </div>
           </div>
         ) : null}
@@ -1914,6 +2026,7 @@ function resolveDebatePerson(message = {}) {
 
 function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null }) {
   const [tick, setTick] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
     if (!loading) {
@@ -1926,13 +2039,24 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
   }, [loading]);
 
   useEffect(() => {
+    if (!loading) {
+      return undefined;
+    }
+    const elapsedTimer = window.setInterval(() => {
+      setElapsedSec((prev) => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(elapsedTimer);
+  }, [loading]);
+
+  useEffect(() => {
     if (loading) {
       setTick(0);
+      setElapsedSec(0);
     }
   }, [loading, selectedAgenda?.id, selectedAgenda?.title]);
 
   const stagedMessages = loading
-    ? PRODUCT_DEBATE_WARMUP_LINES.slice(0, Math.min(PRODUCT_DEBATE_WARMUP_LINES.length, Math.max(4, tick + 1)))
+    ? PRODUCT_DEBATE_WARMUP_LINES.slice(0, Math.min(PRODUCT_DEBATE_WARMUP_LINES.length, Math.max(6, tick + 1)))
     : messages.map((message, index) => {
       const person = resolveDebatePerson(message);
       return {
@@ -1945,6 +2069,7 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
     });
   const activePerson = resolveDebatePerson(stagedMessages[stagedMessages.length - 1] || {});
   const agendaTitle = selectedAgenda?.title || '선택된 안건';
+  const thinkingLine = `${activePerson.name}가 ${loading ? '핵심 쟁점을 정리하며 고민 중' : '최종 의견을 마무리하는 중'}...`;
 
   return (
     <div className={`product-debate-room ${loading ? 'is-live' : 'is-complete'}`}>
@@ -1953,7 +2078,7 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
           <span className="panel-kicker">Live Meeting Room</span>
           <strong>{loading ? '4명이 회의실에서 안건을 맞추는 중' : '4개 부서 토론 기록'}</strong>
         </div>
-        <span className="sample-pill">{loading ? '실시간 구성 중' : `${messages.length}개 발언`}</span>
+        <span className="sample-pill">{loading ? `${elapsedSec}초 경과 · 실시간 토론 중` : `${messages.length}개 발언`}</span>
       </div>
 
       <div className="product-debate-table">
@@ -1988,6 +2113,11 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
       </div>
 
       <div className="product-debate-live-feed">
+        <div className="product-debate-thinking">
+          <span className="product-debate-thinking-dot" aria-hidden="true" />
+          <strong>Live Thought</strong>
+          <p>{thinkingLine}</p>
+        </div>
         <AnimatePresence initial={false}>
           {stagedMessages.slice(-6).map((message, index) => {
             const person = resolveDebatePerson(message);
@@ -2021,17 +2151,42 @@ function ProductDevelopmentWorkspace({
   semanticRefresh = {},
   onRefreshAgendas,
   onSelectAgenda,
+  onStartDebate,
   onOpenConcepts,
 }) {
   const agendas = state.agendas || [];
-  const debate = state.debate?.result || state.debate || null;
+  const debatePayload = state.debate || null;
+  const debate = debatePayload?.result || debatePayload || null;
   const context = state.agendaPayload?.context || state.debate?.context || {};
   const productSummaries = context.product_summaries || debate?.product_cards || [];
   const messages = debate?.messages || [];
   const final = debate?.final || {};
+  const orchestration = debate?.orchestration || {};
+  const memoryHits = orchestration.memory_hits || [];
+  const consensusHistory = orchestration.consensus_history || [];
+  const roundTimings = orchestration.round_timings || [];
+  const totalElapsedMs = Number(orchestration.total_elapsed_ms || 0);
+  const finalElapsedMs = Number(orchestration.final_elapsed_ms || 0);
+  const llmMeta = debatePayload?.llm || {};
+  const autogenDiagnostics = orchestration.diagnostics || llmMeta.diagnostics || {};
+  const autogenRunMs = Number(autogenDiagnostics.autogen_run_elapsed_ms || 0);
+  const memoryElapsedMs = Number(autogenDiagnostics.memory_elapsed_ms || 0);
+  const memoryEnabled = Boolean(autogenDiagnostics.memory_enabled);
+  const kickoffChars = Number(autogenDiagnostics.kickoff_chars || 0);
+  const systemPromptChars = Number(autogenDiagnostics.system_prompt_chars || 0);
+  const autogenTimeoutSec = Number(autogenDiagnostics.timeout_sec || 0);
+  const autogenBottleneck = autogenRunMs > 0 && autogenTimeoutSec > 0 && autogenRunMs >= autogenTimeoutSec * 850
+    ? 'Ollama/AutoGen 응답 대기'
+    : (kickoffChars + systemPromptChars > 8000 ? '프롬프트 컨텍스트 큼' : (memoryEnabled && memoryElapsedMs > 1000 ? '롱텀메모리 조회' : '정상 범위'));
   const newProduct = final.new_product || {};
   const improvements = final.product_logic_improvements || [];
-  const sourceLabel = state.source === 'ollama' || state.debateSource === 'ollama' ? 'Ollama 1회 생성' : 'Fallback 초안';
+  const sourceRaw = String(debatePayload?.source || state.debateSource || state.source || '');
+  const sourceLabel = sourceRaw.includes('autogen')
+    ? 'AutoGen 멀티에이전트'
+    : (sourceRaw.includes('ollama') ? 'Ollama 생성' : 'Fallback 초안');
+  const llmModeLabel = llmMeta?.mode === 'autogen' ? '오케스트레이션 실행 중' : '커스텀 루프 폴백';
+  const autogenErrorText = String(llmMeta?.autogen_error || '');
+  const maxConsensus = Math.max(0.01, ...consensusHistory.map((item) => Number(item.consensus_score || 0)));
 
   return (
     <motion.article className="product-development-workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, ease: 'easeOut' }}>
@@ -2039,7 +2194,7 @@ function ProductDevelopmentWorkspace({
         <div>
           <span className="panel-kicker">상품개발모드</span>
           <h2>통계 큐브와 군집분석으로 4개 부서가 빠르게 상품을 설계합니다.</h2>
-          <p>먼저 금융솔루션부가 토론 안건 2개를 제안하고, 안건을 고르면 4명이 서로 질문하며 신상품과 기존 상품 보완 로직을 같이 만듭니다.</p>
+          <p>AutoGen이 부서별 에이전트를 독립 발언 루프로 돌리고, 현재는 롱텀메모리 없이 선택 안건과 부서 컨텍스트만으로 합의안을 만듭니다. 지금 회의실에서 실제처럼 발언, 반박, 정리 단계가 순차 진행됩니다.</p>
         </div>
         <div className="product-dev-actions">
           <button type="button" className="secondary-button" onClick={onOpenConcepts}>부서 컨셉 보기</button>
@@ -2062,9 +2217,93 @@ function ProductDevelopmentWorkspace({
 
       <div className="product-dev-meta-row">
         <span className="sample-pill">{sourceLabel}</span>
+        <span className="sample-pill">{llmModeLabel}</span>
         <span className="sample-pill">큐브 {Number(context?.cube_meta?.segment_count || semanticRefresh?.segment_count || 0).toLocaleString('ko-KR')}개 세그먼트</span>
         <span className="sample-pill">군집 {Number(semanticRefresh?.cluster_count || 0).toLocaleString('ko-KR')}개</span>
       </div>
+
+      <section className="product-dev-section">
+        <div className="product-dev-section-head">
+          <span className="panel-kicker">AutoGen + Memory</span>
+          <strong>멀티에이전트 토론 엔진 상태</strong>
+        </div>
+        <div className="product-dev-engine-grid">
+          <article className="product-dev-engine-card">
+            <span>엔진</span>
+            <strong>{sourceLabel}</strong>
+            <small>{state.debateLoading ? '부서별 독립 루프 실행 중' : '최근 토론 실행 완료'}</small>
+          </article>
+          <article className="product-dev-engine-card">
+            <span>합의 라운드</span>
+            <strong>{consensusHistory.length || Number(orchestration.rounds_run || 0)}회</strong>
+            <small>종료 기준: consensus score 임계치 또는 max rounds</small>
+          </article>
+          <article className="product-dev-engine-card">
+            <span>실행 시간</span>
+            <strong>{totalElapsedMs > 0 ? `${(totalElapsedMs / 1000).toFixed(1)}s` : '-'}</strong>
+            <small>{finalElapsedMs > 0 ? `최종 합성 ${finalElapsedMs}ms` : '라운드별 소요시간 수집 중'}</small>
+          </article>
+          <article className="product-dev-engine-card">
+            <span>롱텀메모리 회수</span>
+            <strong>{memoryEnabled ? `${memoryHits.length}건` : 'OFF'}</strong>
+            <small>{memoryEnabled ? `${memoryElapsedMs}ms · ${memoryHits.length ? '이전 토론 기억을 이번 안건에 반영했습니다.' : '조회 결과 없음'}` : '현재 병목 확인을 위해 조회/컨텍스트 주입을 꺼두었습니다.'}</small>
+          </article>
+          <article className="product-dev-engine-card">
+            <span>병목 추정</span>
+            <strong>{state.debateLoading ? (state.debateStage || 'running') : autogenBottleneck}</strong>
+            <small>
+              {autogenRunMs
+                ? `AutoGen ${autogenRunMs}ms · kickoff ${kickoffChars}자 · system ${systemPromptChars}자`
+                : (state.debateStageDetail || '실행 후 진단값이 표시됩니다.')}
+            </small>
+          </article>
+        </div>
+        {memoryHits.length ? (
+          <div className="product-dev-memory-hit-list">
+            {memoryHits.slice(0, 3).map((item, index) => (
+              <article key={`${item.timestamp || 'memory'}-${index}`}>
+                <strong>{item.agenda_title || '이전 안건'}</strong>
+                <p>{item.issue_summary || '요약 정보 없음'}</p>
+              </article>
+            ))}
+          </div>
+        ) : null}
+        {autogenErrorText ? (
+          <div className="product-dev-engine-warning">
+            <strong>AutoGen 경로에서 폴백 발생</strong>
+            <p>{autogenErrorText}</p>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="product-dev-section">
+        <div className="product-dev-section-head">
+          <span className="panel-kicker">Consensus Timeline</span>
+          <strong>라운드별 합의 점수 추이</strong>
+        </div>
+        {consensusHistory.length ? (
+          <div className="product-dev-consensus-timeline">
+            {consensusHistory.map((item, index) => {
+              const score = Number(item.consensus_score || 0);
+              const width = Math.max(4, Math.round((score / maxConsensus) * 100));
+              const timing = roundTimings.find((row) => Number(row.round || 0) === Number(item.round || index + 1)) || null;
+              return (
+                <article key={`consensus-round-${index + 1}`} className="product-dev-consensus-item">
+                  <div className="product-dev-consensus-head">
+                    <strong>Round {item.round || index + 1}</strong>
+                    <b>{(score * 100).toFixed(1)}%</b>
+                  </div>
+                  <div className="product-dev-consensus-bar"><span style={{ width: `${width}%` }} /></div>
+                  {timing ? <small>라운드 소요 {Number(timing.elapsed_ms || 0).toLocaleString('ko-KR')}ms · 호출합 {Number(timing.total_call_ms || 0).toLocaleString('ko-KR')}ms</small> : null}
+                  <p>{item.summary || '요약 생성 중'}</p>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-box compact">아직 합의 라운드 로그가 없습니다. 현재는 초기 토론 또는 AutoGen 경로에서 합의 로그가 축약된 상태입니다.</div>
+        )}
+      </section>
 
       {state.agendaError ? <div className="error-banner">상품개발 안건 생성 실패: {state.agendaError}</div> : null}
       {state.debateError ? <div className="error-banner">상품개발 토론 생성 실패: {state.debateError}</div> : null}
@@ -2090,6 +2329,16 @@ function ProductDevelopmentWorkspace({
               </button>
             );
           })}
+        </div>
+        <div className="product-dev-actions">
+          <button
+            type="button"
+            className="primary-button product-dev-refresh-button"
+            onClick={() => onStartDebate?.(state.selectedAgenda)}
+            disabled={!state.selectedAgenda || state.debateLoading}
+          >
+            {state.debateLoading ? '토론 진행 중' : '선택 후보로 토론 시작'}
+          </button>
         </div>
       </section>
 
@@ -2207,6 +2456,9 @@ export default function OntologyWorkbench({
     debateError: '',
     debate: null,
     debateSource: '',
+    debateJobId: '',
+    debateStage: '',
+    debateStageDetail: '',
   });
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [isRoniHovered, setIsRoniHovered] = useState(false);
@@ -3301,29 +3553,39 @@ export default function OntologyWorkbench({
     setProductDevelopmentState((previous) => ({
       ...previous,
       selectedAgenda: agenda,
+      debateError: '',
+    }));
+  }
+
+  async function handleStartProductDevelopmentDebate(agenda) {
+    if (!agenda) {
+      return;
+    }
+    setProductDevelopmentState((previous) => ({
+      ...previous,
+      selectedAgenda: agenda,
       debateLoading: true,
       debateError: '',
       debate: null,
+      debateJobId: '',
+      debateStage: 'queued',
+      debateStageDetail: '토론 작업을 준비하고 있습니다.',
     }));
     try {
-      const payload = await createProductDevelopmentDebate({
+      const job = await startProductDevelopmentDebateJob({
         selected_agenda: agenda,
         department_concepts: departmentConceptsRef.current,
       });
+      const jobId = String(job?.job_id || '');
+      if (!jobId) {
+        throw new Error('토론 작업 ID를 받지 못했습니다.');
+      }
       setProductDevelopmentState((previous) => ({
         ...previous,
-        debateLoading: false,
-        debate: payload,
-        debateSource: payload?.source || '',
+        debateJobId: jobId,
+        debateStage: 'queued',
+        debateStageDetail: 'AutoGen 토론 작업이 시작되었습니다.',
       }));
-      onToast?.({
-        id: `product-dev-debate-${Date.now()}`,
-        kicker: '4-Department Debate',
-        title: '상품개발 토론 완료',
-        meta: payload?.source === 'ollama' ? 'Ollama 1회 호출' : '캐시 기반 초안',
-        message: '신상품 제안과 기존 상품별 보완 로직을 함께 정리했습니다.',
-        tone: 'completed',
-      });
     } catch (error) {
       setProductDevelopmentState((previous) => ({
         ...previous,
@@ -3332,6 +3594,71 @@ export default function OntologyWorkbench({
       }));
     }
   }
+
+  useEffect(() => {
+    if (!productDevelopmentState.debateLoading || !productDevelopmentState.debateJobId) {
+      return undefined;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const statusPayload = await fetchProductDevelopmentDebateJob(productDevelopmentState.debateJobId);
+        if (cancelled) {
+          return;
+        }
+        const nextStatus = String(statusPayload?.status || '').toLowerCase();
+        const stage = String(statusPayload?.stage || '');
+        const detail = String(statusPayload?.detail || '');
+        setProductDevelopmentState((previous) => ({
+          ...previous,
+          debateStage: stage,
+          debateStageDetail: detail,
+        }));
+        if (nextStatus === 'completed') {
+          const payload = statusPayload?.result || null;
+          setProductDevelopmentState((previous) => ({
+            ...previous,
+            debateLoading: false,
+            debate: payload,
+            debateSource: payload?.source || '',
+            debateError: '',
+          }));
+          onToast?.({
+            id: `product-dev-debate-${Date.now()}`,
+            kicker: '4-Department Debate',
+            title: '상품개발 토론 완료',
+            meta: payload?.source?.includes('autogen') ? 'AutoGen 경로 완료' : '토론 완료',
+            message: '신상품 제안과 기존 상품별 보완 로직을 함께 정리했습니다.',
+            tone: 'completed',
+          });
+          return;
+        }
+        if (nextStatus === 'failed') {
+          const errorText = String(statusPayload?.error || '상품개발 토론 생성에 실패했습니다.');
+          setProductDevelopmentState((previous) => ({
+            ...previous,
+            debateLoading: false,
+            debateError: errorText,
+          }));
+          return;
+        }
+        window.setTimeout(poll, 1000);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setProductDevelopmentState((previous) => ({
+          ...previous,
+          debateLoading: false,
+          debateError: String(error.message || error),
+        }));
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [productDevelopmentState.debateLoading, productDevelopmentState.debateJobId, onToast]);
 
   useEffect(() => {
     if (answerMode !== 'product') {
@@ -3519,6 +3846,49 @@ export default function OntologyWorkbench({
     ...(insightToolCard?.metrics || []).slice(0, 2),
   ].slice(0, 4);
   const compactQuestionText = String(currentQuestion || '').replace(/\s+/g, '').toLowerCase();
+  const activeProductDeptId = onboardingDepartment || memoDepartment || 'solution';
+  const activeProductDept = MEMO_DEPARTMENTS.find((item) => item.id === activeProductDeptId) || MEMO_DEPARTMENTS[0];
+  const activeProductDeptMemo = String(memoDepartmentNotes?.[activeProductDeptId] || '').trim();
+  const productDebatePayload = productDevelopmentState.debate || null;
+  const productDebateResult = productDebatePayload?.result || productDebatePayload || null;
+  const productRoundsRun = Number(productDebateResult?.orchestration?.rounds_run || 0);
+  const productConsensusCount = Array.isArray(productDebateResult?.orchestration?.consensus_history)
+    ? productDebateResult.orchestration.consensus_history.length
+    : 0;
+  const productLeftStages = [
+    {
+      key: 'agenda',
+      label: '안건 선정',
+      detail: productDevelopmentState.loadingAgendas
+        ? '통계 큐브 기반 안건 생성 중'
+        : (productDevelopmentState.selectedAgenda?.title || '안건 선택 대기'),
+      status: productDevelopmentState.loadingAgendas ? 'running' : (productDevelopmentState.selectedAgenda ? 'completed' : 'pending'),
+    },
+    {
+      key: 'debate',
+      label: '부서 토론',
+      detail: productDevelopmentState.debateLoading
+        ? (productDevelopmentState.debateStageDetail || '4개 부서 발언/반박 진행 중')
+        : (productDebateResult?.messages?.length ? `${productDebateResult.messages.length}개 발언 기록` : '토론 시작 대기'),
+      status: productDevelopmentState.debateLoading ? 'running' : (productDebateResult?.messages?.length ? 'completed' : 'pending'),
+    },
+    {
+      key: 'consensus',
+      label: '합의 산출',
+      detail: productDebateResult?.orchestration
+        ? `라운드 ${Math.max(productRoundsRun, productConsensusCount)}회 · score 계산`
+        : '합의 라운드 대기',
+      status: productDebateResult?.orchestration ? 'completed' : (productDevelopmentState.debateLoading ? 'running' : 'pending'),
+    },
+    {
+      key: 'final',
+      label: '최종 정리',
+      detail: productDebateResult?.final?.new_product?.name
+        ? `신상품안: ${productDebateResult.final.new_product.name}`
+        : '상품안/룰개선안 정리 대기',
+      status: productDebateResult?.final?.new_product?.name ? 'completed' : (productDevelopmentState.debateLoading ? 'running' : 'pending'),
+    },
+  ];
   const isAverageDistributionQuestion = (
     (compactQuestionText.includes('평균') || compactQuestionText.includes('avg') || compactQuestionText.includes('average'))
     && (compactQuestionText.includes('금리') || compactQuestionText.includes('rate') || compactQuestionText.includes('한도') || compactQuestionText.includes('limit'))
@@ -3714,52 +4084,81 @@ export default function OntologyWorkbench({
                 </p>
                 <span><i aria-hidden="true"><b /><b /><b /></i>{roniCaption.detail}</span>
               </div>
-              <div className="agent-panel-status-card">
-                <div className="agent-panel-card-head">
-                  <div>
-                    <span className="panel-kicker">진행 상태</span>
-                    <strong>{agentPanelHeadline}</strong>
-                  </div>
-                  <span className={`agent-live-dot ${!isAgentIdle && (backendState.loading || runtimeJobStatus === 'running') ? 'is-running' : ''}`} />
-                </div>
-                <div className="agent-progress-checklist">
-                  {visibleAgentStages.map((stage) => (
-                    <div key={stage.key} className={`agent-progress-step ${toneClass(stage.status)}`}>
-                      <span aria-hidden="true">{stage.status === 'completed' ? '✓' : stage.status === 'running' ? '○' : '•'}</span>
-                      <strong>{stageShortLabel(stage.key)}</strong>
-                      <small>{statusLabelKo(stage.status)}</small>
+              {answerMode === 'product' ? (
+                <div className="agent-panel-status-card product-left-status-card">
+                  <div className="agent-panel-card-head">
+                    <div>
+                      <span className="panel-kicker">선택 부서 페르소나</span>
+                      <strong>{activeProductDept.icon} {activeProductDept.label}</strong>
                     </div>
-                  ))}
+                    <span className={`agent-live-dot ${productDevelopmentState.debateLoading ? 'is-running' : ''}`} />
+                  </div>
+                  <p className="product-left-persona-copy">{activeProductDeptMemo || activeProductDept.defaultConcept}</p>
+                  <div className="product-left-stage-list">
+                    {productLeftStages.map((stage) => (
+                      <div key={stage.key} className={`product-left-stage-row ${toneClass(stage.status)}`}>
+                        <span aria-hidden="true">{stage.status === 'completed' ? '✓' : stage.status === 'running' ? '○' : '•'}</span>
+                        <div>
+                          <strong>{stage.label}</strong>
+                          <small>{stage.detail}</small>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="agent-active-tool-row">
-                  {(activeToolSummary.length ? activeToolSummary : ['질문 대기']).map((toolName) => (
-                    <span key={toolName}>{toolName}</span>
-                  ))}
+              ) : (
+                <div className="agent-panel-status-card">
+                  <div className="agent-panel-card-head">
+                    <div>
+                      <span className="panel-kicker">진행 상태</span>
+                      <strong>{agentPanelHeadline}</strong>
+                    </div>
+                    <span className={`agent-live-dot ${!isAgentIdle && (backendState.loading || runtimeJobStatus === 'running') ? 'is-running' : ''}`} />
+                  </div>
+                  <div className="agent-progress-checklist">
+                    {visibleAgentStages.map((stage) => (
+                      <div key={stage.key} className={`agent-progress-step ${toneClass(stage.status)}`}>
+                        <span aria-hidden="true">{stage.status === 'completed' ? '✓' : stage.status === 'running' ? '○' : '•'}</span>
+                        <strong>{stageShortLabel(stage.key)}</strong>
+                        <small>{statusLabelKo(stage.status)}</small>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="agent-active-tool-row">
+                    {(activeToolSummary.length ? activeToolSummary : ['질문 대기']).map((toolName) => (
+                      <span key={toolName}>{toolName}</span>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
               <motion.button
                 type="button"
                 className="agent-metric-cube-launcher"
                 whileHover={reduceMotion ? undefined : { y: -3, scale: 1.015 }}
                 whileTap={reduceMotion ? undefined : { scale: 0.985 }}
-                onClick={() => handleOpenMetricCubeModal('cube')}
-                aria-label="통계 큐브와 군집분석 보기"
+                onClick={() => handleOpenMetricCubeModal(answerMode === 'product' ? 'persona' : 'cube')}
+                aria-label={answerMode === 'product' ? '선택 부서 페르소나와 Ollama 흐름 보기' : '통계 큐브와 군집분석 보기'}
               >
                 <span className="agent-metric-cube-orb" aria-hidden="true"><i /><i /><i /></span>
                 <span className="agent-metric-cube-copy">
-                  <small>통계 큐브</small>
-                  <strong>평균 · 승인률 · 연체위험 보기</strong>
+                  <small>{answerMode === 'product' ? '선택 부서 페르소나' : '통계 큐브'}</small>
+                  <strong>{answerMode === 'product' ? `${activeProductDept.icon} ${activeProductDept.label} 관점으로 토론 보기` : '평균 · 승인률 · 연체위험 보기'}</strong>
                   <em>
-                    {metricCubeState.data?.meta?.segment_count
-                      ? `${Number(metricCubeState.data.meta.segment_count).toLocaleString('ko-KR')}개 세그먼트`
-                      : 'data/segment_metric_cube.json'}
-                    {' · '}
-                    {metricCubeState.data?.cluster_summary?.total_clusters
-                      ? `군집 ${Number(metricCubeState.data.cluster_summary.total_clusters).toLocaleString('ko-KR')}개`
-                      : '군집분석 함께 보기'}
+                    {answerMode === 'product'
+                      ? `${activeProductDeptMemo || activeProductDept.defaultConcept}`
+                      : (
+                        metricCubeState.data?.meta?.segment_count
+                          ? `${Number(metricCubeState.data.meta.segment_count).toLocaleString('ko-KR')}개 세그먼트`
+                          : 'data/segment_metric_cube.json'
+                      )}
+                    {answerMode === 'product'
+                      ? ''
+                      : ` · ${metricCubeState.data?.cluster_summary?.total_clusters
+                        ? `군집 ${Number(metricCubeState.data.cluster_summary.total_clusters).toLocaleString('ko-KR')}개`
+                        : '군집분석 함께 보기'}`}
                   </em>
                   <small className={`agent-metric-cube-refresh ${semanticRefreshStatus === 'running' ? 'is-running' : ''}`}>
-                    {semanticRefreshLabel} · {semanticRefreshDetail}
+                    {answerMode === 'product' ? '클릭하면 Ollama 입력/출력 Trace를 확인할 수 있어요' : `${semanticRefreshLabel} · ${semanticRefreshDetail}`}
                   </small>
                 </span>
                 <span className="agent-metric-cube-arrow" aria-hidden="true">↗</span>
@@ -3916,6 +4315,7 @@ export default function OntologyWorkbench({
                   semanticRefresh={semanticRefresh}
                   onRefreshAgendas={() => handleLoadProductDevelopmentAgendas(true)}
                   onSelectAgenda={handleSelectProductDevelopmentAgenda}
+                  onStartDebate={handleStartProductDevelopmentDebate}
                   onOpenConcepts={() => setShowConceptModal(true)}
                 />
               ) : null}
@@ -3927,7 +4327,7 @@ export default function OntologyWorkbench({
                   <p>버니가 질문에 맞는 심사 로그, 고객군 정보, 규제 근거를 필요한 만큼만 찾아보고 쉬운 말로 정리해드려요. 복잡한 분석 화면을 먼저 볼 필요 없이, 질문을 쓰고 보내기만 누르면 됩니다.</p>
                 </article>
               ) : null}
-              {orderedConversationTurns.map((turn) => {
+              {answerMode !== 'product' ? orderedConversationTurns.map((turn) => {
                 const isLatest = turn.id === latestConversationTurnId;
                 const isRuntimePending = backendState.loading || runtimeJobStatus === 'queued' || runtimeJobStatus === 'running';
                 const showAnswerProgress = isLatest && isRuntimePending && !hasResolvedRuntimeAnswer;
@@ -4322,7 +4722,7 @@ export default function OntologyWorkbench({
                     ) : null}
                   </React.Fragment>
                 );
-              })}
+              }) : null}
             </div>
             {answerMode === 'product' && hasResolvedRuntimeAnswer ? (
               <StrategyWorkspace panels={strategyPanels} workflow={agentWorkflow} semanticLayer={semanticFinancialLayer} />
@@ -4608,6 +5008,10 @@ export default function OntologyWorkbench({
             onTabChange={setMetricCubeTab}
             onClose={() => setShowMetricCubeModal(false)}
             onRefresh={() => handleOpenMetricCubeModal(metricCubeTab, true)}
+            isProductMode={answerMode === 'product'}
+            selectedDepartment={activeProductDept}
+            selectedDepartmentMemo={activeProductDeptMemo}
+            productDebatePayload={productDevelopmentState.debate}
           />
         ) : null}
       </AnimatePresence>

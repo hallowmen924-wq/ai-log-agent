@@ -13,8 +13,11 @@ import urllib.parse
 import urllib.request
 import sys
 import threading
+import contextlib
 import time
 import uuid
+import warnings
+from typing import Callable
 
 import numpy as np
 from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
@@ -24,6 +27,15 @@ from fastapi.responses import FileResponse
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Python 3.14 + LangChain의 pydantic v1 shim 경고를 런타임에서 필터링합니다.
+# (동작에는 영향 없고, 경고 로그만 과도하게 출력되는 현상 완화)
+warnings.filterwarnings(
+    "ignore",
+    message=r"Core Pydantic V1 functionality isn't compatible with Python 3\.14 or greater\.",
+    category=UserWarning,
+    module=r"langchain_core\._api\.deprecation",
+)
 
 # 이 파일은 FastAPI의 실제 진입점입니다.
 # Streamlit은 이 서버에 HTTP 요청을 보내고, 서버는 분석/벡터/챗 작업을 수행합니다.
@@ -74,6 +86,7 @@ from backend.evidence_guard import (
     evaluate_runtime_evidence,
 )
 from backend.worker import worker
+from backend.product_debate_orchestrator import run_product_debate_orchestration
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
 import asyncio
@@ -218,6 +231,11 @@ def _openai_chat_completion(
 
 
 OLLAMA_LIGHTWEIGHT_MODEL = os.environ.get("OLLAMA_LIGHTWEIGHT_MODEL", "mistral")
+PRODUCT_DEBATE_MEMORY_PATH = pathlib.Path(__file__).resolve().parent / "data" / "product_debate_memory.json"
+PRODUCT_DEBATE_MAX_CONCURRENCY = max(1, int(os.environ.get("PRODUCT_DEBATE_MAX_CONCURRENCY", "1") or 1))
+PRODUCT_DEBATE_CALL_SEMAPHORE = threading.BoundedSemaphore(PRODUCT_DEBATE_MAX_CONCURRENCY)
+PRODUCT_DEBATE_JOB_STATUS_LOCK = threading.Lock()
+PRODUCT_DEBATE_JOB_STATUS: dict[str, dict[str, object]] = {}
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -235,6 +253,9 @@ def _env_int(name: str, default: int, minimum: int | None = None) -> int:
     if minimum is not None:
         return max(minimum, value)
     return value
+
+
+PRODUCT_DEBATE_FORCE_AUTOGEN = _env_flag("PRODUCT_DEBATE_FORCE_AUTOGEN", True)
 
 try:
     from websockets.exceptions import ConnectionClosed
@@ -5253,7 +5274,97 @@ def _fallback_product_debate(selected_agenda: dict[str, object], context: dict[s
     }
 
 
+def _build_department_persona_profiles() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "신프로",
+            "department": "신용기획부",
+            "role": "리스크 기준선 설계 및 심사정책 검증",
+            "skills": ["DSR 분석", "신용등급 분석", "거절코드 분석"],
+            "memory": ["DSR 40% 이상은 연체 위험이 높음"],
+            "constraints": ["손실률 최소화", "정책 위반 금지", "리스크 구간 선제 차단"],
+            "stance": "보수적",
+            "goal": "손실률 최소화",
+            "tone": "risk",
+        },
+        {
+            "name": "금프로",
+            "department": "금융솔루션부",
+            "role": "상품 구조 설계와 출시 전략 총괄",
+            "skills": ["상품기획", "고객세그먼트 분석", "수익성 분석"],
+            "memory": ["소액 한도 상품은 초기 유입 효과가 좋음"],
+            "constraints": ["실행 가능한 MVP 우선", "기존 심사체계와 충돌 최소화"],
+            "stance": "공격적",
+            "goal": "신규 상품 출시",
+            "tone": "moderator",
+        },
+        {
+            "name": "영프로",
+            "department": "금융영업부",
+            "role": "영업 전환율 및 실행액 관점 검증",
+            "skills": ["승인률 개선", "현장 세일즈 시나리오", "고객 커뮤니케이션"],
+            "memory": ["조건이 명확하면 상담 전환율이 높아짐"],
+            "constraints": ["현장 실행 난이도 낮게", "고객 안내 문구 명확화"],
+            "stance": "실행중심",
+            "goal": "승인 전환율 확대",
+            "tone": "sales",
+        },
+        {
+            "name": "아프로",
+            "department": "IT개발자",
+            "role": "데이터 연계/개발공수/배포리스크 검증",
+            "skills": ["데이터 정합성 검증", "외부기관 연계 설계", "배포 안정성 점검"],
+            "memory": ["룰이 명확하면 배치 검증부터 빠르게 적용 가능"],
+            "constraints": ["연계 실패 대비책 필요", "배포 안정성 우선"],
+            "stance": "현실적",
+            "goal": "안정적 구현",
+            "tone": "tech",
+        },
+    ]
+
+
+def _build_department_agent_prompt_blocks(personas: list[dict[str, object]]) -> str:
+    blocks: list[str] = []
+    for persona in personas:
+        name = str(persona.get("name") or "").strip()
+        role = str(persona.get("role") or "").strip()
+        skills = ", ".join([str(item).strip() for item in list(persona.get("skills") or []) if str(item).strip()]) or "-"
+        memory = ", ".join([str(item).strip() for item in list(persona.get("memory") or []) if str(item).strip()]) or "-"
+        constraints = ", ".join([str(item).strip() for item in list(persona.get("constraints") or []) if str(item).strip()]) or "-"
+        stance = str(persona.get("stance") or "").strip()
+        goal = str(persona.get("goal") or "").strip()
+        blocks.append(
+            f"""[AGENT PROMPT · {name}]
+너는 {name}이다.
+
+역할:
+{role}
+
+보유 skill:
+{skills}
+
+기억:
+{memory}
+
+판단 제약:
+{constraints}
+
+의사결정 성향:
+{stance}
+
+목표:
+{goal}
+
+아래 안건에 대해 네 부서 관점에서 의견을 내라.
+다른 부서 발언과 충돌하면 반박 근거를 짧게 제시하고, 마지막에는 합의 가능한 수정안을 1개 제안하라."""
+        )
+    return "\n\n".join(blocks)
+
+
 def _build_product_debate_prompt(selected_agenda: dict[str, object], context: dict[str, object], concepts: list[dict[str, object]]) -> str:
+    personas = _build_department_persona_profiles()
+    persona_json = json.dumps({"agents": personas}, ensure_ascii=False, indent=2)
+    persona_prompt_blocks = _build_department_agent_prompt_blocks(personas)
     return f"""
 너는 금융사 상품개발 워크숍을 진행하는 AI다.
 선택된 안건을 바탕으로 4개 부서가 서로 질문하고 답하는 느낌의 짧은 토론을 만든다.
@@ -5291,6 +5402,12 @@ def _build_product_debate_prompt(selected_agenda: dict[str, object], context: di
 [선택 안건]
 {json.dumps(selected_agenda, ensure_ascii=False)}
 
+[부서 Persona JSON]
+{persona_json}
+
+[부서별 Agent Prompt]
+{persona_prompt_blocks}
+
 [부서 컨셉]
 {_concepts_prompt(concepts)}
 
@@ -5299,27 +5416,22 @@ def _build_product_debate_prompt(selected_agenda: dict[str, object], context: di
 
 
 def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
-    result: dict[str, object] = {}
-
-    def _worker() -> None:
-        try:
-            result["text"] = lightweight_ollama_generate(
+    acquired = PRODUCT_DEBATE_CALL_SEMAPHORE.acquire(timeout=max(1, wait_seconds))
+    if not acquired:
+        raise TimeoutError("상품개발 토론 호출이 혼잡하여 대기 중입니다. 잠시 후 다시 시도해 주세요.")
+    try:
+        return str(
+            lightweight_ollama_generate(
                 prompt,
                 timeout_seconds=max(wait_seconds + 3, 12),
                 fail_fast_if_busy=True,
                 priority_group="ontology",
             )
-        except Exception as error:  # noqa: BLE001 - product mode falls back to precomputed stats.
-            result["error"] = error
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    thread.join(wait_seconds)
-    if thread.is_alive():
-        raise TimeoutError(f"상품개발 Ollama 응답이 {wait_seconds}초 안에 끝나지 않았습니다.")
-    if result.get("error"):
-        raise result["error"]  # type: ignore[misc]
-    return str(result.get("text") or "")
+            or ""
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            PRODUCT_DEBATE_CALL_SEMAPHORE.release()
 
 
 def _generate_product_development_agendas(concepts: list[dict[str, object]]) -> dict[str, object]:
@@ -5352,38 +5464,71 @@ def _generate_product_development_agendas(concepts: list[dict[str, object]]) -> 
     }
 
 
-def _generate_product_development_debate(selected_agenda: dict[str, object], concepts: list[dict[str, object]]) -> dict[str, object]:
+def _generate_product_development_debate(
+    selected_agenda: dict[str, object],
+    concepts: list[dict[str, object]],
+    *,
+    require_autogen: bool | None = None,
+    progress_callback: Callable[[str, str], None] | None = None,
+) -> dict[str, object]:
     context = _build_product_development_context()
-    prompt = _build_product_debate_prompt(selected_agenda, context, concepts)
     fallback = _fallback_product_debate(selected_agenda, context, concepts)
-    source = "fallback"
-    response_text = ""
-    result = fallback
-    try:
-        response_text = _product_ollama_generate_fast(prompt, wait_seconds=8)
-        parsed = _product_dev_json_from_text(response_text)
-        if isinstance(parsed.get("final"), dict) and isinstance(parsed.get("messages"), list):
-            result = {
-                **fallback,
-                **parsed,
-                "selected_agenda": selected_agenda,
-                "product_cards": fallback.get("product_cards") or [],
-                "concepts": concepts,
-            }
-            source = "ollama"
-    except Exception as error:
-        response_text = str(error)
-    return {
-        "status": "ok",
-        "source": source,
-        "context": context,
-        "result": result,
-        "llm": {
-            "model": OLLAMA_LIGHTWEIGHT_MODEL,
-            "prompt": prompt,
-            "response_text": response_text,
-        },
-    }
+    personas = _build_department_persona_profiles()
+    turn_wait_seconds = max(1, _env_int("PRODUCT_DEBATE_TURN_WAIT_SECONDS", 3, minimum=1))
+    max_turns = max(2, _env_int("PRODUCT_DEBATE_MAX_TURNS", _env_int("PRODUCT_DEBATE_MAX_ROUNDS", 2, minimum=2), minimum=2))
+    force_autogen = PRODUCT_DEBATE_FORCE_AUTOGEN if require_autogen is None else bool(require_autogen)
+    if progress_callback:
+        progress_callback("orchestration-start", "AutoGen 오케스트레이션을 시작합니다.")
+    orchestrated = run_product_debate_orchestration(
+        selected_agenda=selected_agenda,
+        context=context,
+        concepts=concepts,
+        personas=personas,
+        llm_call=lambda prompt: _product_ollama_generate_fast(prompt, wait_seconds=turn_wait_seconds),
+        parse_json=_product_dev_json_from_text,
+        fallback_result=fallback,
+        memory_path=PRODUCT_DEBATE_MEMORY_PATH,
+        max_rounds=max_turns,
+        retries=max(0, _env_int("PRODUCT_DEBATE_RETRIES", 1, minimum=0)),
+        consensus_threshold=float(os.environ.get("PRODUCT_DEBATE_CONSENSUS_THRESHOLD", "0.72") or 0.72),
+        require_autogen=force_autogen,
+        progress_callback=progress_callback,
+    )
+    # Safety fallback: if orchestration failed to create a valid result payload, preserve legacy behavior.
+    result_payload = dict(orchestrated.get("result") or {})
+    if not isinstance(result_payload.get("final"), dict) or not isinstance(result_payload.get("messages"), list):
+        if force_autogen:
+            raise RuntimeError("AutoGen 토론 결과가 유효하지 않습니다. 커스텀 루프로 전환하지 않도록 설정되어 실패 처리합니다.")
+        prompt = _build_product_debate_prompt(selected_agenda, context, concepts)
+        response_text = ""
+        result = fallback
+        source = "fallback"
+        try:
+            response_text = _product_ollama_generate_fast(prompt, wait_seconds=8)
+            parsed = _product_dev_json_from_text(response_text)
+            if isinstance(parsed.get("final"), dict) and isinstance(parsed.get("messages"), list):
+                result = {
+                    **fallback,
+                    **parsed,
+                    "selected_agenda": selected_agenda,
+                    "product_cards": fallback.get("product_cards") or [],
+                    "concepts": concepts,
+                }
+                source = "ollama"
+        except Exception as error:
+            response_text = str(error)
+        return {
+            "status": "ok",
+            "source": source,
+            "context": context,
+            "result": result,
+            "llm": {
+                "model": OLLAMA_LIGHTWEIGHT_MODEL,
+                "prompt": prompt,
+                "response_text": response_text,
+            },
+        }
+    return orchestrated
 
 
 def _dedupe_text_items(values: list[object], limit: int = 8) -> list[str]:
@@ -7405,13 +7550,82 @@ def feature_ontology_product_development_agendas(payload: dict[str, object] = Bo
     return _generate_product_development_agendas(concepts)
 
 
+def _update_product_debate_job(job_id: str, **updates: object) -> None:
+    with PRODUCT_DEBATE_JOB_STATUS_LOCK:
+        current = dict(PRODUCT_DEBATE_JOB_STATUS.get(job_id) or {})
+        current.update(updates)
+        current["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        PRODUCT_DEBATE_JOB_STATUS[job_id] = current
+
+
+@app.post("/feature-ontology/product-development/debate-jobs")
+def feature_ontology_product_development_debate_job_start(payload: dict[str, object] = Body(default_factory=dict)) -> dict[str, object]:
+    selected_agenda = payload.get("selected_agenda") or payload.get("agenda") or {}
+    if not isinstance(selected_agenda, dict):
+        raise HTTPException(status_code=400, detail="selected_agenda is required")
+    concepts = _normalize_department_concepts(payload.get("department_concepts") or payload.get("concepts") or {})
+    job_id = f"pd-{uuid.uuid4().hex[:12]}"
+    now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+    with PRODUCT_DEBATE_JOB_STATUS_LOCK:
+        PRODUCT_DEBATE_JOB_STATUS[job_id] = {
+            "job_id": job_id,
+            "status": "running",
+            "stage": "queued",
+            "detail": "토론 작업을 큐에 등록했습니다.",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "result": None,
+            "error": "",
+        }
+
+    def _runner() -> None:
+        def _progress(stage: str, detail: str) -> None:
+            _update_product_debate_job(job_id, stage=stage, detail=str(detail or ""))
+
+        try:
+            result = _generate_product_development_debate(
+                selected_agenda,
+                concepts,
+                require_autogen=True,
+                progress_callback=_progress,
+            )
+            _update_product_debate_job(
+                job_id,
+                status="completed",
+                stage="completed",
+                detail="토론이 완료되었습니다.",
+                result=result,
+                error="",
+            )
+        except Exception as error:  # noqa: BLE001
+            _update_product_debate_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                detail="토론 생성 중 오류가 발생했습니다.",
+                error=str(error),
+            )
+
+    threading.Thread(target=_runner, daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+@app.get("/feature-ontology/product-development/debate-jobs/{job_id}")
+def feature_ontology_product_development_debate_job_status(job_id: str) -> dict[str, object]:
+    with PRODUCT_DEBATE_JOB_STATUS_LOCK:
+        payload = PRODUCT_DEBATE_JOB_STATUS.get(job_id)
+        if not payload:
+            raise HTTPException(status_code=404, detail="debate job not found")
+        return {"status": "ok", **payload}
+
+
 @app.post("/feature-ontology/product-development/debate")
 def feature_ontology_product_development_debate(payload: dict[str, object] = Body(default_factory=dict)) -> dict[str, object]:
     selected_agenda = payload.get("selected_agenda") or payload.get("agenda") or {}
     if not isinstance(selected_agenda, dict):
         raise HTTPException(status_code=400, detail="selected_agenda is required")
     concepts = _normalize_department_concepts(payload.get("department_concepts") or payload.get("concepts") or {})
-    return _generate_product_development_debate(selected_agenda, concepts)
+    return _generate_product_development_debate(selected_agenda, concepts, require_autogen=True)
 
 
 @app.post("/feature-ontology/ollama")

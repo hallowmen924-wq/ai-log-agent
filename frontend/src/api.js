@@ -23,8 +23,23 @@ function buildUrl(path, query = {}) {
   return url.toString();
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(buildUrl(path), options);
+async function request(path, options = {}, timeoutMs = 0) {
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timerId = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response;
+  try {
+    response = await fetch(buildUrl(path), { ...options, signal: controller?.signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      const sec = Math.max(1, Math.round((timeoutMs || 0) / 1000));
+      throw new Error(`요청 시간이 초과되었습니다. (${sec}초)`);
+    }
+    throw error;
+  } finally {
+    if (timerId) {
+      window.clearTimeout(timerId);
+    }
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `HTTP ${response.status}`);
@@ -111,6 +126,18 @@ export function createProductDevelopmentDebate(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload || {}),
   });
+}
+
+export function startProductDevelopmentDebateJob(payload) {
+  return request('/feature-ontology/product-development/debate-jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function fetchProductDevelopmentDebateJob(jobId) {
+  return request(`/feature-ontology/product-development/debate-jobs/${encodeURIComponent(String(jobId || ''))}`);
 }
 
 export function rebuildFeatureOntologyClusters(payload) {
