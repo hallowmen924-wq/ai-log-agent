@@ -255,7 +255,7 @@ def _env_int(name: str, default: int, minimum: int | None = None) -> int:
     return value
 
 
-PRODUCT_DEBATE_FORCE_AUTOGEN = _env_flag("PRODUCT_DEBATE_FORCE_AUTOGEN", True)
+PRODUCT_DEBATE_FORCE_AUTOGEN = _env_flag("PRODUCT_DEBATE_FORCE_AUTOGEN", False)
 
 try:
     from websockets.exceptions import ConnectionClosed
@@ -5227,6 +5227,7 @@ def _build_product_agenda_prompt(context: dict[str, object], concepts: list[dict
 
 def _fallback_product_debate(selected_agenda: dict[str, object], context: dict[str, object], concepts: list[dict[str, object]]) -> dict[str, object]:
     title = str(selected_agenda.get("title") or "상품개발 안건")
+    agenda_type = str(selected_agenda.get("type") or "").strip().lower()
     products = list(context.get("product_summaries") or [])
     product_cards = [
         {
@@ -5241,33 +5242,60 @@ def _fallback_product_debate(selected_agenda: dict[str, object], context: dict[s
         for item in products[:4]
     ]
     messages = [
-        {"speaker": "금융솔루션부", "tone": "moderator", "message": f"{title}로 가보죠. 새 상품은 작게 실험하고, 기존 룰은 크게 흔들지 않는 쪽이 좋아요."},
-        {"speaker": "신용기획부", "tone": "risk", "message": "금리·한도는 통계 큐브 기준을 벗어나면 위험합니다. K코드는 완화가 아니라 분기 설계로 보겠습니다."},
-        {"speaker": "금융영업부", "tone": "sales", "message": "좋습니다. 다만 승인 전환 후보가 보여야 합니다. 너무 얌전하면 현장에서는 박수 대신 한숨이 나옵니다."},
-        {"speaker": "IT개발자", "tone": "tech", "message": "신규 엔진은 곤란합니다. 기존 상품 룰에 feature 조회와 검증 단계를 얹는 방식이면 배포 가능성이 있습니다."},
+        {"speaker": "금융솔루션부", "tone": "moderator", "message": f"{title} 기준으로 의견을 정리합니다. 안건 타입에 맞는 제안만 남기겠습니다."},
+        {"speaker": "신용기획팀", "tone": "risk", "message": "리스크 민감 구간을 먼저 점검하고 변동 폭을 제어하겠습니다."},
+        {"speaker": "상품전략팀", "tone": "sales", "message": "전환 가능성이 높은 고객군 중심으로 실행안을 좁혀보겠습니다."},
+        {"speaker": "IT개발팀", "tone": "tech", "message": "기존 룰과 충돌하지 않도록 최소 변경 구조로 제안합니다."},
     ]
+
+    new_product_candidates = [
+        {
+            "name": "씬파일 승인 전환형 소액 신용 상품",
+            "target": "승인률이 낮은 군에서 리스크 하위 세그먼트를 분리해 승인 전환을 확대",
+            "core_logic": ["초기한도 보수 운영", "행동 데이터 확인 후 증액", "신용/소득 proxy 혼합 검증"],
+            "limit_rate_policy": "초기 한도는 작게 시작하고 금리는 위험 등급별 차등 적용",
+            "risk_guardrails": ["거절 코드 급증 감시", "DSR/연체 proxy 임계치 차단", "30일 롤링 모니터링"],
+        },
+        {
+            "name": "금리-한도 탄력형 전환 상품",
+            "target": "거절 이력이 많은 고객군에 소액/단기 상품을 제공해 점진적 전환 유도",
+            "core_logic": ["금리 스텝 구조", "재신청 시 가산점 반영", "세그먼트별 한도 상한 분리"],
+            "limit_rate_policy": "한도 상단을 제한하고 금리는 단계적으로 완화",
+            "risk_guardrails": ["고위험 코드 선차단", "상환/이탈 경보 자동화", "구간별 성과 리포트"],
+        },
+    ]
+    logic_improvements = [
+        {
+            "product": item.get("product_label"),
+            "change": "거절 코드 기반 분기 로직을 한도/금리/재신청 조건에 연계",
+            "expected_effect": f"승인률 {item.get('approval_rate_percent')}% 구간에서 전환 후보 확대",
+            "dev_impact": "규칙 테이블 및 점수 매핑 확장",
+        }
+        for item in products[:4]
+    ]
+    while len(logic_improvements) < 2:
+        logic_improvements.append(
+            {
+                "product": "이지론(C9)",
+                "change": "소득 proxy 보정 및 금리 밴드 재정렬",
+                "expected_effect": "리스크 급증 없이 승인 전환 폭 확대",
+                "dev_impact": "feature 파이프라인/검증 규칙 보완",
+            }
+        )
+
+    final_new_product_candidates = new_product_candidates[:2] if agenda_type == "new_product" else []
+    final_logic_improvements = logic_improvements[:2] if agenda_type == "logic_improvement" else []
+    primary_new_product = final_new_product_candidates[0] if final_new_product_candidates else new_product_candidates[0]
+
     return {
         "selected_agenda": selected_agenda,
         "messages": messages,
         "final": {
-            "new_product": {
-                "name": "선별형 소액 리밸런싱론",
-                "target": "중신용·중소득 중 연체 proxy가 낮고 한도 요청이 과하지 않은 고객군",
-                "core_logic": ["초기 한도는 보수적으로 시작", "상환 행동 확인 후 한도 증액", "KCB/NICE/신정원 보완조회로 거절 사유 재분기"],
-                "limit_rate_policy": "평균 한도는 기존 상품 평균보다 낮게, 금리는 리스크 구간별 차등 적용",
-                "risk_guardrails": ["상위 K코드 즉시 승인 금지", "DSR·연체 신호 동시 악화 시 차단", "30일 단위 성과 모니터링"],
-            },
-            "product_logic_improvements": [
-                {
-                    "product": item.get("product_label"),
-                    "change": "거절코드 상위 사유를 한도 감액/추가조회/최종거절로 세분화",
-                    "expected_effect": f"현재 승인률 {item.get('approval_rate_percent')}% 기준 전환 후보를 선별",
-                    "dev_impact": "기존 룰 엔진 분기 추가 중심",
-                }
-                for item in products[:4]
-            ],
-            "implementation_plan": ["2주: 큐브 기준 룰 후보 확정", "3주: 심사솔루션 분기 개발", "2주: 파일럿과 모니터링 대시보드"],
-            "kpis": ["승인률", "평균금리", "평균한도", "연체 proxy", "K코드별 전환율"],
+            "new_product": primary_new_product,
+            "new_product_candidates": final_new_product_candidates,
+            "product_logic_improvements": final_logic_improvements,
+            "implementation_plan": ["2주: 후보 정의/데이터 점검", "3주: 규칙 반영 및 검증", "2주: 시범 운영 모니터링"],
+            "kpis": ["승인률", "평균금리", "평균한도", "부실 proxy", "거절코드 전환율"],
         },
         "product_cards": product_cards,
         "concepts": concepts,
@@ -5365,37 +5393,53 @@ def _build_product_debate_prompt(selected_agenda: dict[str, object], context: di
     personas = _build_department_persona_profiles()
     persona_json = json.dumps({"agents": personas}, ensure_ascii=False, indent=2)
     persona_prompt_blocks = _build_department_agent_prompt_blocks(personas)
+    agenda_type = str(selected_agenda.get("type") or "").strip().lower()
+    if agenda_type == "new_product":
+        agenda_focus_instruction = (
+            "안건 타입은 new_product다. final.new_product_candidates에 정확히 2개를 작성하고, "
+            "final.product_logic_improvements는 빈 배열([])로 유지한다."
+        )
+    elif agenda_type == "logic_improvement":
+        agenda_focus_instruction = (
+            "안건 타입은 logic_improvement다. final.product_logic_improvements에 정확히 2개를 작성하고, "
+            "final.new_product_candidates는 빈 배열([])로 유지한다."
+        )
+    else:
+        agenda_focus_instruction = (
+            "안건 타입이 불명확하면 둘 중 하나 축만 선택해서 정확히 2개를 작성하고, 다른 축은 빈 배열로 둔다."
+        )
     return f"""
-너는 금융사 상품개발 워크숍을 진행하는 AI다.
-선택된 안건을 바탕으로 4개 부서가 서로 질문하고 답하는 느낌의 짧은 토론을 만든다.
-순차 발표가 아니라, 의견을 묻고 받아치는 회의처럼 작성한다. 말투는 재미있고 위트 있지만, 결론은 현업 문서처럼 명확해야 한다.
+너는 금융 상품개발 토론을 진행하는 AI다.
+선택된 안건을 기준으로 4개 부서의 의견을 구성하고, 최종 합의안을 JSON으로만 반환한다.
+실행 가능성과 근거 중심으로 작성한다.
 
-반드시 최종 결과는 2개 축으로 나온다:
-1) 신상품 제안
-2) 기존 상품별 보완 로직
+[안건 타입 규칙]
+{agenda_focus_instruction}
 
-반드시 JSON만 출력한다.
-스키마:
+반드시 아래 JSON 스키마를 따른다:
 {{
   "messages": [
-    {{"speaker": "금융솔루션부", "tone": "moderator", "message": "발언"}},
-    {{"speaker": "신용기획부", "tone": "risk", "message": "발언"}},
-    {{"speaker": "금융영업부", "tone": "sales", "message": "발언"}},
-    {{"speaker": "IT개발자", "tone": "tech", "message": "발언"}}
+    {{"speaker": "금융솔루션부", "tone": "moderator", "message": "요약"}},
+    {{"speaker": "신용기획팀", "tone": "risk", "message": "요약"}},
+    {{"speaker": "상품전략팀", "tone": "sales", "message": "요약"}},
+    {{"speaker": "IT개발팀", "tone": "tech", "message": "요약"}}
   ],
   "final": {{
     "new_product": {{
       "name": "상품명",
-      "target": "대상 고객",
-      "core_logic": ["심사/한도/금리 로직"],
-      "limit_rate_policy": "한도와 금리 운영안",
-      "risk_guardrails": ["리스크 통제 장치"]
+      "target": "대상",
+      "core_logic": ["핵심 로직"],
+      "limit_rate_policy": "한도/금리 정책",
+      "risk_guardrails": ["리스크 가드레일"]
     }},
-    "product_logic_improvements": [
-      {{"product": "이지론(C9)", "change": "보완 로직", "expected_effect": "기대 효과", "dev_impact": "개발 영향도"}}
+    "new_product_candidates": [
+      {{"name": "상품명", "target": "대상", "core_logic": ["핵심 로직"]}}
     ],
-    "implementation_plan": ["실행 단계"],
-    "kpis": ["관리 지표"]
+    "product_logic_improvements": [
+      {{"product": "상품", "change": "개선안", "expected_effect": "기대효과", "dev_impact": "개발영향"}}
+    ],
+    "implementation_plan": ["단계"],
+    "kpis": ["지표"]
   }}
 }}
 
@@ -5408,11 +5452,70 @@ def _build_product_debate_prompt(selected_agenda: dict[str, object], context: di
 [부서별 Agent Prompt]
 {persona_prompt_blocks}
 
-[부서 컨셉]
+[부서 개념]
 {_concepts_prompt(concepts)}
 
 {_product_development_context_prompt(context)}
 """.strip()
+
+
+def _contains_non_ascii_text(value: object) -> bool:
+    text = str(value or "")
+    return any(ord(ch) > 127 for ch in text)
+
+
+def _normalize_product_debate_final(
+    selected_agenda: dict[str, object],
+    final_payload: dict[str, object],
+    fallback_final: dict[str, object],
+) -> dict[str, object]:
+    agenda_type = str(selected_agenda.get("type") or "").strip().lower()
+    normalized = dict(final_payload or {})
+    fallback_new = dict(fallback_final.get("new_product") or {})
+    fallback_candidates = [item for item in list(fallback_final.get("new_product_candidates") or []) if isinstance(item, dict)]
+    fallback_improvements = [item for item in list(fallback_final.get("product_logic_improvements") or []) if isinstance(item, dict)]
+
+    candidates = [item for item in list(normalized.get("new_product_candidates") or []) if isinstance(item, dict)]
+    improvements = [item for item in list(normalized.get("product_logic_improvements") or []) if isinstance(item, dict)]
+    new_product = dict(normalized.get("new_product") or {})
+
+    if agenda_type == "new_product":
+        merged = candidates[:2]
+        while len(merged) < 2 and len(fallback_candidates) > len(merged):
+            merged.append(fallback_candidates[len(merged)])
+        if len(merged) < 2:
+            merged = fallback_candidates[:2]
+        normalized["new_product_candidates"] = merged[:2]
+        normalized["product_logic_improvements"] = []
+        normalized["new_product"] = dict(merged[0] if merged else fallback_new)
+    elif agenda_type == "logic_improvement":
+        merged = improvements[:2]
+        while len(merged) < 2 and len(fallback_improvements) > len(merged):
+            merged.append(fallback_improvements[len(merged)])
+        if len(merged) < 2:
+            merged = fallback_improvements[:2]
+        normalized["product_logic_improvements"] = merged[:2]
+        normalized["new_product_candidates"] = []
+        normalized["new_product"] = fallback_new
+
+    # LLM이 영어 단일 결과를 줄 때 한글 fallback으로 교정
+    current_new = dict(normalized.get("new_product") or {})
+    if not _contains_non_ascii_text(current_new.get("name")):
+        normalized["new_product"] = fallback_new
+    if agenda_type == "new_product":
+        fixed_candidates = []
+        for idx, item in enumerate(list(normalized.get("new_product_candidates") or [])[:2]):
+            if _contains_non_ascii_text(item.get("name")):
+                fixed_candidates.append(item)
+            elif idx < len(fallback_candidates):
+                fixed_candidates.append(fallback_candidates[idx])
+        while len(fixed_candidates) < 2 and len(fallback_candidates) > len(fixed_candidates):
+            fixed_candidates.append(fallback_candidates[len(fixed_candidates)])
+        normalized["new_product_candidates"] = fixed_candidates[:2]
+        if fixed_candidates:
+            normalized["new_product"] = dict(fixed_candidates[0])
+
+    return normalized
 
 
 def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
@@ -5496,6 +5599,13 @@ def _generate_product_development_debate(
     )
     # Safety fallback: if orchestration failed to create a valid result payload, preserve legacy behavior.
     result_payload = dict(orchestrated.get("result") or {})
+    if isinstance(result_payload.get("final"), dict):
+        result_payload["final"] = _normalize_product_debate_final(
+            selected_agenda=selected_agenda,
+            final_payload=dict(result_payload.get("final") or {}),
+            fallback_final=dict(fallback.get("final") or {}),
+        )
+        orchestrated["result"] = result_payload
     if not isinstance(result_payload.get("final"), dict) or not isinstance(result_payload.get("messages"), list):
         if force_autogen:
             raise RuntimeError("AutoGen 토론 결과가 유효하지 않습니다. 커스텀 루프로 전환하지 않도록 설정되어 실패 처리합니다.")
@@ -5507,9 +5617,15 @@ def _generate_product_development_debate(
             response_text = _product_ollama_generate_fast(prompt, wait_seconds=8)
             parsed = _product_dev_json_from_text(response_text)
             if isinstance(parsed.get("final"), dict) and isinstance(parsed.get("messages"), list):
+                normalized_final = _normalize_product_debate_final(
+                    selected_agenda=selected_agenda,
+                    final_payload=dict(parsed.get("final") or {}),
+                    fallback_final=dict(fallback.get("final") or {}),
+                )
                 result = {
                     **fallback,
                     **parsed,
+                    "final": normalized_final,
                     "selected_agenda": selected_agenda,
                     "product_cards": fallback.get("product_cards") or [],
                     "concepts": concepts,

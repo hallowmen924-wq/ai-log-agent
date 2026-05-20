@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { EventType, useRive, useStateMachineInput } from '@rive-app/react-canvas';
 import ReactFlow, { Background, Controls, Handle, MarkerType, MiniMap, Position } from 'reactflow';
@@ -1478,6 +1479,21 @@ const PRODUCT_DEBATE_WARMUP_LINES = Object.freeze([
 
 const MEMO_STORAGE_KEY = 'ontology-workbench-memo-preferences';
 const ONBOARDING_STORAGE_KEY = 'ontology-workbench-department-onboarding-v1';
+const INITIAL_PRODUCT_DEVELOPMENT_STATE = Object.freeze({
+  loadingAgendas: false,
+  agendaError: '',
+  agendaPayload: null,
+  agendas: [],
+  source: '',
+  selectedAgenda: null,
+  debateLoading: false,
+  debateError: '',
+  debate: null,
+  debateSource: '',
+  debateJobId: '',
+  debateStage: '',
+  debateStageDetail: '',
+});
 const DEPARTMENT_SURVEY_QUESTIONS = Object.freeze({
   solution: [
     { id: 'goal', prompt: '이번 분기에 가장 중요한 목표는?', choices: ['신상품 속도', '규제 대응', '고객경험 개선'] },
@@ -2027,6 +2043,7 @@ function resolveDebatePerson(message = {}) {
 function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null }) {
   const [tick, setTick] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [typedCaption, setTypedCaption] = useState('');
 
   useEffect(() => {
     if (!loading) {
@@ -2034,7 +2051,7 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
     }
     const timerId = window.setInterval(() => {
       setTick((value) => value + 1);
-    }, 1150);
+    }, 2800);
     return () => window.clearInterval(timerId);
   }, [loading]);
 
@@ -2056,7 +2073,7 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
   }, [loading, selectedAgenda?.id, selectedAgenda?.title]);
 
   const stagedMessages = loading
-    ? PRODUCT_DEBATE_WARMUP_LINES.slice(0, Math.min(PRODUCT_DEBATE_WARMUP_LINES.length, Math.max(6, tick + 1)))
+    ? PRODUCT_DEBATE_WARMUP_LINES.slice(0, Math.min(PRODUCT_DEBATE_WARMUP_LINES.length, Math.max(1, tick + 1)))
     : messages.map((message, index) => {
       const person = resolveDebatePerson(message);
       return {
@@ -2068,8 +2085,34 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
       };
     });
   const activePerson = resolveDebatePerson(stagedMessages[stagedMessages.length - 1] || {});
+  const activeMessage = stagedMessages[stagedMessages.length - 1] || null;
   const agendaTitle = selectedAgenda?.title || '선택된 안건';
   const thinkingLine = `${activePerson.name}가 ${loading ? '핵심 쟁점을 정리하며 고민 중' : '최종 의견을 마무리하는 중'}...`;
+  const speakerSoftLine = loading
+    ? `지금은 ${activePerson.name}(${activePerson.department})가 차분하게 의견을 설명하고 있어요.`
+    : `${activePerson.name}(${activePerson.department})가 최종 발언을 정리했어요.`;
+
+  useEffect(() => {
+    const text = String(activeMessage?.message || '');
+    if (!text) {
+      setTypedCaption('');
+      return undefined;
+    }
+    if (!loading) {
+      setTypedCaption(text);
+      return undefined;
+    }
+    setTypedCaption('');
+    let cursor = 0;
+    const timer = window.setInterval(() => {
+      cursor += 1;
+      setTypedCaption(text.slice(0, cursor));
+      if (cursor >= text.length) {
+        window.clearInterval(timer);
+      }
+    }, 34);
+    return () => window.clearInterval(timer);
+  }, [activeMessage?.id, activeMessage?.message, loading]);
 
   return (
     <div className={`product-debate-room ${loading ? 'is-live' : 'is-complete'}`}>
@@ -2082,15 +2125,22 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
       </div>
 
       <div className="product-debate-table">
+        <div className="product-debate-ambient product-debate-ambient-left" aria-hidden="true" />
+        <div className="product-debate-ambient product-debate-ambient-right" aria-hidden="true" />
         <div className="product-debate-table-surface">
           <span>{agendaTitle}</span>
           <strong>{loading ? 'OLLAMA 결과를 기다리는 동안 사전 토론 중' : '토론 정리 완료'}</strong>
-          <div className="product-debate-equalizer" aria-hidden="true">
-            {Array.from({ length: 12 }).map((_, index) => <i key={index} style={{ animationDelay: `${index * 0.08}s` }} />)}
+          <div className="product-debate-topic-note">
+            <p>{speakerSoftLine}</p>
+            <small>{activeMessage?.speaker ? `${activeMessage.speaker} 발언 진행 중` : '발언자를 기다리는 중'}</small>
           </div>
         </div>
         {PRODUCT_DEBATE_PEOPLE.map((person, index) => {
           const isSpeaking = person.id === activePerson.id;
+          const speech = stagedMessages
+            .slice()
+            .reverse()
+            .find((item) => resolveDebatePerson(item).id === person.id);
           return (
             <motion.div
               key={person.id}
@@ -2106,10 +2156,30 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
               <div>
                 <strong>{person.name}</strong>
                 <small>{person.department} · {person.role}</small>
+                <p className="product-debate-person-speech">{speech?.message ? String(speech.message).slice(0, 46) : '발언 대기 중...'}</p>
               </div>
             </motion.div>
           );
         })}
+        <AnimatePresence mode="wait">
+          {activeMessage ? (
+            <motion.article
+              key={`${activeMessage.id || activeMessage.speaker}-${activeMessage.message}`}
+              className="product-debate-live-caption tailwind-caption w-full md:w-[92%] max-w-5xl mx-auto rounded-2xl"
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.98 }}
+              transition={{ duration: 0.26, ease: 'easeOut' }}
+            >
+              <div className="product-debate-live-caption-head">
+                <span>{activePerson.short}</span>
+                <strong>{activeMessage.speaker || activePerson.name}</strong>
+                <small>{activeMessage.department || activePerson.department}</small>
+              </div>
+              <p>{typedCaption || '핵심 메시지를 정리 중입니다.'}</p>
+            </motion.article>
+          ) : null}
+        </AnimatePresence>
       </div>
 
       <div className="product-debate-live-feed">
@@ -2118,28 +2188,6 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
           <strong>Live Thought</strong>
           <p>{thinkingLine}</p>
         </div>
-        <AnimatePresence initial={false}>
-          {stagedMessages.slice(-6).map((message, index) => {
-            const person = resolveDebatePerson(message);
-            return (
-              <motion.article
-                key={message.id || `${message.speaker}-${index}-${message.message}`}
-                className={`product-dev-message is-${message.tone || person.tone}`}
-                initial={{ opacity: 0, x: -12, y: 6 }}
-                animate={{ opacity: 1, x: 0, y: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-              >
-                <div className="product-dev-message-speaker">
-                  <span>{person.short}</span>
-                  <strong>{message.speaker || person.name}</strong>
-                  <small>{message.department || person.department}</small>
-                </div>
-                <p>{message.message}</p>
-              </motion.article>
-            );
-          })}
-        </AnimatePresence>
       </div>
     </div>
   );
@@ -2153,7 +2201,14 @@ function ProductDevelopmentWorkspace({
   onSelectAgenda,
   onStartDebate,
   onOpenConcepts,
+  onCompleteFinal,
 }) {
+  const [showEnginePanel, setShowEnginePanel] = useState(false);
+  const [pendingAgenda, setPendingAgenda] = useState(null);
+  const [showAgendaConfirmModal, setShowAgendaConfirmModal] = useState(false);
+  const [step2Armed, setStep2Armed] = useState(false);
+  const [showFinalModal, setShowFinalModal] = useState(false);
+  const [lastFinalOpenKey, setLastFinalOpenKey] = useState('');
   const agendas = state.agendas || [];
   const debatePayload = state.debate || null;
   const debate = debatePayload?.result || debatePayload || null;
@@ -2179,21 +2234,68 @@ function ProductDevelopmentWorkspace({
     ? 'Ollama/AutoGen 응답 대기'
     : (kickoffChars + systemPromptChars > 8000 ? '프롬프트 컨텍스트 큼' : (memoryEnabled && memoryElapsedMs > 1000 ? '롱텀메모리 조회' : '정상 범위'));
   const newProduct = final.new_product || {};
+  const newProductCandidates = Array.isArray(final.new_product_candidates) ? final.new_product_candidates : [];
   const improvements = final.product_logic_improvements || [];
+  const selectedAgendaType = String(state.selectedAgenda?.type || '').trim().toLowerCase();
   const sourceRaw = String(debatePayload?.source || state.debateSource || state.source || '');
   const sourceLabel = sourceRaw.includes('autogen')
     ? 'AutoGen 멀티에이전트'
     : (sourceRaw.includes('ollama') ? 'Ollama 생성' : 'Fallback 초안');
   const llmModeLabel = llmMeta?.mode === 'autogen' ? '오케스트레이션 실행 중' : '커스텀 루프 폴백';
   const autogenErrorText = String(llmMeta?.autogen_error || '');
+  const isAutogenOptionalFallback = autogenErrorText.includes('자동 전환');
   const maxConsensus = Math.max(0.01, ...consensusHistory.map((item) => Number(item.consensus_score || 0)));
+  const agendaForConfirm = pendingAgenda || state.selectedAgenda || null;
+  const isNewProductAgenda = String(agendaForConfirm?.type || '').trim().toLowerCase() === 'new_product';
+  const agendaWhyDescription = isNewProductAgenda
+    ? '승인 전환 가능성이 높은 세그먼트를 빠르게 상품화해 신규 실행액을 확보하고, 기존 거절군의 재유입 루트를 만들기 위해 개발합니다.'
+    : '현재 심사 로직의 누락 구간을 보완해 과거 거절 고객 중 재평가 가능한 구간을 살리고, 리스크를 통제한 상태에서 승인률을 끌어올리기 위해 개발합니다.';
+  const showStep2 = Boolean(step2Armed || state.debateLoading || messages.length);
+  const hasFinalResult = Boolean(final.new_product || newProductCandidates.length || improvements.length);
+  const finalOpenKey = `${state.selectedAgenda?.id || state.selectedAgenda?.title || 'none'}-${messages.length}-${newProductCandidates.length}-${improvements.length}`;
+
+  const handleAgendaClick = (agenda) => {
+    onSelectAgenda?.(agenda);
+    setPendingAgenda(agenda);
+    setShowAgendaConfirmModal(true);
+  };
+
+  const handleConfirmAgenda = () => {
+    const targetAgenda = pendingAgenda || state.selectedAgenda;
+    if (!targetAgenda || state.debateLoading) {
+      return;
+    }
+    setShowAgendaConfirmModal(false);
+    setStep2Armed(true);
+    onStartDebate?.(targetAgenda);
+  };
+
+  const handleCompleteFinal = () => {
+    setShowFinalModal(false);
+    setStep2Armed(false);
+    setPendingAgenda(null);
+    setShowAgendaConfirmModal(false);
+    onCompleteFinal?.();
+  };
+
+  useEffect(() => {
+    if (!showStep2 || state.debateLoading || !hasFinalResult) {
+      return;
+    }
+    if (lastFinalOpenKey === finalOpenKey) {
+      return;
+    }
+    setShowFinalModal(true);
+    setLastFinalOpenKey(finalOpenKey);
+  }, [showStep2, state.debateLoading, hasFinalResult, finalOpenKey, lastFinalOpenKey]);
 
   return (
     <motion.article className="product-development-workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, ease: 'easeOut' }}>
+      {!showStep2 ? (
       <div className="product-dev-hero">
         <div>
           <span className="panel-kicker">상품개발모드</span>
-          <h2>통계 큐브와 군집분석으로 4개 부서가 빠르게 상품을 설계합니다.</h2>
+          <h2>통계 CUBE X Clsuter 분석을 기반 신상품 설계</h2>
           <p>AutoGen이 부서별 에이전트를 독립 발언 루프로 돌리고, 현재는 롱텀메모리 없이 선택 안건과 부서 컨텍스트만으로 합의안을 만듭니다. 지금 회의실에서 실제처럼 발언, 반박, 정리 단계가 순차 진행됩니다.</p>
         </div>
         <div className="product-dev-actions">
@@ -2203,7 +2305,9 @@ function ProductDevelopmentWorkspace({
           </button>
         </div>
       </div>
+      ) : null}
 
+      {!showStep2 ? (
       <div className="product-dev-stat-strip">
         {(productSummaries.length ? productSummaries : []).slice(0, 4).map((item) => (
           <article key={item.product || item.product_label}>
@@ -2214,111 +2318,44 @@ function ProductDevelopmentWorkspace({
         ))}
         {!productSummaries.length ? <div className="empty-box compact">통계 큐브를 읽어 상품별 숫자를 준비하는 중입니다.</div> : null}
       </div>
+      ) : null}
 
+      {!showStep2 ? (
       <div className="product-dev-meta-row">
         <span className="sample-pill">{sourceLabel}</span>
         <span className="sample-pill">{llmModeLabel}</span>
         <span className="sample-pill">큐브 {Number(context?.cube_meta?.segment_count || semanticRefresh?.segment_count || 0).toLocaleString('ko-KR')}개 세그먼트</span>
         <span className="sample-pill">군집 {Number(semanticRefresh?.cluster_count || 0).toLocaleString('ko-KR')}개</span>
       </div>
+      ) : null}
 
-      <section className="product-dev-section">
-        <div className="product-dev-section-head">
-          <span className="panel-kicker">AutoGen + Memory</span>
-          <strong>멀티에이전트 토론 엔진 상태</strong>
-        </div>
-        <div className="product-dev-engine-grid">
-          <article className="product-dev-engine-card">
-            <span>엔진</span>
-            <strong>{sourceLabel}</strong>
-            <small>{state.debateLoading ? '부서별 독립 루프 실행 중' : '최근 토론 실행 완료'}</small>
-          </article>
-          <article className="product-dev-engine-card">
-            <span>합의 라운드</span>
-            <strong>{consensusHistory.length || Number(orchestration.rounds_run || 0)}회</strong>
-            <small>종료 기준: consensus score 임계치 또는 max rounds</small>
-          </article>
-          <article className="product-dev-engine-card">
-            <span>실행 시간</span>
-            <strong>{totalElapsedMs > 0 ? `${(totalElapsedMs / 1000).toFixed(1)}s` : '-'}</strong>
-            <small>{finalElapsedMs > 0 ? `최종 합성 ${finalElapsedMs}ms` : '라운드별 소요시간 수집 중'}</small>
-          </article>
-          <article className="product-dev-engine-card">
-            <span>롱텀메모리 회수</span>
-            <strong>{memoryEnabled ? `${memoryHits.length}건` : 'OFF'}</strong>
-            <small>{memoryEnabled ? `${memoryElapsedMs}ms · ${memoryHits.length ? '이전 토론 기억을 이번 안건에 반영했습니다.' : '조회 결과 없음'}` : '현재 병목 확인을 위해 조회/컨텍스트 주입을 꺼두었습니다.'}</small>
-          </article>
-          <article className="product-dev-engine-card">
-            <span>병목 추정</span>
-            <strong>{state.debateLoading ? (state.debateStage || 'running') : autogenBottleneck}</strong>
-            <small>
-              {autogenRunMs
-                ? `AutoGen ${autogenRunMs}ms · kickoff ${kickoffChars}자 · system ${systemPromptChars}자`
-                : (state.debateStageDetail || '실행 후 진단값이 표시됩니다.')}
-            </small>
-          </article>
-        </div>
-        {memoryHits.length ? (
-          <div className="product-dev-memory-hit-list">
-            {memoryHits.slice(0, 3).map((item, index) => (
-              <article key={`${item.timestamp || 'memory'}-${index}`}>
-                <strong>{item.agenda_title || '이전 안건'}</strong>
-                <p>{item.issue_summary || '요약 정보 없음'}</p>
-              </article>
-            ))}
-          </div>
-        ) : null}
-        {autogenErrorText ? (
-          <div className="product-dev-engine-warning">
-            <strong>AutoGen 경로에서 폴백 발생</strong>
-            <p>{autogenErrorText}</p>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="product-dev-section">
-        <div className="product-dev-section-head">
-          <span className="panel-kicker">Consensus Timeline</span>
-          <strong>라운드별 합의 점수 추이</strong>
-        </div>
-        {consensusHistory.length ? (
-          <div className="product-dev-consensus-timeline">
-            {consensusHistory.map((item, index) => {
-              const score = Number(item.consensus_score || 0);
-              const width = Math.max(4, Math.round((score / maxConsensus) * 100));
-              const timing = roundTimings.find((row) => Number(row.round || 0) === Number(item.round || index + 1)) || null;
-              return (
-                <article key={`consensus-round-${index + 1}`} className="product-dev-consensus-item">
-                  <div className="product-dev-consensus-head">
-                    <strong>Round {item.round || index + 1}</strong>
-                    <b>{(score * 100).toFixed(1)}%</b>
-                  </div>
-                  <div className="product-dev-consensus-bar"><span style={{ width: `${width}%` }} /></div>
-                  {timing ? <small>라운드 소요 {Number(timing.elapsed_ms || 0).toLocaleString('ko-KR')}ms · 호출합 {Number(timing.total_call_ms || 0).toLocaleString('ko-KR')}ms</small> : null}
-                  <p>{item.summary || '요약 생성 중'}</p>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="empty-box compact">아직 합의 라운드 로그가 없습니다. 현재는 초기 토론 또는 AutoGen 경로에서 합의 로그가 축약된 상태입니다.</div>
-        )}
-      </section>
+      {/* 요청사항: 엔진 상태(1), Consensus Timeline(2) 섹션 숨김 */}
 
       {state.agendaError ? <div className="error-banner">상품개발 안건 생성 실패: {state.agendaError}</div> : null}
       {state.debateError ? <div className="error-banner">상품개발 토론 생성 실패: {state.debateError}</div> : null}
 
+      {!showStep2 ? (
       <section className="product-dev-section">
         <div className="product-dev-section-head">
           <span className="panel-kicker">Step 1</span>
           <strong>금융솔루션부가 던지는 토론 안건 2개</strong>
+        </div>
+        <div className="product-dev-reason-box">
+          <strong>후보 생성 근거</strong>
+          <p>
+            통계 CUBE에서 상품별 승인률/금리/한도/연체 지표를 읽고, 클러스터 분석에서 위험이 과도하지 않은 세그먼트를 우선 추출했습니다.
+            이후 거절코드 분포와 전환 가능 구간을 교차해, 신상품 후보와 로직 보완 후보를 각각 1개씩 생성했습니다.
+          </p>
+          <small>
+            현재 기준: {(productSummaries || []).slice(0, 4).map((item) => `${item.product_label || item.product} 승인률 ${item.approval_rate_percent ?? '-'}%`).join(' · ')}
+          </small>
         </div>
         {state.loadingAgendas ? <div className="empty-box compact">통계자료, 한도, 금리, 거절코드, 연체가능성을 읽고 안건을 만드는 중입니다.</div> : null}
         <div className="product-dev-agenda-grid">
           {agendas.map((agenda, index) => {
             const isSelected = state.selectedAgenda?.id === agenda.id || (!agenda.id && state.selectedAgenda === agenda);
             return (
-              <button key={agenda.id || `${agenda.title}-${index}`} type="button" className={`product-dev-agenda-card ${isSelected ? 'active' : ''}`} onClick={() => onSelectAgenda(agenda)} disabled={state.debateLoading}>
+              <button key={agenda.id || `${agenda.title}-${index}`} type="button" className={`product-dev-agenda-card ${isSelected ? 'active' : ''}`} onClick={() => handleAgendaClick(agenda)} disabled={state.debateLoading}>
                 <span>{agenda.type === 'new_product' ? '신상품 후보' : '로직 보완 후보'}</span>
                 <strong>{agenda.title}</strong>
                 <p>{agenda.summary}</p>
@@ -2330,19 +2367,10 @@ function ProductDevelopmentWorkspace({
             );
           })}
         </div>
-        <div className="product-dev-actions">
-          <button
-            type="button"
-            className="primary-button product-dev-refresh-button"
-            onClick={() => onStartDebate?.(state.selectedAgenda)}
-            disabled={!state.selectedAgenda || state.debateLoading}
-          >
-            {state.debateLoading ? '토론 진행 중' : '선택 후보로 토론 시작'}
-          </button>
-        </div>
       </section>
+      ) : null}
 
-      {(state.debateLoading || messages.length) ? (
+      {showStep2 ? (
         <section className="product-dev-section">
           <div className="product-dev-section-head">
             <span className="panel-kicker">Step 2</span>
@@ -2352,42 +2380,114 @@ function ProductDevelopmentWorkspace({
         </section>
       ) : null}
 
-      {final.new_product || improvements.length ? (
-        <section className="product-dev-section product-dev-final">
-          <div className="product-dev-section-head">
-            <span className="panel-kicker">Final</span>
-            <strong>최종 산출물: 신상품 + 기존 상품별 보완 로직</strong>
-          </div>
-          <div className="product-dev-final-grid">
-            <article className="product-dev-final-card is-new">
-              <span>신상품</span>
-              <strong>{newProduct.name || '신상품 초안'}</strong>
-              <p>{newProduct.target || '-'}</p>
-              <div className="product-dev-list">
-                {(newProduct.core_logic || []).map((item) => <em key={item}>{item}</em>)}
-                {newProduct.limit_rate_policy ? <em>{newProduct.limit_rate_policy}</em> : null}
-              </div>
-            </article>
-            <article className="product-dev-final-card">
-              <span>기존 상품 보완</span>
-              <strong>상품별 심사 로직 개선안</strong>
-              <div className="product-dev-improvement-list">
-                {improvements.map((item) => (
-                  <div key={`${item.product}-${item.change}`}>
-                    <b>{item.product}</b>
-                    <p>{item.change}</p>
-                    <small>{item.expected_effect} · {item.dev_impact}</small>
-                  </div>
-                ))}
-              </div>
-            </article>
-          </div>
-        </section>
+      {showStep2 && hasFinalResult ? (
+        <div className="product-dev-actions">
+          <button type="button" className="primary-button" onClick={() => setShowFinalModal(true)}>
+            최종 결과 상세 보기
+          </button>
+        </div>
       ) : null}
 
       <div className="product-dev-concept-row">
         {concepts.map((item) => <span key={item.id}>{item.icon} {item.label}</span>)}
       </div>
+      <AnimatePresence>
+        {typeof document !== 'undefined' && showFinalModal && hasFinalResult
+          ? createPortal(
+            <motion.div
+              className="prompt-modal-backdrop product-final-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowFinalModal(false)}
+            >
+              <motion.section
+                className="prompt-modal product-final-detail-modal"
+                initial={{ opacity: 0, y: 18, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.98 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="prompt-modal-head">
+                  <h3>{selectedAgendaType === 'new_product' ? '최종 산출물: 신상품 후보 2개' : '최종 산출물: 로직 보완안 2개'}</h3>
+                  <p>{state.selectedAgenda?.title || '선택 안건 기준 최종 결과'}</p>
+                </div>
+                <div className="product-final-detail-body">
+                  <section>
+                    <h4>{selectedAgendaType === 'logic_improvement' ? '보완 기준 요약' : '대표 신상품 요약'}</h4>
+                    <strong>{newProduct.name || '신상품 초안'}</strong>
+                    <p>{newProduct.target || '-'}</p>
+                    <div className="product-dev-list">
+                      {(newProduct.core_logic || []).map((item) => <em key={item}>{item}</em>)}
+                      {newProduct.limit_rate_policy ? <em>{newProduct.limit_rate_policy}</em> : null}
+                      {(newProduct.risk_guardrails || []).slice(0, 3).map((item) => <em key={item}>{item}</em>)}
+                    </div>
+                  </section>
+                  <section>
+                    <h4>{selectedAgendaType === 'new_product' ? '후보별 상세 비교' : '상품별 로직 보완 상세'}</h4>
+                    <div className="product-dev-improvement-list">
+                      {selectedAgendaType === 'new_product'
+                        ? newProductCandidates.slice(0, 2).map((item) => (
+                          <div key={`${item.name}-${item.target}`}>
+                            <b>{item.name}</b>
+                            <p>{item.target}</p>
+                            <small>{Array.isArray(item.core_logic) ? item.core_logic.join(' · ') : '-'}</small>
+                          </div>
+                        ))
+                        : improvements.slice(0, 2).map((item) => (
+                          <div key={`${item.product}-${item.change}`}>
+                            <b>{item.product}</b>
+                            <p>{item.change}</p>
+                            <small>{item.expected_effect} · {item.dev_impact}</small>
+                          </div>
+                        ))}
+                    </div>
+                  </section>
+                </div>
+                <div className="prompt-modal-actions">
+                  <button type="button" className="primary-button" onClick={handleCompleteFinal}>완료</button>
+                </div>
+              </motion.section>
+            </motion.div>,
+            document.body,
+          )
+          : null}
+        {showAgendaConfirmModal && agendaForConfirm ? (
+          <motion.div
+            className="prompt-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowAgendaConfirmModal(false)}
+          >
+            <motion.section
+              className="prompt-modal product-agenda-confirm-modal"
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="prompt-modal-head">
+                <h3>{isNewProductAgenda ? '신상품 후보 실행 안내' : '로직 보완 후보 실행 안내'}</h3>
+                <p>{agendaForConfirm.title || '선택한 후보'}</p>
+              </div>
+              <div className="product-agenda-confirm-body">
+                <p>{agendaForConfirm.summary || '-'}</p>
+                <small>{agendaForConfirm.target || '-'}</small>
+                <p>{agendaWhyDescription}</p>
+              </div>
+              <div className="prompt-modal-actions">
+                <button type="button" className="secondary-button" onClick={() => setShowAgendaConfirmModal(false)}>닫기</button>
+                <button type="button" className="primary-button" onClick={handleConfirmAgenda} disabled={state.debateLoading}>
+                  {state.debateLoading ? '진행 중' : '이 안건으로 STEP 2 시작'}
+                </button>
+              </div>
+            </motion.section>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </motion.article>
   );
 }
@@ -2445,21 +2545,7 @@ export default function OntologyWorkbench({
   const [memoNotes, setMemoNotes] = useState('');
   const [memoDepartmentNotes, setMemoDepartmentNotes] = useState({});
   const [showConceptModal, setShowConceptModal] = useState(false);
-  const [productDevelopmentState, setProductDevelopmentState] = useState({
-    loadingAgendas: false,
-    agendaError: '',
-    agendaPayload: null,
-    agendas: [],
-    source: '',
-    selectedAgenda: null,
-    debateLoading: false,
-    debateError: '',
-    debate: null,
-    debateSource: '',
-    debateJobId: '',
-    debateStage: '',
-    debateStageDetail: '',
-  });
+  const [productDevelopmentState, setProductDevelopmentState] = useState(INITIAL_PRODUCT_DEVELOPMENT_STATE);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [isRoniHovered, setIsRoniHovered] = useState(false);
   const [isNewsBadgeHovered, setIsNewsBadgeHovered] = useState(false);
@@ -2475,6 +2561,7 @@ export default function OntologyWorkbench({
   const [onboardingAnswers, setOnboardingAnswers] = useState({});
   const [onboardingFreeText, setOnboardingFreeText] = useState('');
   const [showNewsDetailModal, setShowNewsDetailModal] = useState(false);
+  const onboardingVantaRef = useRef(null);
   const [newsDetailState, setNewsDetailState] = useState({
     loading: false,
     error: '',
@@ -2555,6 +2642,52 @@ export default function OntologyWorkbench({
     }
     onDepartmentThemeChange?.(memoDepartment);
   }, [memoDepartment, onDepartmentThemeChange, showDepartmentOnboarding, onboardingDepartment]);
+
+  useEffect(() => {
+    const shouldShowClouds = showDepartmentOnboarding && onboardingStep === 'department';
+    if (!shouldShowClouds) {
+      if (onboardingVantaRef.current && typeof onboardingVantaRef.current.destroy === 'function') {
+        onboardingVantaRef.current.destroy();
+      }
+      onboardingVantaRef.current = null;
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const target = document.getElementById('department-onboarding-clouds');
+    if (!target || !window.VANTA || !window.VANTA.CLOUDS2) {
+      return;
+    }
+    if (onboardingVantaRef.current && typeof onboardingVantaRef.current.destroy === 'function') {
+      onboardingVantaRef.current.destroy();
+      onboardingVantaRef.current = null;
+    }
+    onboardingVantaRef.current = window.VANTA.CLOUDS2({
+      el: '#department-onboarding-clouds',
+      mouseControls: true,
+      touchControls: true,
+      gyroControls: false,
+      minHeight: 200.0,
+      minWidth: 200.0,
+      scale: 1.0,
+      scaleMobile: 1.0,
+      backgroundColor: 0xdfefff,
+      skyColor: 0x89bdf3,
+      cloudColor: 0xbde3ff,
+      cloudShadowColor: 0x6ea9df,
+      sunColor: 0xa8d9ff,
+      sunGlareColor: 0xc8ebff,
+      sunlightColor: 0x9ccff3,
+      speed: 0.8,
+    });
+    return () => {
+      if (onboardingVantaRef.current && typeof onboardingVantaRef.current.destroy === 'function') {
+        onboardingVantaRef.current.destroy();
+      }
+      onboardingVantaRef.current = null;
+    };
+  }, [showDepartmentOnboarding, onboardingStep]);
 
   const departmentConcepts = useMemo(() => {
     const concepts = {};
@@ -3595,6 +3728,11 @@ export default function OntologyWorkbench({
     }
   }
 
+  async function handleResetProductDevelopmentMode() {
+    setProductDevelopmentState(INITIAL_PRODUCT_DEVELOPMENT_STATE);
+    await handleLoadProductDevelopmentAgendas(true);
+  }
+
   useEffect(() => {
     if (!productDevelopmentState.debateLoading || !productDevelopmentState.debateJobId) {
       return undefined;
@@ -4317,6 +4455,7 @@ export default function OntologyWorkbench({
                   onSelectAgenda={handleSelectProductDevelopmentAgenda}
                   onStartDebate={handleStartProductDevelopmentDebate}
                   onOpenConcepts={() => setShowConceptModal(true)}
+                  onCompleteFinal={handleResetProductDevelopmentMode}
                 />
               ) : null}
               {!displayedConversationTurns.length && answerMode !== 'product' ? (
@@ -4890,6 +5029,7 @@ export default function OntologyWorkbench({
       <AnimatePresence>
         {showDepartmentOnboarding ? (
           <motion.div className="prompt-modal-backdrop department-onboarding-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => handleCloseOnboarding(true)}>
+            {onboardingStep === 'department' ? <div id="department-onboarding-clouds" className="department-onboarding-clouds" aria-hidden="true" /> : null}
             <motion.section className="prompt-modal department-onboarding-modal" initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
               <div className="department-onboarding-head">
                 <div>
@@ -4902,7 +5042,7 @@ export default function OntologyWorkbench({
               {onboardingStep === 'department' ? (
                 <div className="department-onboarding-character-grid">
                   {MEMO_DEPARTMENTS.map((department) => (
-                    <button key={department.id} type="button" className={`department-character-card ${onboardingDepartment === department.id ? 'active' : ''}`} onClick={() => { setOnboardingDepartment(department.id); onDepartmentThemeChange?.(department.id); }}>
+                    <button key={department.id} type="button" className={`department-character-card department-character-card-poker ${onboardingDepartment === department.id ? 'active' : ''}`} onClick={() => { setOnboardingDepartment(department.id); onDepartmentThemeChange?.(department.id); setOnboardingStep('mode'); }}>
                       <span aria-hidden="true">{department.icon}</span>
                       <strong>{department.label}</strong>
                       <p>{department.defaultConcept}</p>
@@ -4959,11 +5099,7 @@ export default function OntologyWorkbench({
                     }
                   }}>이전</button>
                 ) : <span />}
-                {onboardingStep === 'department' ? (
-                  <button type="button" className="primary-button" disabled={!onboardingDepartment} onClick={() => {
-                    setOnboardingStep('mode');
-                  }}>다음</button>
-                ) : null}
+                {onboardingStep === 'department' ? null : null}
                 {onboardingStep === 'mode' ? (
                   <button type="button" className="primary-button" onClick={() => {
                     setOnboardingQuestionIndex(0);

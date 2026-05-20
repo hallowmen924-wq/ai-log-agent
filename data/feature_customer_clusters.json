@@ -1,8 +1,8 @@
 {
   "meta": {
-    "built_at": "2026-05-20T08:19:29",
+    "built_at": "2026-05-20T18:29:54",
     "cache_version": 9,
-    "source_mtime_ns": 1779063695138587900,
+    "source_mtime_ns": 1779028148778816500,
     "record_count": 4732,
     "source_path": "data\\full_text_records.json",
     "income_band_thresholds": [

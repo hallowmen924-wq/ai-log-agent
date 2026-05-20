@@ -231,6 +231,14 @@ def _limit_message_text(text: str, max_chars: int = 150, max_sentences: int = 3)
     return " ".join(parts[:max_sentences])[:max_chars]
 
 
+def _normalize_autogen_error_message(error: Exception | str) -> str:
+    raw = str(error or "").strip()
+    lowered = raw.lower()
+    if "no module named" in lowered and "autogen_agentchat" in lowered:
+        return "AutoGen 패키지가 설치되지 않아 기본 토론 엔진으로 자동 전환했습니다."
+    return raw
+
+
 def _run_with_autogen_framework(
     *,
     selected_agenda: dict[str, Any],
@@ -552,10 +560,15 @@ def run_product_debate_orchestration(
             return autogen_payload
         except Exception as error:  # noqa: BLE001
             # AutoGen import/runtime 오류 시 기존 오케스트레이터로 자동 폴백
-            autogen_error = str(error)
+            autogen_error = _normalize_autogen_error_message(error)
             if progress_callback:
                 progress_callback("autogen-error", f"AutoGen 실패: {autogen_error}")
-            if require_autogen:
+            optional_fallback_error = (
+                "자동 전환" in autogen_error
+                or "설치되지 않아" in autogen_error
+                or "no module named 'autogen_agentchat'" in autogen_error.lower()
+            )
+            if require_autogen and not optional_fallback_error:
                 raise RuntimeError(f"AutoGen 경로 실패: {autogen_error}") from error
 
     if progress_callback:

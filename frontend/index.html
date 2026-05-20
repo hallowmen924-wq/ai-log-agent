@@ -6,7 +6,49 @@
     <title>AI 대출 심사</title>
   </head>
   <body>
+    <div id="vanta-bg" aria-hidden="true"></div>
     <div id="root"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="/vanta.waves.min.js"></script>
+    <script src="/vanta.clouds2.min.js"></script>
+    <script>
+      (function () {
+        function mountVanta() {
+          if (!window.VANTA || !window.THREE) return false;
+          var target = document.getElementById('vanta-bg');
+          if (!target) return false;
+          if (window.__vantaWavesEffect && typeof window.__vantaWavesEffect.destroy === 'function') {
+            window.__vantaWavesEffect.destroy();
+          }
+          window.__vantaWavesEffect = window.VANTA.WAVES({
+            el: '#vanta-bg',
+            mouseControls: true,
+            touchControls: true,
+            gyroControls: false,
+            minHeight: 200.0,
+            minWidth: 200.0,
+            scale: 1.0,
+            scaleMobile: 1.0,
+            color: 0x0c64af,
+            waveSpeed: 0.85,
+            zoom: 0.65
+          });
+          document.body.classList.add('vanta-enabled');
+          return true;
+        }
+
+        window.addEventListener('DOMContentLoaded', function () {
+          if (mountVanta()) return;
+          var retry = 0;
+          var timer = window.setInterval(function () {
+            retry += 1;
+            if (mountVanta() || retry > 40) {
+              window.clearInterval(timer);
+            }
+          }, 250);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
