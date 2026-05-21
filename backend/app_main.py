@@ -2983,7 +2983,8 @@ def _rule_based_query_intent(
     if _query_has_cluster_vector_intent(query):
         return "cluster_vector"
     if _query_asks_influence_features(query):
-        return "approval_factor"
+        # "영향 feature" 질문은 전략 시뮬레이션보다 군집/특성 분석 성격이 강하므로 cluster로 라우팅
+        return "cluster_vector"
     return ""
 
 
@@ -4407,10 +4408,13 @@ def _query_requires_strategy_simulation(query: str) -> bool:
         "금리", "한도", "dsr", "거절코드", "승인률", "승인율", "수익", "부실", "리스크",
         "전환", "심사기준", "대출", "상품",
     ]
-    return (
-        any(token in compact_query for token in scenario_markers)
-        and any(token in compact_query for token in business_markers)
+    has_counterfactual = any(token in compact_query for token in scenario_markers)
+    has_business_topic = any(token in compact_query for token in business_markers)
+    looks_like_feature_explain = (
+        any(token in compact_query for token in ["feature", "요인", "특징", "영향주는", "영향을주는"])
+        and not any(token in compact_query for token in ["시뮬레이션", "simulation", "whatif", "what-if", "전략"])
     )
+    return has_counterfactual and has_business_topic and not looks_like_feature_explain
 
 
 def _query_has_metric_intent(query: str) -> bool:

@@ -1,20 +1,20 @@
 {
   "status": "ok",
-  "detail": "문서 1건 분석 완료 · 벡터 1건 추가 · summary=disabled",
+  "detail": "문서 1건 분석 완료 · 벡터 7건 추가 · summary=disabled",
   "summary": "규제 문서를 벡터에 적재했습니다. (요약 생성 꺼짐)",
-  "updated_at": "2026-05-19T22:08:02",
+  "updated_at": "2026-05-21T12:18:54",
   "files": [
-    "251024_(보도참고) 규제지역 내 주택담보대출의 대환대출시 해당 주택담보대출 취급 시점의 LTV 규제비율을 적용합니다.pdf"
+    "[신용정보원] 마이데이터를 활용한 금리인하요구권 활성화 업무 운영기준_20260310.pdf"
   ],
-  "vector_count": 101,
-  "added_count": 1,
+  "vector_count": 108,
+  "added_count": 7,
   "summary_mode": "disabled",
   "regulation_upload_summary_enabled": false,
   "file_stats": [
     {
-      "name": "251024_(보도참고) 규제지역 내 주택담보대출의 대환대출시 해당 주택담보대출 취급 시점의 LTV 규제비율을 적용합니다.pdf",
-      "page_count": 1,
-      "chunk_count": 1,
+      "name": "[신용정보원] 마이데이터를 활용한 금리인하요구권 활성화 업무 운영기준_20260310.pdf",
+      "page_count": 7,
+      "chunk_count": 7,
       "status": "indexed"
     }
   ]

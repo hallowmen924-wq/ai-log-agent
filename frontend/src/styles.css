@@ -1030,6 +1030,7 @@ textarea {
     radial-gradient(circle at 16% 12%, rgba(103, 169, 255, 0.1), transparent 32%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(242, 248, 255, 0.86));
   box-shadow: 0 18px 42px rgba(72, 126, 168, 0.11);
+  min-height: min(520px, 56vh);
 }
 
 .workspace-tool-tabs {
@@ -1984,7 +1985,35 @@ textarea {
 }
 
 .ontology-chat-bubble-user {
-  background: linear-gradient(180deg, rgba(223, 238, 249, 0.96), rgba(213, 232, 246, 0.92));
+  background:
+    radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.36), transparent 36%),
+    linear-gradient(135deg, rgba(122, 197, 255, 0.55), rgba(62, 149, 236, 0.66));
+  border: 1px solid rgba(63, 143, 225, 0.42);
+  box-shadow: 0 10px 22px rgba(45, 121, 205, 0.2);
+  padding: 10px 14px;
+  gap: 6px;
+  border-radius: 16px;
+}
+
+.ontology-chat-role-with-avatar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ontology-chat-role-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.82rem;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.92), transparent 42%),
+    linear-gradient(180deg, rgba(227, 244, 255, 0.96), rgba(182, 225, 255, 0.98));
+  box-shadow: 0 4px 12px rgba(42, 112, 187, 0.22);
 }
 
 .ontology-chat-bubble-assistant {
@@ -3795,6 +3824,18 @@ textarea {
   border-color: rgba(255, 255, 255, 0.42);
   background: rgba(255, 255, 255, 0.86);
   color: #21679d;
+}
+
+.workspace-prompt-dock .ontology-example-toggle .prompt-lottie-icon {
+  display: none;
+}
+
+.workspace-prompt-dock .ontology-example-toggle::before {
+  content: '✨';
+  position: relative;
+  z-index: 2;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .workspace-prompt-dock .ontology-runtime-run {
@@ -6494,15 +6535,19 @@ textarea {
 
 .ontology-answer-keyword {
   position: relative;
-  display: inline-block;
+  display: inline;
   margin: 0 1px;
-  padding: 0 5px;
-  border-radius: 8px;
-  color: #0c4a68;
-  background: linear-gradient(180deg, rgba(208, 244, 255, 0.95), rgba(182, 232, 255, 0.86));
-  box-shadow: 0 0 0 1px rgba(81, 158, 210, 0.18), 0 6px 16px rgba(80, 157, 208, 0.12);
-  font-weight: 850;
-  animation: answerKeywordPop 0.52s ease both, answerKeywordGlow 2.8s ease-in-out infinite;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 800;
+  text-decoration-line: underline;
+  text-decoration-color: #e43b3b;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  animation: none;
 }
 
 .ontology-answer-keyword[data-tooltip]:not([data-tooltip=""]) {
@@ -6539,8 +6584,60 @@ textarea {
 }
 
 .ontology-runtime-answer-chip .ontology-answer-keyword {
-  padding: 0 4px;
-  border-radius: 7px;
+  padding: 0;
+  border-radius: 0;
+}
+
+.intent-explain-trigger {
+  margin-top: 8px;
+  margin-bottom: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1e5f93;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.intent-explain-trigger:hover {
+  color: #13486f;
+}
+
+.ontology-intent-modal .ontology-intent-modal-body {
+  display: grid;
+  gap: 12px;
+}
+
+.reason-chip.is-active {
+  border-color: rgba(57, 137, 214, 0.42);
+  background: linear-gradient(180deg, rgba(232, 247, 255, 0.96), rgba(206, 236, 255, 0.9));
+  color: #195176;
+}
+
+.ontology-intent-flow-card .intent-flow-diagram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ontology-intent-flow-card .intent-flow-node {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(103, 168, 219, 0.28);
+  background: rgba(243, 251, 255, 0.92);
+  color: #1f4f72;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ontology-intent-flow-card .intent-flow-arrow {
+  color: #4d82a9;
+  font-weight: 900;
 }
 
 .ontology-chat-cursor {
@@ -8221,6 +8318,10 @@ textarea {
   gap: 14px;
   max-width: 1760px;
   padding-left: 18px;
+  padding-bottom: 12px;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 @keyframes answerKeywordPop {
@@ -8234,6 +8335,9 @@ textarea {
 }
 
 .app-shell.loan-gpt-mode {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   background:
     radial-gradient(circle at 16% 12%, var(--immersive-glow-a), transparent 24%),
     radial-gradient(circle at 84% 16%, var(--immersive-glow-b), transparent 20%),
@@ -8278,23 +8382,7 @@ textarea {
 }
 
 .app-section-rail.immersive {
-  order: 2;
-  position: static;
-  width: min(1040px, calc(100% - var(--ontology-right-dock-width, 600px) - 40px));
-  margin: -4px auto 0;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(118px, 1fr);
-  align-items: stretch;
-  justify-items: stretch;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid rgba(103, 169, 214, 0.24);
-  border-radius: 22px;
-  background:
-    radial-gradient(circle at 12% 24%, rgba(97, 244, 222, 0.16), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(232, 246, 255, 0.9));
-  box-shadow: 0 18px 38px rgba(91, 139, 176, 0.14);
+  display: none;
 }
 
 .app-section-rail.immersive .rail-nav-button {

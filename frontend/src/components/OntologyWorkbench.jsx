@@ -2547,6 +2547,7 @@ export default function OntologyWorkbench({
   const [showConceptModal, setShowConceptModal] = useState(false);
   const [productDevelopmentState, setProductDevelopmentState] = useState(INITIAL_PRODUCT_DEVELOPMENT_STATE);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showIntentFlowModal, setShowIntentFlowModal] = useState(false);
   const [isRoniHovered, setIsRoniHovered] = useState(false);
   const [isNewsBadgeHovered, setIsNewsBadgeHovered] = useState(false);
   const [showRoniSuccess, setShowRoniSuccess] = useState(false);
@@ -3899,9 +3900,11 @@ export default function OntologyWorkbench({
       : '큐브와 군집을 함께 갱신';
   const runtimeToolMap = Object.fromEntries(runtimeToolCards.map((tool) => [String(tool?.id || '').toLowerCase(), tool]));
   const activeToolIds = new Set(runtimeToolCards.map((tool) => String(tool?.id || '').toLowerCase()).filter(Boolean));
-  const isStrategySimulationAnswer = activeToolIds.has('strategy')
-    || String(intentClassification?.intent || resultSummary.intent || '').toLowerCase() === 'strategy_simulation'
+  const compactQuestionText = String(currentQuestion || '').replace(/\s+/g, '').toLowerCase();
+  const isStrategyIntentRaw = String(intentClassification?.intent || resultSummary.intent || '').toLowerCase() === 'strategy_simulation'
     || String(outputCategoryLabel || '').toLowerCase() === 'strategy_simulation';
+  const isStrategyIntent = isStrategyIntentRaw;
+  const isStrategySimulationAnswer = activeToolIds.has('strategy') || isStrategyIntent;
   const hasRegulationCitations = (resolvedAnswerSummary?.citations || []).length > 0;
   const isRegulationGroundedAnswer = !isStrategySimulationAnswer && (
     hasRegulationCitations
@@ -3910,14 +3913,9 @@ export default function OntologyWorkbench({
   const workspaceToolTabs = hasResolvedRuntimeAnswer
     ? [
         { id: 'summary', label: '요약' },
-        !isRegulationGroundedAnswer
-        && !isEvidenceBlockedAnswer
-        && (activeToolIds.has('explainability') || runtimeToolCards.length > 0)
-          ? { id: 'insight', label: '상세 인사이트' }
-          : null,
         !isEvidenceBlockedAnswer && activeToolIds.has('policy') ? { id: 'policy', label: '정책/규제 영향' } : null,
         !isEvidenceBlockedAnswer
-        && (activeToolIds.has('strategy') || isStrategySimulationAnswer)
+        && isStrategyIntent
           ? { id: 'strategy', label: '상품 시뮬레이션' }
           : null,
       ].filter(Boolean)
@@ -3936,7 +3934,88 @@ export default function OntologyWorkbench({
     ...(clusterToolCard?.metrics || []).slice(0, 3),
     ...(insightToolCard?.metrics || []).slice(0, 2),
   ].slice(0, 4);
-  const compactQuestionText = String(currentQuestion || '').replace(/\s+/g, '').toLowerCase();
+  const normalizedIntent = String(intentClassification?.intent || resultSummary.intent || intentLabel || '').toLowerCase();
+  const intentInterpretationMessage = `질문을 '${intentLabel}${intentConfidence ? ` (${(intentConfidence * 100).toFixed(0)}%)` : ''}' intent로 해석했습니다.`;
+  const isRejectReasonIntent = (
+    compactQuestionText.includes('거절')
+    || compactQuestionText.includes('탈락')
+    || compactQuestionText.includes('reject')
+    || compactQuestionText.includes('decline')
+    || compactQuestionText.includes('사유')
+    || normalizedIntent.includes('reject')
+    || normalizedIntent.includes('decline')
+  );
+  const isRateLimitIntent = (
+    compactQuestionText.includes('금리')
+    || compactQuestionText.includes('한도')
+    || compactQuestionText.includes('승인')
+    || compactQuestionText.includes('평균')
+    || compactQuestionText.includes('분포')
+    || normalizedIntent.includes('rate')
+    || normalizedIntent.includes('limit')
+    || normalizedIntent.includes('approval')
+  );
+  const isClusterIntent = (
+    compactQuestionText.includes('군집')
+    || compactQuestionText.includes('클러스터')
+    || compactQuestionText.includes('segment')
+    || compactQuestionText.includes('벡터')
+    || normalizedIntent.includes('cluster')
+    || normalizedIntent.includes('segment')
+  );
+  const summaryToolPriority = isRegulationGroundedAnswer
+    ? ['policy', 'explainability', 'cluster']
+    : isRejectReasonIntent
+      ? ['explainability', 'cluster', 'policy']
+      : isClusterIntent
+        ? ['cluster', 'explainability', 'policy']
+        : isRateLimitIntent
+          ? ['cluster', 'explainability', 'policy']
+          : ['explainability', 'cluster', 'policy'];
+  const summaryToolMap = {
+    cluster: clusterToolCard,
+    explainability: insightToolCard,
+    policy: policyToolCard,
+  };
+  const prioritizedSummaryTools = summaryToolPriority
+    .map((key) => ({ key, tool: summaryToolMap[key] }))
+    .filter((item) => Boolean(item.tool));
+  const shouldPinExplainabilityInSummaryMain = Boolean(insightToolCard);
+  const prioritizedSummarySideTools = prioritizedSummaryTools.filter((item) => item.key !== 'explainability');
+  const summaryPriorityLabelMap = {
+    cluster: 'Cluster',
+    explainability: 'Explainability',
+    policy: 'Policy',
+  };
+  const summaryPriorityMessage = prioritizedSummaryTools.length
+    ? `TOOL AGENT 우선 노출: ${prioritizedSummaryTools.map((item) => summaryPriorityLabelMap[item.key]).join(' → ')}`
+    : 'TOOL AGENT 우선 노출: 연결된 카드가 없어 기본 요약만 표시합니다.';
+  const ruleIntentId = String(intentClassification?.rule_intent || '').trim();
+  const embeddingIntentId = String(intentClassification?.embedding_intent || '').trim();
+  const finalIntentId = String(intentClassification?.intent || resultSummary.intent || '').trim();
+  const intentDecisionReason = (() => {
+    const method = String(intentClassification?.method || '').toLowerCase();
+    if (method.includes('rule') && ruleIntentId) {
+      return `룰 매칭(${ruleIntentId})이 우선 적용되어 최종 intent(${finalIntentId || intentLabel})로 결정됐습니다.`;
+    }
+    if (method.includes('embedding') && embeddingIntentId) {
+      return `임베딩 유사도 상위 intent(${embeddingIntentId})가 임계치를 넘어 최종 intent로 선택됐습니다.`;
+    }
+    return `fallback 규칙에 따라 ${finalIntentId || intentLabel}로 처리됐습니다.`;
+  })();
+  const intentReasonChips = [
+    isRateLimitIntent ? '금리/한도/승인/분포 키워드 감지' : null,
+    isRejectReasonIntent ? '거절/탈락/사유 키워드 감지' : null,
+    isClusterIntent ? '군집/클러스터/세그먼트 키워드 감지' : null,
+    intentClassification?.method ? `분류 방식: ${intentClassification.method}` : null,
+  ].filter(Boolean);
+  const intentFlowCards = [
+    `질문 입력: ${currentQuestion || '-'}`,
+    `Intent 분류: ${intentLabel}${intentConfidence ? ` (${(intentConfidence * 100).toFixed(0)}%)` : ''}`,
+    `출력 카테고리: ${outputCategoryLabel}`,
+    summaryPriorityMessage,
+    `최종 답변 소스: ${currentAnswerSourceTag}`,
+  ];
   const activeProductDeptId = onboardingDepartment || memoDepartment || 'solution';
   const activeProductDept = MEMO_DEPARTMENTS.find((item) => item.id === activeProductDeptId) || MEMO_DEPARTMENTS[0];
   const activeProductDeptMemo = String(memoDepartmentNotes?.[activeProductDeptId] || '').trim();
@@ -4030,12 +4109,12 @@ export default function OntologyWorkbench({
             <span className="sample-pill">상품 {getProductDisplayName(selectedProductCode)}</span>
           </div>
           <div className="ontology-chat-action-buttons">
-            <PromptLottieActionButton
-              className={`secondary-button ontology-example-toggle ${showPromptExamples ? 'is-open' : ''}`}
-              ariaLabel={showPromptExamples ? '예시 닫기' : '예시 보기'}
-              title={showPromptExamples ? '예시 닫기' : '예시 보기'}
-              onClick={() => setShowPromptExamples((value) => !value)}
-            />
+              <PromptLottieActionButton
+                className={`secondary-button ontology-example-toggle ${showPromptExamples ? 'is-open' : ''}`}
+                ariaLabel={showPromptExamples ? '✨ 예시 닫기' : '✨ 예시 보기'}
+                title={showPromptExamples ? '✨ 예시 닫기' : '✨ 예시 보기'}
+                onClick={() => setShowPromptExamples((value) => !value)}
+              />
           </div>
         </div>
         <AnimatePresence>
@@ -4315,8 +4394,8 @@ export default function OntologyWorkbench({
                     <div className="ontology-chat-action-buttons">
                       <PromptLottieActionButton
                         className={`secondary-button ontology-example-toggle ${showPromptExamples ? 'is-open' : ''}`}
-                        ariaLabel={showPromptExamples ? '예시 닫기' : '예시 보기'}
-                        title={showPromptExamples ? '예시 닫기' : '예시 보기'}
+                        ariaLabel={showPromptExamples ? '✨ 예시 닫기' : '✨ 예시 보기'}
+                        title={showPromptExamples ? '✨ 예시 닫기' : '✨ 예시 보기'}
                         onClick={() => setShowPromptExamples((value) => !value)}
                       />
                       <PromptLottieActionButton
@@ -4444,7 +4523,10 @@ export default function OntologyWorkbench({
                       <div className="ontology-history-accordion-body">
                         <article className="ontology-chat-bubble ontology-chat-bubble-user ontology-chat-bubble-archived">
                           <div className="ontology-chat-meta-row">
-                            <span className="ontology-chat-role">User</span>
+                            <span className="ontology-chat-role-with-avatar">
+                              <span className="ontology-chat-role-avatar" aria-hidden="true">{activeProductDept.icon}</span>
+                              <span className="ontology-chat-role">부서원</span>
+                            </span>
                             <span className="sample-pill">{turn.timestamp}</span>
                           </div>
                           <strong>{turn.question}</strong>
@@ -4477,7 +4559,10 @@ export default function OntologyWorkbench({
                   <React.Fragment key={turn.id}>
                     <article className="ontology-chat-bubble ontology-chat-bubble-user">
                       <div className="ontology-chat-meta-row">
-                        <span className="ontology-chat-role">User</span>
+                        <span className="ontology-chat-role-with-avatar">
+                          <span className="ontology-chat-role-avatar" aria-hidden="true">{activeProductDept.icon}</span>
+                          <span className="ontology-chat-role">부서원</span>
+                        </span>
                         <span className="sample-pill">{turn.timestamp}</span>
                       </div>
                       <strong>{turn.question}</strong>
@@ -4510,11 +4595,22 @@ export default function OntologyWorkbench({
                                     <strong>
                                       <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '분석 요약을 준비했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
                                     </strong>
+                                    <button
+                                      type="button"
+                                      className="intent-explain-trigger"
+                                      onClick={() => setShowIntentFlowModal(true)}
+                                      title="인텐트 분류/카드 출력/질문 진행 흐름 보기"
+                                    >
+                                      {intentInterpretationMessage}
+                                    </button>
                                     <p>
                                       <HighlightedAnswerText text={finalAnswerBody || '핵심 결과를 실제 로그와 고객군집 기준으로 정리했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
                                     </p>
                                   </div>
                                 </article>
+                                {shouldPinExplainabilityInSummaryMain ? (
+                                  <FinancialToolCard tool={insightToolCard} />
+                                ) : null}
                                 <div className="workspace-summary-status-row">
                                   <span
                                     className={`ollama-call-icon ${ollamaWasCalled ? 'is-called' : 'is-skipped'}`}
@@ -4547,6 +4643,9 @@ export default function OntologyWorkbench({
                                     </div>
                                   </details>
                                 </div>
+                                <div className="detail-chip-row" style={{ marginTop: 8, marginBottom: 8 }}>
+                                  <span className="sample-pill">{summaryPriorityMessage}</span>
+                                </div>
                                 {/* K코드별 통계 표 노출 (summary 영역) */}
                                 {resolvedAnswerSummary?.top_reject_codes?.length ? (
                                   <div className="summary-reject-code-table" style={{ margin: '16px 0', overflowX: 'auto' }}>
@@ -4575,11 +4674,13 @@ export default function OntologyWorkbench({
                               </div>
                               {!isEvidenceBlockedAnswer ? (
                               <div className="workspace-summary-tools">
-                                {!isRegulationGroundedAnswer && strategyToolCard ? <FinancialToolCard tool={strategyToolCard} /> : null}
-                                {(isRegulationGroundedAnswer || !strategyToolCard) && policyToolCard ? <FinancialToolCard tool={policyToolCard} /> : null}
-                                {/* Customer Cluster Intelligence Card (군집 카드) */}
-                                {!isRegulationGroundedAnswer && !strategyToolCard && clusterToolCard ? <FinancialToolCard tool={clusterToolCard} collapseExploratoryVisuals={isAverageDistributionQuestion} /> : null}
-                                {!isRegulationGroundedAnswer && !strategyToolCard && insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
+                                {!isRegulationGroundedAnswer && isStrategyIntent && strategyToolCard ? <FinancialToolCard tool={strategyToolCard} /> : null}
+                                {(isRegulationGroundedAnswer || !isStrategyIntent || !strategyToolCard) && prioritizedSummarySideTools.map((item) => {
+                                  if (item.key === 'cluster') {
+                                    return <FinancialToolCard key="summary-tool-cluster" tool={item.tool} collapseExploratoryVisuals={isAverageDistributionQuestion} />;
+                                  }
+                                  return <FinancialToolCard key={`summary-tool-${item.key}`} tool={item.tool} />;
+                                })}
                                 {/* 군집/로그/지표가 없을 때 Explainability Agent 결과로 대체 */}
                                 {!isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
                                   !insightToolCard
@@ -4622,34 +4723,11 @@ export default function OntologyWorkbench({
 
                           {selectedWorkspaceResultTab === 'insight' ? (
                             <div className="workspace-insight-view">
-                              {insightToolCard ? <FinancialToolCard tool={insightToolCard} /> : null}
-                              {metricInsightItems.length ? (
-                                <div className="workspace-summary-metric-grid">
-                                  {metricInsightItems.map((item) => (
-                                    <div key={`insight-${item.label}-${item.value}`} className={`workspace-summary-metric is-${item.tone || 'neutral'}`}>
-                                      <span>{item.label}</span>
-                                      <strong>{item.value}</strong>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : null}
-                              <div className="workspace-insight-grid">
-                                <article>
-                                  <span>핵심 기준</span>
-                                  <strong>{topFeatureName}</strong>
-                                  <p>질문과 직접 연결된 feature, 실제 로그, 고객군집 결과를 우선해서 봅니다.</p>
-                                </article>
-                                <article>
-                                  <span>상위 고객군</span>
-                                  <strong>{resultTopCluster?.label || '군집 계산 결과'}</strong>
-                                  <p>{resultTopCluster ? `${resultTopCluster.decision || '-'} / ${resultTopCluster.age_band || '-'} / ${resultTopCluster.income_band || '-'}` : '답변과 연결된 고객군을 찾는 중입니다.'}</p>
-                                </article>
-                                <article>
-                                  <span>근거 건수</span>
-                                  <strong>{retrievalResults.length || resultSummary.record_count || '-'}건</strong>
-                                  <p>retrieval evidence와 고객군집 캐시에서 확인한 근거입니다.</p>
-                                </article>
-                              </div>
+                              <StrategyWorkspace
+                                panels={strategyPanels}
+                                workflow={agentWorkflow}
+                                semanticLayer={semanticFinancialLayer}
+                              />
                             </div>
                           ) : null}
 
@@ -4816,14 +4894,64 @@ export default function OntologyWorkbench({
                 );
               }) : null}
             </div>
-            {answerMode !== 'product' && hasResolvedRuntimeAnswer ? (
-              <StrategyWorkspace panels={strategyPanels} workflow={agentWorkflow} semanticLayer={semanticFinancialLayer} />
-            ) : null}
             {promptDock}
 
           </section>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showIntentFlowModal ? (
+          <motion.div className="prompt-modal-backdrop ontology-intent-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowIntentFlowModal(false)}>
+            <motion.section className="prompt-modal ontology-intent-modal" style={{ maxWidth: '920px', width: '100%' }} initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+              <div className="ontology-detail-modal-head">
+                <div>
+                  <div className="panel-kicker">Intent Explain</div>
+                  <h2>질문 분류와 카드 출력 흐름</h2>
+                  <p>왜 이 인텐트로 분류됐는지와, 어떤 카드가 어떤 순서로 나오는지 시각화합니다.</p>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => setShowIntentFlowModal(false)}>닫기</button>
+              </div>
+              <div className="ontology-intent-modal-body">
+                <article className="ontology-detail-card">
+                  <span>분류 결과</span>
+                  <strong>{intentLabel}{intentConfidence ? ` · ${(intentConfidence * 100).toFixed(0)}%` : ''}</strong>
+                  <p>{intentDecisionReason}</p>
+                  <div className="detail-chip-row">
+                    {ruleIntentId ? <span className="reason-chip">rule_intent: {ruleIntentId}</span> : null}
+                    {embeddingIntentId ? <span className="reason-chip">embedding_intent: {embeddingIntentId}</span> : null}
+                    <span className="reason-chip">final_intent: {finalIntentId || intentLabel}</span>
+                    {intentReasonChips.map((chip) => <span key={chip} className="reason-chip">{chip}</span>)}
+                    {(intentClassification?.top_candidates || []).slice(0, 4).map((item) => (
+                      <span key={`intent-candidate-${item.intent}`} className="reason-chip">{item.intent} {Number(item.score || 0).toFixed(2)}</span>
+                    ))}
+                  </div>
+                </article>
+                <article className="ontology-detail-card">
+                  <span>Intent 카테고리</span>
+                  <div className="detail-chip-row">
+                    <span className={`reason-chip ${isRateLimitIntent ? 'is-active' : ''}`}>금리/한도</span>
+                    <span className={`reason-chip ${isRejectReasonIntent ? 'is-active' : ''}`}>거절/탈락</span>
+                    <span className={`reason-chip ${isClusterIntent ? 'is-active' : ''}`}>군집/벡터</span>
+                    <span className={`reason-chip ${isRegulationGroundedAnswer ? 'is-active' : ''}`}>정책/규제</span>
+                  </div>
+                </article>
+                <article className="ontology-detail-card ontology-intent-flow-card">
+                  <span>질문 진행 그림</span>
+                  <div className="intent-flow-diagram">
+                    {intentFlowCards.map((step, index) => (
+                      <React.Fragment key={`intent-flow-${index}`}>
+                        <div className="intent-flow-node">{step}</div>
+                        {index < intentFlowCards.length - 1 ? <div className="intent-flow-arrow" aria-hidden="true">→</div> : null}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </article>
+              </div>
+            </motion.section>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showDetailModal ? (
