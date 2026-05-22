@@ -5525,6 +5525,11 @@ def _normalize_product_debate_final(
 
 
 def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
+    debate_timeout_sec = max(
+        12,
+        _env_int("PRODUCT_DEBATE_OLLAMA_TIMEOUT_SEC", max(wait_seconds + 3, 30), minimum=12),
+    )
+    debate_fail_fast_if_busy = _env_flag("PRODUCT_DEBATE_FAIL_FAST_IF_BUSY", False)
     acquired = PRODUCT_DEBATE_CALL_SEMAPHORE.acquire(timeout=max(1, wait_seconds))
     if not acquired:
         raise TimeoutError("상품개발 토론 호출이 혼잡하여 대기 중입니다. 잠시 후 다시 시도해 주세요.")
@@ -5532,9 +5537,9 @@ def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
         return str(
             lightweight_ollama_generate(
                 prompt,
-                timeout_seconds=max(wait_seconds + 3, 12),
-                fail_fast_if_busy=True,
-                priority_group="ontology",
+                timeout_seconds=debate_timeout_sec,
+                fail_fast_if_busy=debate_fail_fast_if_busy,
+                priority_group="product_debate",
             )
             or ""
         )
@@ -5584,7 +5589,7 @@ def _generate_product_development_debate(
     fallback = _fallback_product_debate(selected_agenda, context, concepts)
     personas = _build_department_persona_profiles()
     turn_wait_seconds = max(1, _env_int("PRODUCT_DEBATE_TURN_WAIT_SECONDS", 3, minimum=1))
-    max_turns = max(2, _env_int("PRODUCT_DEBATE_MAX_TURNS", _env_int("PRODUCT_DEBATE_MAX_ROUNDS", 2, minimum=2), minimum=2))
+    max_turns = max(1, _env_int("PRODUCT_DEBATE_MAX_TURNS", _env_int("PRODUCT_DEBATE_MAX_ROUNDS", 1, minimum=1), minimum=1))
     force_autogen = PRODUCT_DEBATE_FORCE_AUTOGEN if require_autogen is None else bool(require_autogen)
     if progress_callback:
         progress_callback("orchestration-start", "AutoGen 오케스트레이션을 시작합니다.")
@@ -7733,6 +7738,7 @@ def feature_ontology_product_development_debate_job_start(payload: dict[str, obj
             _update_product_debate_job(job_id, stage=stage, detail=str(detail or ""))
 
         try:
+            _progress("custom-start", "커스텀 토론 엔진을 시작합니다.")
             result = _generate_product_development_debate(
                 selected_agenda,
                 concepts,

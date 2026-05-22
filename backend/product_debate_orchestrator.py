@@ -204,6 +204,66 @@ def _prompt_final_synthesis(
 """.strip()
 
 
+def _prompt_single_call_synthesis(
+    selected_agenda: dict[str, Any],
+    concepts: list[dict[str, Any]],
+    fallback_final: dict[str, Any],
+) -> str:
+    compact_concepts = [
+        {
+            "id": str(item.get("id") or ""),
+            "name": str(item.get("name") or ""),
+            "concept": str(item.get("concept") or item.get("default_concept") or ""),
+        }
+        for item in list(concepts[:2])
+        if isinstance(item, dict)
+    ]
+    fallback_min = {
+        "new_product": {
+            "name": str(((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("name") or ""),
+            "target": str(((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("target") or ""),
+            "core_logic": list((((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("core_logic") or []))[:3],
+            "limit_rate_policy": str(((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("limit_rate_policy") or ""),
+            "risk_guardrails": list((((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("risk_guardrails") or []))[:3],
+        },
+        "kpis": list((fallback_final.get("kpis") if isinstance(fallback_final, dict) else []) or [])[:4],
+    }
+    agenda_min = {
+        "id": str(selected_agenda.get("id") or ""),
+        "title": str(selected_agenda.get("title") or ""),
+        "summary": str(selected_agenda.get("summary") or ""),
+        "target": str(selected_agenda.get("target") or ""),
+    }
+    return f"""
+금융 상품개발 결론 생성.
+반드시 JSON만 출력.
+
+안건:
+{json.dumps(agenda_min, ensure_ascii=False)}
+
+컨셉:
+{json.dumps(compact_concepts, ensure_ascii=False)}
+
+참고:
+{json.dumps(fallback_min, ensure_ascii=False)}
+
+출력 스키마:
+{{
+  "final": {{
+    "new_product": {{
+      "name": "",
+      "target": "",
+      "core_logic": ["", ""],
+      "limit_rate_policy": "",
+      "risk_guardrails": ["", ""]
+    }},
+    "implementation_plan": ["", ""],
+    "kpis": ["", ""]
+  }}
+}}
+""".strip()
+
+
 def _call_with_retry(
     llm_call: Callable[[str], str],
     prompt: str,
@@ -522,7 +582,8 @@ def run_product_debate_orchestration(
             progress_callback("memory-recall", f"롱텀메모리 회수 {len(memory_hits)}건 · {memory_elapsed_ms}ms")
         else:
             progress_callback("memory-disabled", "롱텀메모리 조회/주입 비활성화")
-    use_autogen = str(os.getenv("PRODUCT_DEBATE_USE_AUTOGEN", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    env_use_autogen = str(os.getenv("PRODUCT_DEBATE_USE_AUTOGEN", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    use_autogen = bool(require_autogen and env_use_autogen)
     autogen_error = ""
 
     def _append_memory_from_result(result_obj: dict[str, Any], consensus_score: float = 0.0) -> None:
@@ -598,8 +659,77 @@ def run_product_debate_orchestration(
     synthesis_retries = max(0, retries)
     early_stop_round = max(2, int(os.getenv("PRODUCT_DEBATE_EARLY_STOP_ROUND", "2") or 2))
     early_stop_threshold = float(os.getenv("PRODUCT_DEBATE_EARLY_STOP_THRESHOLD", "0.62") or 0.62)
+    single_call_mode = str(os.getenv("PRODUCT_DEBATE_SINGLE_CALL", "1")).strip().lower() in {"1", "true", "yes", "on"}
 
     try:
+        if single_call_mode:
+            if progress_callback:
+                progress_callback("custom-single-start", "싱글 콜 결론 모드를 시작합니다.")
+            single_prompt = _prompt_single_call_synthesis(
+                selected_agenda=selected_agenda,
+                concepts=concepts,
+                fallback_final=dict(fallback_result.get("final") or {}),
+            )
+            single_elapsed_ms = 0
+            parsed_final = {}
+            single_error = ""
+            if not _budget_exceeded(reserve_sec=0.0):
+                try:
+                    started = time.perf_counter()
+                    single_text = _call_with_retry(llm_call, single_prompt, retries=synthesis_retries)
+                    single_elapsed_ms = int((time.perf_counter() - started) * 1000)
+                    llm_traces.append({"agent": "SingleSynthesizer", "round": 1, "prompt": single_prompt, "response": single_text})
+                    payload = _safe_json_obj(parse_json, single_text)
+                    parsed_final = payload.get("final") if isinstance(payload.get("final"), dict) else {}
+                except Exception as single_call_error:  # noqa: BLE001
+                    single_error = str(single_call_error)
+            if parsed_final:
+                source = "orchestrator-ollama-single"
+            else:
+                parsed_final = dict(fallback_result.get("final") or {})
+            result = {
+                **fallback_result,
+                "selected_agenda": selected_agenda,
+                "messages": [
+                    {
+                        "speaker": "결론 정리 엔진",
+                        "tone": "moderator",
+                        "message": "싱글 콜로 최종 결론을 정리했습니다.",
+                    }
+                ],
+                "final": parsed_final,
+                "product_cards": list(fallback_result.get("product_cards") or []),
+                "concepts": concepts,
+                "orchestration": {
+                    "engine": "custom_single_call",
+                    "max_rounds": 1,
+                    "rounds_run": 1 if parsed_final else 0,
+                    "retries": retries,
+                    "consensus_history": [],
+                    "round_timings": [],
+                    "final_elapsed_ms": single_elapsed_ms,
+                    "total_elapsed_ms": single_elapsed_ms,
+                    "total_budget_sec": total_budget_sec,
+                    "budget_exceeded": _budget_exceeded(reserve_sec=0.0),
+                    "memory_hits": memory_hits,
+                },
+            }
+            if progress_callback:
+                progress_callback("completed", f"싱글 콜 결론 완료 ({single_elapsed_ms}ms)")
+            return {
+                "status": "ok",
+                "source": source,
+                "context": context,
+                "result": result,
+                "llm": {
+                    "model": "ollama",
+                    "mode": "custom_single_call",
+                    "autogen_error": autogen_error,
+                    "error": single_error,
+                    "traces": llm_traces[-5:],
+                },
+            }
+
         if progress_callback:
             progress_callback("custom-start", f"커스텀 토론 시작 · agents {len(personas)} · max_rounds {max(1, max_rounds)}")
         for round_index in range(max(1, max_rounds)):
@@ -818,6 +948,7 @@ def run_product_debate_orchestration(
     except Exception as error:  # noqa: BLE001
         if progress_callback:
             progress_callback("failed", f"커스텀 토론 오류: {str(error)}")
+        fallback_mode = "custom_single_call" if single_call_mode else "custom_orchestrator"
         return {
             "status": "ok",
             "source": "fallback",
@@ -825,7 +956,7 @@ def run_product_debate_orchestration(
             "result": fallback_result,
             "llm": {
                 "model": "ollama",
-                "mode": "custom_orchestrator",
+                "mode": fallback_mode,
                 "autogen_error": autogen_error,
                 "error": str(error),
             },

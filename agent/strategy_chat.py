@@ -28,6 +28,7 @@ OLLAMA_RUNTIME_STATE_LOCK = threading.RLock()
 OLLAMA_GPU_ENABLED = True
 ONTOLOGY_QUERY_PRIORITY_ENABLED = True
 _PENDING_ONTOLOGY_REQUESTS = 0
+_PENDING_PRODUCT_DEBATE_REQUESTS = 0
 
 DEFAULT_LOG_AGENT_PROMPT_TEMPLATE = """당신은 금융 심사 로그 분석가입니다.
 
@@ -92,8 +93,11 @@ def set_ontology_query_priority_enabled(enabled: bool) -> dict[str, bool]:
 
 
 def _begin_ontology_priority_scope(priority_group: str) -> bool:
-    global _PENDING_ONTOLOGY_REQUESTS
+    global _PENDING_ONTOLOGY_REQUESTS, _PENDING_PRODUCT_DEBATE_REQUESTS
     with OLLAMA_RUNTIME_STATE_LOCK:
+        if priority_group == "product_debate":
+            _PENDING_PRODUCT_DEBATE_REQUESTS += 1
+            return True
         if priority_group != "ontology" or not ONTOLOGY_QUERY_PRIORITY_ENABLED:
             return False
         _PENDING_ONTOLOGY_REQUESTS += 1
@@ -101,11 +105,14 @@ def _begin_ontology_priority_scope(priority_group: str) -> bool:
 
 
 def _end_ontology_priority_scope(enabled: bool) -> None:
-    global _PENDING_ONTOLOGY_REQUESTS
+    global _PENDING_ONTOLOGY_REQUESTS, _PENDING_PRODUCT_DEBATE_REQUESTS
     if not enabled:
         return
     with OLLAMA_RUNTIME_STATE_LOCK:
-        _PENDING_ONTOLOGY_REQUESTS = max(0, _PENDING_ONTOLOGY_REQUESTS - 1)
+        if _PENDING_PRODUCT_DEBATE_REQUESTS > 0:
+            _PENDING_PRODUCT_DEBATE_REQUESTS = max(0, _PENDING_PRODUCT_DEBATE_REQUESTS - 1)
+        else:
+            _PENDING_ONTOLOGY_REQUESTS = max(0, _PENDING_ONTOLOGY_REQUESTS - 1)
 
 
 def _has_pending_ontology_priority() -> bool:
@@ -113,11 +120,19 @@ def _has_pending_ontology_priority() -> bool:
         return bool(ONTOLOGY_QUERY_PRIORITY_ENABLED and _PENDING_ONTOLOGY_REQUESTS > 0)
 
 
+def _has_pending_product_debate_priority() -> bool:
+    with OLLAMA_RUNTIME_STATE_LOCK:
+        return _PENDING_PRODUCT_DEBATE_REQUESTS > 0
+
+
 def _build_lightweight_ollama_options() -> dict[str, Any]:
+    num_ctx = int(os.environ.get("OLLAMA_LIGHTWEIGHT_NUM_CTX", "1536") or 1536)
+    num_predict = int(os.environ.get("OLLAMA_LIGHTWEIGHT_NUM_PREDICT", "180") or 180)
+    temperature = float(os.environ.get("OLLAMA_LIGHTWEIGHT_TEMPERATURE", "0.1") or 0.1)
     options: dict[str, Any] = {
-        "num_ctx": 2048,
-        "num_predict": 360,
-        "temperature": 0.1,
+        "num_ctx": max(512, num_ctx),
+        "num_predict": max(64, num_predict),
+        "temperature": max(0.0, min(1.0, temperature)),
     }
     with OLLAMA_RUNTIME_STATE_LOCK:
         gpu_enabled = bool(OLLAMA_GPU_ENABLED)
@@ -169,8 +184,16 @@ def _ollama_generate(
         "workbench 응답은 fallback summary 로 먼저 표시하고, 잠시 뒤 다시 시도하세요."
     )
     priority_message = "[priority-busy] 온톨로지 질의가 우선 처리 중입니다. 현재 요청은 잠시 뒤 다시 시도하세요."
+    product_debate_priority_message = "[debate-busy] 상품개발 토론 결론 생성이 우선 처리 중입니다. 잠시 뒤 다시 시도하세요."
     priority_scope_enabled = _begin_ontology_priority_scope(priority_group)
     try:
+        if priority_group != "product_debate" and _has_pending_product_debate_priority():
+            if progress_callback is not None:
+                progress_callback(
+                    "failed",
+                    {"model": model, "error": product_debate_priority_message},
+                )
+            raise OllamaUnavailableError(product_debate_priority_message)
         if priority_group != "ontology" and _has_pending_ontology_priority():
             if progress_callback is not None:
                 progress_callback(

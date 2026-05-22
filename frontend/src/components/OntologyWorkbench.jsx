@@ -1779,6 +1779,7 @@ const INITIAL_PRODUCT_DEVELOPMENT_STATE = Object.freeze({
   debateJobId: '',
   debateStage: '',
   debateStageDetail: '',
+  debateTrace: [],
 });
 const DEPARTMENT_SURVEY_QUESTIONS = Object.freeze({
   solution: [
@@ -2326,7 +2327,7 @@ function resolveDebatePerson(message = {}) {
   return PRODUCT_DEBATE_PEOPLE.find((person) => person.tone === message.tone) || PRODUCT_DEBATE_PEOPLE[0];
 }
 
-function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null }) {
+function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null, stage = '', stageDetail = '', trace = [] }) {
   const [tick, setTick] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [typedCaption, setTypedCaption] = useState('');
@@ -2373,7 +2374,28 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
   const activePerson = resolveDebatePerson(stagedMessages[stagedMessages.length - 1] || {});
   const activeMessage = stagedMessages[stagedMessages.length - 1] || null;
   const agendaTitle = selectedAgenda?.title || '선택된 안건';
-  const thinkingLine = `${activePerson.name}가 ${loading ? '핵심 쟁점을 정리하며 고민 중' : '최종 의견을 마무리하는 중'}...`;
+  const stageText = String(stage || '').trim().toLowerCase();
+  const stageDetailText = String(stageDetail || '').trim();
+  const stageFallbackLabelMap = {
+    queued: '토론 작업을 큐에 등록했습니다.',
+    'custom-start': '커스텀 토론 엔진을 시작했습니다.',
+    'custom-round': '라운드를 시작하고 부서 발언을 수집 중입니다.',
+    'custom-agent': '부서 에이전트 응답을 생성 중입니다.',
+    'custom-agent-done': '부서 에이전트 응답이 완료되었습니다.',
+    'custom-moderator': '모더레이터가 합의안을 정리 중입니다.',
+    'custom-moderator-done': '모더레이터 합의 정리가 완료되었습니다.',
+    'custom-final': '최종 결론 JSON을 생성 중입니다.',
+    'custom-final-done': '최종 결론 JSON 생성이 완료되었습니다.',
+    'custom-single-start': '싱글 콜 결론 모드를 시작했습니다.',
+    'network-retry': '상태 조회 연결을 재시도 중입니다.',
+    stalled: '진행 신호가 지연되어 상태를 재확인 중입니다.',
+    completed: '토론이 완료되었습니다.',
+    failed: '토론 생성 중 오류가 발생했습니다.',
+  };
+  const stageFallbackLabel = stageFallbackLabelMap[stageText] || '';
+  const thinkingLine = loading
+    ? (stageDetailText || stageFallbackLabel || `서버 응답을 기다리는 중입니다... (${elapsedSec}s)`)
+    : `${activePerson.name}가 최종 의견을 마무리하는 중...`;
   const speakerSoftLine = loading
     ? `지금은 ${activePerson.name}(${activePerson.department})가 차분하게 의견을 설명하고 있어요.`
     : `${activePerson.name}(${activePerson.department})가 최종 발언을 정리했어요.`;
@@ -2473,6 +2495,21 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
           <span className="product-debate-thinking-dot" aria-hidden="true" />
           <strong>Live Thought</strong>
           <p>{thinkingLine}</p>
+        </div>
+        <div className="product-debate-thinking">
+          <span className="product-debate-thinking-dot" aria-hidden="true" />
+          <strong>Latency Trace</strong>
+          {trace.length ? (
+            <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+              {trace.slice(-5).map((item, index) => (
+                <li key={`${item.stage || 'stage'}-${index}`} style={{ fontSize: 12, lineHeight: 1.45 }}>
+                  {item.label || item.stage || 'step'}{item.elapsedMs ? ` · ${item.elapsedMs}ms` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>호출 시간 수집 중...</p>
+          )}
         </div>
       </div>
     </div>
@@ -2662,7 +2699,14 @@ function ProductDevelopmentWorkspace({
             <span className="panel-kicker">Step 2</span>
             <strong>{state.debateLoading ? '4개 부서 실시간 회의' : '4개 부서 토론'}</strong>
           </div>
-          <ProductDebateMeetingRoom loading={state.debateLoading} messages={messages} selectedAgenda={state.selectedAgenda} />
+          <ProductDebateMeetingRoom
+            loading={state.debateLoading}
+            messages={messages}
+            selectedAgenda={state.selectedAgenda}
+            stage={state.debateStage}
+            stageDetail={state.debateStageDetail}
+            trace={state.debateTrace}
+          />
         </section>
       ) : null}
 
@@ -3963,6 +4007,7 @@ export default function OntologyWorkbench({
       debateJobId: '',
       debateStage: 'queued',
       debateStageDetail: '토론 작업을 준비하고 있습니다.',
+      debateTrace: [],
     }));
     try {
       const job = await startProductDevelopmentDebateJob({
@@ -3977,7 +4022,8 @@ export default function OntologyWorkbench({
         ...previous,
         debateJobId: jobId,
         debateStage: 'queued',
-        debateStageDetail: 'AutoGen 토론 작업이 시작되었습니다.',
+        debateStageDetail: '토론 작업이 시작되었습니다.',
+        debateTrace: [],
       }));
     } catch (error) {
       setProductDevelopmentState((previous) => ({
@@ -3999,24 +4045,92 @@ export default function OntologyWorkbench({
     }
     let cancelled = false;
     let transientFailureCount = 0;
+    let lastProgressFingerprint = '';
+    let lastProgressAt = Date.now();
     const maxTransientFailures = 8;
+    const pollStartedAt = Date.now();
+    const maxPollingMs = 180000;
     const poll = async () => {
       try {
+        if (Date.now() - pollStartedAt > maxPollingMs) {
+          setProductDevelopmentState((previous) => ({
+            ...previous,
+            debateLoading: false,
+            debateError: `토론 진행 시간이 ${Math.round(maxPollingMs / 1000)}초를 초과했습니다. 마지막 단계: ${previous.debateStage || 'unknown'} · ${previous.debateStageDetail || '상세 없음'}`,
+          }));
+          return;
+        }
         const statusPayload = await fetchProductDevelopmentDebateJob(productDevelopmentState.debateJobId);
         if (cancelled) {
           return;
         }
         transientFailureCount = 0;
-        const nextStatus = String(statusPayload?.status || '').toLowerCase();
-        const stage = String(statusPayload?.stage || '');
-        const detail = String(statusPayload?.detail || '');
+        const nextStatus = String(
+          statusPayload?.status
+          || statusPayload?.job_status
+          || statusPayload?.job?.status
+          || '',
+        ).toLowerCase();
+        const stage = String(
+          statusPayload?.stage
+          || statusPayload?.job_stage
+          || statusPayload?.job?.stage
+          || '',
+        );
+        const detail = String(
+          statusPayload?.detail
+          || statusPayload?.job_detail
+          || statusPayload?.job?.detail
+          || '',
+        );
+        const fingerprint = `${nextStatus}::${stage}::${detail}`;
+        if (fingerprint !== lastProgressFingerprint) {
+          lastProgressFingerprint = fingerprint;
+          lastProgressAt = Date.now();
+        } else if (Date.now() - lastProgressAt > 45000) {
+          setProductDevelopmentState((previous) => ({
+            ...previous,
+            debateStage: previous.debateStage || 'stalled',
+            debateStageDetail: `진행 신호가 45초 이상 갱신되지 않았습니다. 현재 단계(${stage || 'unknown'})를 재확인 중입니다...`,
+            debateTrace: [
+              ...(Array.isArray(previous.debateTrace) ? previous.debateTrace : []),
+              {
+                stage: 'stalled',
+                detail: `진행 신호 지연 (45s+) · ${stage || 'unknown'}`,
+                label: `진행 신호 지연 (45s+) · ${stage || 'unknown'}`,
+                elapsedMs: 0,
+                at: Date.now(),
+              },
+            ].slice(-5),
+          }));
+        }
         setProductDevelopmentState((previous) => ({
           ...previous,
           debateStage: stage,
           debateStageDetail: detail,
+          debateTrace: (() => {
+            const prevTrace = Array.isArray(previous.debateTrace) ? previous.debateTrace : [];
+            const last = prevTrace[prevTrace.length - 1] || null;
+            const changed = !last || String(last.stage || '') !== stage || String(last.detail || '') !== detail;
+            if (!changed) {
+              return prevTrace;
+            }
+            const match = detail.match(/(\d+)\s*ms/i);
+            const elapsedMs = match ? Number(match[1]) : 0;
+            const nextItem = {
+              stage,
+              detail,
+              label: detail || stage || 'step',
+              elapsedMs,
+              at: Date.now(),
+            };
+            return [...prevTrace, nextItem].slice(-5);
+          })(),
         }));
         if (nextStatus === 'completed') {
           const payload = statusPayload?.result || null;
+          const isFallback = String(payload?.source || '').toLowerCase().includes('fallback');
+          const llmErrorText = String(payload?.llm?.error || '').trim();
           setProductDevelopmentState((previous) => ({
             ...previous,
             debateLoading: false,
@@ -4027,10 +4141,12 @@ export default function OntologyWorkbench({
           onToast?.({
             id: `product-dev-debate-${Date.now()}`,
             kicker: '4-Department Debate',
-            title: '상품개발 토론 완료',
-            meta: payload?.source?.includes('autogen') ? 'AutoGen 경로 완료' : '토론 완료',
-            message: '신상품 제안과 기존 상품별 보완 로직을 함께 정리했습니다.',
-            tone: 'completed',
+            title: isFallback ? '상품개발 토론 fallback 완료' : '상품개발 토론 완료',
+            meta: isFallback ? 'LLM timeout/지연으로 fallback 결과를 사용했습니다.' : (payload?.source?.includes('autogen') ? 'AutoGen 경로 완료' : '토론 완료'),
+            message: isFallback
+              ? (llmErrorText || 'Ollama 응답 지연으로 기본 결론 템플릿을 사용했습니다.')
+              : '신상품 제안과 기존 상품별 보완 로직을 함께 정리했습니다.',
+            tone: isFallback ? 'warning' : 'completed',
           });
           return;
         }
