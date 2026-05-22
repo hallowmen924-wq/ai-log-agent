@@ -13,6 +13,7 @@
     "@rive-app/react-canvas": "^4.28.4",
     "autoprefixer": "^10.5.0",
     "buffer": "^6.0.3",
+    "cytoscape": "^3.33.4",
     "framer-motion": "^12.12.1",
     "openai": "^6.37.0",
     "plotly.js": "^3.0.1",

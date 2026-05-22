@@ -278,6 +278,10 @@ def _run_with_autogen_framework(
     system_prompt_chars = 0
     if progress_callback:
         progress_callback("autogen-personas", "부서별 에이전트 페르소나를 구성합니다.")
+    concept_limit = min(5, max(3, int(os.getenv("PRODUCT_DEBATE_CONCEPT_LIMIT", "4") or 4)))
+    history_limit = min(4, max(2, int(os.getenv("PRODUCT_DEBATE_HISTORY_LIMIT", "3") or 3)))
+    history_char_limit = min(260, max(120, int(os.getenv("PRODUCT_DEBATE_HISTORY_CHAR_LIMIT", "180") or 180)))
+
     for persona in personas:
         name = str(persona.get("name") or persona.get("department") or "Agent")
         role = str(persona.get("role") or "")
@@ -292,7 +296,7 @@ def _run_with_autogen_framework(
             f"판단 제약: {constraints}\n"
             "부서 관점 의견을 간결하게 제시하라."
         )
-        sys_msg = f"{sys_msg}\n반드시 JSON만 출력하고, message는 최대 3문장/150자 이내로 유지하라."
+        sys_msg = f"{sys_msg}\n반드시 JSON만 출력하고, message는 최대 2문장/90자 이내로 유지하라."
         system_prompt_chars += len(sys_msg)
         agents.append(AssistantAgent(name=name, model_client=model_client, system_message=sys_msg))
 
@@ -308,11 +312,13 @@ def _run_with_autogen_framework(
     )
 
     max_turns = len(agents)
+    condensed_concepts = list(concepts[:concept_limit])
+    condensed_memory_hits = list(memory_hits[:3])
 
     kickoff = (
         f"[안건] {json.dumps(selected_agenda, ensure_ascii=False)}\n"
-        f"[관련 컨셉] {json.dumps(concepts[:8], ensure_ascii=False)}\n"
-        f"[장기기억 히트] {json.dumps(memory_hits, ensure_ascii=False)}\n"
+        f"[관련 컨셉] {json.dumps(condensed_concepts, ensure_ascii=False)}\n"
+        f"[장기기억 히트] {json.dumps(condensed_memory_hits, ensure_ascii=False)}\n"
         "각 부서는 리스크/기대효과를 제시하고, Moderator는 FINAL_JSON으로 합의안을 제시하라."
     )
 
@@ -321,9 +327,9 @@ def _run_with_autogen_framework(
         kickoff = "\n".join(line for line in kickoff.splitlines() if "[]" not in line)
     autogen_timeout_sec = float(os.getenv("PRODUCT_DEBATE_AUTOGEN_TIMEOUT_SEC", "90") or 90)
     kickoff_chars = len(kickoff)
-    context_chars = _json_char_len(concepts[:8])
+    context_chars = _json_char_len(condensed_concepts)
     agenda_chars = _json_char_len(selected_agenda)
-    memory_chars = _json_char_len(memory_hits)
+    memory_chars = _json_char_len(condensed_memory_hits)
     setup_elapsed_ms = int((time.perf_counter() - function_started) * 1000)
 
     if progress_callback:
@@ -333,6 +339,8 @@ def _run_with_autogen_framework(
         )
     autogen_started = time.perf_counter()
     agent_timeout_sec = float(os.getenv("PRODUCT_DEBATE_AGENT_TIMEOUT_SEC", "30") or 30)
+    # Keep global timeout above sequential per-agent budget to avoid premature abort.
+    autogen_timeout_sec = max(autogen_timeout_sec, (len(agents) * max(4.0, agent_timeout_sec)) + 8.0)
 
     async def _run_agents_sequentially() -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -344,9 +352,9 @@ def _run_with_autogen_framework(
                     kickoff,
                     "",
                     "[이전 부서 발언]",
-                    json.dumps(previous_messages[-6:], ensure_ascii=False),
+                    json.dumps(previous_messages[-history_limit:], ensure_ascii=False),
                     "",
-                    "이번 차례의 부서 관점만 짧게 답하세요. Moderator는 마지막에 FINAL_JSON을 포함하세요.",
+                    "이번 차례의 부서 관점만 매우 짧게 답하세요(최대 2문장/90자). Moderator는 마지막에 FINAL_JSON을 포함하세요.",
                 ]
             )
             if progress_callback:
@@ -360,12 +368,20 @@ def _run_with_autogen_framework(
                     agent.run(task=task, output_task_messages=False),
                     timeout=max(4.0, agent_timeout_sec),
                 )
-            except asyncio.TimeoutError as error:
-                raise TimeoutError(
-                    f"AutoGen agent timeout: {agent_name} after {agent_timeout_sec:.1f}s "
-                    f"(call={index + 1}/{len(agents)}, kickoff_chars={kickoff_chars}, "
-                    f"system_prompt_chars={system_prompt_chars}, memory_chars={memory_chars})"
-                ) from error
+            except asyncio.TimeoutError:
+                if progress_callback:
+                    progress_callback(
+                        "autogen-agent-timeout",
+                        f"{agent_name} timeout ({agent_timeout_sec:.0f}s) · 다음 에이전트로 진행",
+                    )
+                elapsed_ms = int((time.perf_counter() - call_started) * 1000)
+                timeout_note = (
+                    f"[timeout] {agent_name} did not return in {agent_timeout_sec:.1f}s "
+                    f"(call={index + 1}/{len(agents)})"
+                )
+                rows.append({"agent": agent_name, "response": timeout_note, "elapsed_ms": elapsed_ms})
+                previous_messages.append({"speaker": agent_name, "message": timeout_note})
+                continue
             elapsed_ms = int((time.perf_counter() - call_started) * 1000)
             contents: list[str] = []
             for msg in list(getattr(result, "messages", None) or []):
@@ -374,7 +390,7 @@ def _run_with_autogen_framework(
                     contents.append(text)
             content = "\n".join(contents).strip()
             rows.append({"agent": agent_name, "response": content, "elapsed_ms": elapsed_ms})
-            previous_messages.append({"speaker": agent_name, "message": content[:700]})
+            previous_messages.append({"speaker": agent_name, "message": content[:history_char_limit]})
         return rows
 
     try:
@@ -487,7 +503,7 @@ def run_product_debate_orchestration(
     require_autogen: bool = False,
     progress_callback: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    max_agents = max(1, int(os.getenv("PRODUCT_DEBATE_MAX_AGENTS", "3") or 3))
+    max_agents = min(3, max(1, int(os.getenv("PRODUCT_DEBATE_MAX_AGENTS", "3") or 3)))
     personas = list(personas or [])[:max_agents]
     started_at = time.perf_counter()
     total_budget_sec = float(os.getenv("PRODUCT_DEBATE_TOTAL_BUDGET_SEC", "35") or 35)
@@ -584,15 +600,24 @@ def run_product_debate_orchestration(
     early_stop_threshold = float(os.getenv("PRODUCT_DEBATE_EARLY_STOP_THRESHOLD", "0.62") or 0.62)
 
     try:
+        if progress_callback:
+            progress_callback("custom-start", f"커스텀 토론 시작 · agents {len(personas)} · max_rounds {max(1, max_rounds)}")
         for round_index in range(max(1, max_rounds)):
             if _budget_exceeded(reserve_sec=3.0):
                 break
+            if progress_callback:
+                progress_callback("custom-round", f"라운드 {round_index + 1} 시작 · 부서 발언 수집 중")
             round_start = time.perf_counter()
             call_timings: list[dict[str, Any]] = []
             random.shuffle(personas)
             for persona in personas:
                 if _budget_exceeded(reserve_sec=2.0):
                     break
+                if progress_callback:
+                    progress_callback(
+                        "custom-agent",
+                        f"라운드 {round_index + 1} · {str(persona.get('name') or persona.get('department') or 'Agent')} 응답 생성 중",
+                    )
                 persona_prompt = _prompt_persona_turn(
                     persona=persona,
                     selected_agenda=selected_agenda,
@@ -600,7 +625,7 @@ def run_product_debate_orchestration(
                     transcript=transcript,
                     round_index=round_index,
                 )
-                persona_prompt = f"{persona_prompt}\n추가 규칙: message는 최대 3문장/150자."
+                persona_prompt = f"{persona_prompt}\n추가 규칙: message는 최대 2문장/90자."
                 persona_call_started = time.perf_counter()
                 persona_text = _call_with_retry(llm_call, persona_prompt, retries=persona_retries)
                 call_timings.append(
@@ -610,9 +635,15 @@ def run_product_debate_orchestration(
                         "elapsed_ms": int((time.perf_counter() - persona_call_started) * 1000),
                     }
                 )
+                if progress_callback and call_timings:
+                    last = call_timings[-1]
+                    progress_callback(
+                        "custom-agent-done",
+                        f"라운드 {round_index + 1} · {last.get('agent')} 완료 ({int(last.get('elapsed_ms') or 0)}ms)",
+                    )
                 llm_traces.append({"agent": persona.get("name"), "round": round_index + 1, "prompt": persona_prompt, "response": persona_text})
                 obj = _safe_json_obj(parse_json, persona_text)
-                message = _limit_message_text(str(obj.get("message") or "").strip(), max_chars=150, max_sentences=3) or "관점 의견을 보완 중입니다."
+                message = _limit_message_text(str(obj.get("message") or "").strip(), max_chars=90, max_sentences=2) or "관점 의견을 보완 중입니다."
                 transcript.append(
                     {
                         "speaker": str(persona.get("name") or persona.get("department") or "부서"),
@@ -634,6 +665,8 @@ def run_product_debate_orchestration(
                 max_rounds=max_rounds,
             )
             moderator_prompt = f"{moderator_prompt}\n추가 규칙: summary는 최대 2문장."
+            if progress_callback:
+                progress_callback("custom-moderator", f"라운드 {round_index + 1} · 모더레이터 합의 정리 중")
             if _budget_exceeded(reserve_sec=1.0):
                 round_timings.append(
                     {
@@ -653,6 +686,12 @@ def run_product_debate_orchestration(
                     "elapsed_ms": int((time.perf_counter() - moderator_call_started) * 1000),
                 }
             )
+            if progress_callback and call_timings:
+                last = call_timings[-1]
+                progress_callback(
+                    "custom-moderator-done",
+                    f"라운드 {round_index + 1} · 모더레이터 완료 ({int(last.get('elapsed_ms') or 0)}ms)",
+                )
             llm_traces.append({"agent": "Moderator", "round": round_index + 1, "prompt": moderator_prompt, "response": moderator_text})
             moderator_obj = _safe_json_obj(parse_json, moderator_text)
             consensus_score = float(moderator_obj.get("consensus_score") or 0.0)
@@ -694,12 +733,16 @@ def run_product_debate_orchestration(
             fallback_final=dict(fallback_result.get("final") or {}),
         )
         final_prompt = f"{final_prompt}\n추가 규칙: JSON 이외 설명 최소화."
+        if progress_callback:
+            progress_callback("custom-final", "최종 합의안 JSON 생성 중")
         final_elapsed_ms = 0
         parsed_final = {}
         if not _budget_exceeded(reserve_sec=0.0):
             final_call_started = time.perf_counter()
             final_text = _call_with_retry(llm_call, final_prompt, retries=synthesis_retries)
             final_elapsed_ms = int((time.perf_counter() - final_call_started) * 1000)
+            if progress_callback:
+                progress_callback("custom-final-done", f"최종 합의안 생성 완료 ({final_elapsed_ms}ms)")
             llm_traces.append({"agent": "FinalSynthesizer", "round": len(consensus_history), "prompt": final_prompt, "response": final_text})
             final_obj = _safe_json_obj(parse_json, final_text)
             parsed_final = final_obj.get("final") if isinstance(final_obj.get("final"), dict) else {}
@@ -758,6 +801,8 @@ def run_product_debate_orchestration(
                 }
             )
 
+        if progress_callback:
+            progress_callback("completed", f"커스텀 토론 완료 · rounds {len(consensus_history)}")
         return {
             "status": "ok",
             "source": source,
@@ -771,6 +816,8 @@ def run_product_debate_orchestration(
             },
         }
     except Exception as error:  # noqa: BLE001
+        if progress_callback:
+            progress_callback("failed", f"커스텀 토론 오류: {str(error)}")
         return {
             "status": "ok",
             "source": "fallback",

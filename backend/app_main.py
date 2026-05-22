@@ -87,6 +87,7 @@ from backend.evidence_guard import (
 )
 from backend.worker import worker
 from backend.product_debate_orchestrator import run_product_debate_orchestration
+from backend.neo4j_store import Neo4jGraphStore
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, Response
 import asyncio
@@ -506,6 +507,7 @@ _intent_embedding_cache: dict[str, object] = {
     "matrix": None,
 }
 _intent_embedding_cache_lock = threading.Lock()
+_neo4j_graph_store = Neo4jGraphStore()
 
 WORKBENCH_RUNTIME_STAGES = [
     {
@@ -7180,7 +7182,19 @@ def _build_feature_workbench_payload(
     if job_id:
         _update_workbench_job(job_id, "faiss", "running", "고객군집 캐시와 cluster 후보를 계산합니다.")
     customer_cluster_cache = _load_or_build_customer_cluster_cache(records)
-    customer_clusters = _build_customer_clusters(records, selected_product, query=query, selected_feature=selected_feature, representative_features=representative_features)
+    graph_decision_focus = _extract_decision_focus(query)
+    graph_clusters = _neo4j_graph_store.query_customer_clusters(
+        selected_product=selected_product,
+        decision_focus=graph_decision_focus,
+        limit=20,
+    )
+    customer_clusters = _build_customer_clusters(
+        graph_clusters or records,
+        selected_product,
+        query=query,
+        selected_feature=selected_feature,
+        representative_features=representative_features,
+    )
     # profiles를 넘겨서 중복 변환 방지
     reject_code_summary = _build_reject_code_distribution(profiles, selected_product, query, limit=3)
     if job_id:
@@ -7188,7 +7202,23 @@ def _build_feature_workbench_payload(
 
     if job_id:
         _update_workbench_job(job_id, "retrieval", "running", "관련 레코드와 retrieval 결과를 생성합니다.")
-    retrieval_results = _build_retrieval_results(records, selected_product, query, selected_feature, representative_features=representative_features)
+    representative_feature_ids_for_graph = [
+        str(item.get("feature_id") or "").strip()
+        for item in representative_features
+        if str(item.get("feature_id") or "").strip()
+    ][:8]
+    graph_retrieval_results = _neo4j_graph_store.query_records_by_feature(
+        selected_product=selected_product,
+        feature_ids=representative_feature_ids_for_graph,
+        limit=6,
+    )
+    retrieval_results = graph_retrieval_results or _build_retrieval_results(
+        records,
+        selected_product,
+        query,
+        selected_feature,
+        representative_features=representative_features,
+    )
     representative_feature_ids = [
         str(item.get("feature_id") or "").strip()
         for item in representative_features
@@ -7706,7 +7736,7 @@ def feature_ontology_product_development_debate_job_start(payload: dict[str, obj
             result = _generate_product_development_debate(
                 selected_agenda,
                 concepts,
-                require_autogen=True,
+                require_autogen=False,
                 progress_callback=_progress,
             )
             _update_product_debate_job(
@@ -7745,7 +7775,7 @@ def feature_ontology_product_development_debate(payload: dict[str, object] = Bod
     if not isinstance(selected_agenda, dict):
         raise HTTPException(status_code=400, detail="selected_agenda is required")
     concepts = _normalize_department_concepts(payload.get("department_concepts") or payload.get("concepts") or {})
-    return _generate_product_development_debate(selected_agenda, concepts, require_autogen=True)
+    return _generate_product_development_debate(selected_agenda, concepts, require_autogen=False)
 
 
 @app.post("/feature-ontology/ollama")
@@ -8091,12 +8121,32 @@ def health() -> dict:
             "detail": "Set HEALTH_CHECK_OLLAMA=1 or call /health/ollama for a live Ollama probe.",
         }
     )
+    snapshot["neo4j_graph"] = _neo4j_graph_store.health()
     return {"status": "ok", "worker_running": worker.running, **snapshot}
 
 
 @app.get("/health/ollama")
 def health_ollama() -> dict[str, object]:
     return _probe_ollama_health()
+
+
+@app.get("/graph/neo4j/health")
+def graph_neo4j_health() -> dict[str, object]:
+    return _neo4j_graph_store.health()
+
+
+@app.post("/graph/neo4j/rebuild")
+def graph_neo4j_rebuild() -> dict[str, object]:
+    commonfeature = _read_json_file(COMMONFEATURE_PATH)
+    records = _read_record_list(FULL_TEXT_RECORDS_PATH)
+    features = list(commonfeature.get("common_features") or [])
+    result = _neo4j_graph_store.rebuild(records=records, features=features)
+    return {
+        "status": "ok" if bool(result.get("ok")) else "failed",
+        "records": len(records),
+        "features": len(features),
+        "result": result,
+    }
 
 
 @app.post("/news/collect", response_model=NewsCollectResponse)

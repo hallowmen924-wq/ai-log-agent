@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { EventType, useRive, useStateMachineInput } from '@rive-app/react-canvas';
 import ReactFlow, { Background, Controls, Handle, MarkerType, MiniMap, Position } from 'reactflow';
+import cytoscape from 'cytoscape';
 import 'reactflow/dist/style.css';
 import './OntologyWorkbench.local.css';
 import regulationDocumentAnimation from '../assets/regulation-document.json';
@@ -200,7 +201,7 @@ function deriveAnswerHighlightTerms(text, baseTerms = [], tooltipTerms = []) {
     .slice(0, 24);
 }
 
-function HighlightedAnswerText({ text, terms = [], termMeta = {}, className = '' }) {
+function HighlightedAnswerText({ text, terms = [], termMeta = {}, className = '', onKeywordClick = null }) {
   const normalized = String(text || '');
   const highlightTerms = deriveAnswerHighlightTerms(normalized, terms, Object.keys(termMeta || {}));
   if (!normalized || !highlightTerms.length) {
@@ -217,6 +218,15 @@ function HighlightedAnswerText({ text, terms = [], termMeta = {}, className = ''
               className="ontology-answer-keyword"
               data-tooltip={termMeta?.[part] || ''}
               title={termMeta?.[part] || undefined}
+              role={onKeywordClick ? 'button' : undefined}
+              tabIndex={onKeywordClick ? 0 : undefined}
+              onClick={onKeywordClick ? () => onKeywordClick(part) : undefined}
+              onKeyDown={onKeywordClick ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onKeywordClick(part);
+                }
+              } : undefined}
             >
               {part}
             </mark>
@@ -224,6 +234,259 @@ function HighlightedAnswerText({ text, terms = [], termMeta = {}, className = ''
           : <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
       ))}
     </span>
+  );
+}
+
+function buildKeywordGraphElements({
+  keyword = '',
+  selectedFeature = null,
+  representativeFeatures = [],
+  relatedFeatures = [],
+  primaryTopCandidates = [],
+  questionTokenMappings = [],
+  representativeAxisDetails = [],
+}) {
+  const normalizedKeyword = String(keyword || '').trim();
+  const addNode = (list, id, label, kind = 'feature', score = 0) => {
+    if (!id || list.some((item) => item.data.id === id)) return;
+    list.push({
+      data: { id, label, kind, score: Number(score || 0) },
+    });
+  };
+  const addEdge = (list, source, target, label, weight = 1) => {
+    if (!source || !target || source === target) return;
+    const id = `${source}->${target}:${label || ''}`;
+    if (list.some((item) => item.data.id === id)) return;
+    list.push({
+      data: {
+        id,
+        source,
+        target,
+        label: label || 'related',
+        weight: Number(weight || 1),
+      },
+    });
+  };
+
+  const nodes = [];
+  const edges = [];
+  const keywordNodeId = `keyword:${normalizedKeyword || 'query'}`;
+  addNode(nodes, keywordNodeId, normalizedKeyword || '질문 키워드', 'keyword', 1);
+
+  const keywordMatches = (questionTokenMappings || [])
+    .filter((item) => String(item?.token || '').trim() === normalizedKeyword)
+    .map((item) => item?.feature_id)
+    .filter(Boolean);
+
+  const anchors = [];
+  const pushAnchor = (item, fallbackScore = 0.5) => {
+    const featureId = item?.feature_id || item?.id;
+    const featureName = item?.feature_name || item?.label || featureId;
+    if (!featureId) return;
+    const score = Number(item?.hybrid_score || item?.score || fallbackScore);
+    anchors.push({ featureId, featureName, score });
+  };
+
+  (representativeFeatures || []).slice(0, 3).forEach((item) => pushAnchor(item, 0.9));
+  if (!anchors.length && selectedFeature) pushAnchor(selectedFeature, 0.8);
+
+  keywordMatches.forEach((featureId) => {
+    const matched = (representativeFeatures || []).find((item) => item?.feature_id === featureId)
+      || (primaryTopCandidates || []).find((item) => item?.feature_id === featureId)
+      || { feature_id: featureId, feature_name: featureId, score: 0.7 };
+    pushAnchor(matched, 0.7);
+  });
+
+  const anchorMap = new Map();
+  anchors.forEach((item) => {
+    if (!anchorMap.has(item.featureId)) {
+      anchorMap.set(item.featureId, item);
+    }
+  });
+
+  const anchorList = Array.from(anchorMap.values()).slice(0, 4);
+  if (!anchorList.length) {
+    addNode(nodes, 'fallback:feature', '대표 feature 없음', 'feature', 0.2);
+    addEdge(edges, keywordNodeId, 'fallback:feature', 'fallback', 0.2);
+    return { nodes, edges };
+  }
+
+  anchorList.forEach((anchor) => {
+    const anchorNodeId = `feature:${anchor.featureId}`;
+    addNode(nodes, anchorNodeId, anchor.featureName, 'feature', anchor.score);
+    addEdge(edges, keywordNodeId, anchorNodeId, 'matches', anchor.score);
+  });
+
+  const relationPool = [
+    ...(relatedFeatures || []).map((item) => ({ ...item, relationLabel: 'related' })),
+    ...(primaryTopCandidates || []).flatMap((item) => (item?.graph_edges || []).map((edge) => ({
+      feature_id: edge?.target_feature_id,
+      feature_name: edge?.target_feature_name,
+      score: edge?.weight || 0.5,
+      relationLabel: edge?.relation || 'graph',
+    }))),
+    ...(representativeAxisDetails || []).flatMap((axis) => (axis?.graph_supports || []).map((support) => ({
+      feature_id: support?.target_feature_id,
+      feature_name: support?.target_feature_name,
+      score: support?.weight || 0.4,
+      relationLabel: support?.relation || 'support',
+    }))),
+  ];
+
+  anchorList.forEach((anchor) => {
+    const anchorNodeId = `feature:${anchor.featureId}`;
+    relationPool.slice(0, 10).forEach((relation, index) => {
+      const relationFeatureId = relation?.feature_id || relation?.feature_name;
+      const relationFeatureName = relation?.feature_name || relation?.feature_id || `support-${index + 1}`;
+      if (!relationFeatureId || relationFeatureId === anchor.featureId) return;
+      const relationNodeId = `support:${relationFeatureId}`;
+      const relationScore = Number(relation?.score || 0.35);
+      addNode(nodes, relationNodeId, relationFeatureName, 'support', relationScore);
+      addEdge(edges, anchorNodeId, relationNodeId, relation?.relationLabel || 'support', relationScore);
+    });
+  });
+
+  return { nodes: nodes.slice(0, 18), edges: edges.slice(0, 32) };
+}
+
+function KeywordGraphModal({
+  open = false,
+  keyword = '',
+  graphElements = { nodes: [], edges: [] },
+  onClose,
+}) {
+  const graphRef = useRef(null);
+  const cyRef = useRef(null);
+  const [graphError, setGraphError] = useState('');
+  const nodeCount = Array.isArray(graphElements?.nodes) ? graphElements.nodes.length : 0;
+  const edgeCount = Array.isArray(graphElements?.edges) ? graphElements.edges.length : 0;
+
+  useEffect(() => {
+    if (!open || !graphRef.current) return undefined;
+
+    const elements = [
+      ...(graphElements?.nodes || []),
+      ...(graphElements?.edges || []),
+    ];
+
+    try {
+      setGraphError('');
+      const cy = cytoscape({
+        container: graphRef.current,
+        elements,
+        style: [
+          {
+            selector: 'node',
+            style: {
+              label: 'data(label)',
+              'font-size': 11,
+              color: '#0f2b4a',
+              'text-wrap': 'wrap',
+              'text-max-width': 120,
+              'background-color': '#7ec8ff',
+              'border-width': 2,
+              'border-color': '#3d8cf3',
+              width: 'mapData(score, 0, 1, 28, 56)',
+              height: 'mapData(score, 0, 1, 28, 56)',
+              'text-valign': 'center',
+              'text-halign': 'center',
+            },
+          },
+          {
+            selector: 'node[kind = "keyword"]',
+            style: {
+              'background-color': '#2f6df6',
+              color: '#ffffff',
+              'border-color': '#1849b8',
+            },
+          },
+          {
+            selector: 'node[kind = "support"]',
+            style: {
+              'background-color': '#bfe9ff',
+              'border-color': '#69b8e8',
+            },
+          },
+          {
+            selector: 'edge',
+            style: {
+              width: 'mapData(weight, 0, 1, 1.4, 4)',
+              'line-color': '#86bdf6',
+              'target-arrow-color': '#86bdf6',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier',
+              label: 'data(label)',
+              'font-size': 10,
+              color: '#3f6b97',
+              'text-background-color': '#eff7ff',
+              'text-background-opacity': 1,
+              'text-background-padding': 2,
+            },
+          },
+        ],
+        layout: {
+          name: 'cose',
+          animate: true,
+          fit: true,
+          nodeRepulsion: 5200,
+          idealEdgeLength: 120,
+          padding: 24,
+        },
+      });
+
+      cyRef.current = cy;
+      const readyTimer = window.setTimeout(() => {
+        if (!cyRef.current) return;
+        cyRef.current.resize();
+        cyRef.current.fit(undefined, 24);
+        cyRef.current.layout({
+          name: 'cose',
+          animate: false,
+          fit: true,
+          nodeRepulsion: 5200,
+          idealEdgeLength: 120,
+          padding: 24,
+        }).run();
+      }, 140);
+
+      return () => {
+        window.clearTimeout(readyTimer);
+        cy.destroy();
+        cyRef.current = null;
+      };
+    } catch (error) {
+      setGraphError(String(error?.message || error || '그래프를 렌더링하지 못했습니다.'));
+      return undefined;
+    }
+  }, [graphElements, open]);
+
+  if (!open) return null;
+
+  return (
+    <motion.div className="prompt-modal-backdrop ontology-keyword-graph-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.section className="prompt-modal ontology-keyword-graph-modal" initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.2, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+        <div className="ontology-detail-modal-head">
+          <div>
+            <small>GRAPH RAG</small>
+            <h3>{keyword ? `"${keyword}" 연결 그래프` : '키워드 연결 그래프'}</h3>
+            <div className="ontology-keyword-graph-debug">
+              <span>nodes {nodeCount}</span>
+              <span>edges {edgeCount}</span>
+              {graphError ? <span>error</span> : <span>render ok</span>}
+            </div>
+          </div>
+          <button type="button" className="secondary-button" onClick={onClose}>닫기</button>
+        </div>
+        <div className="ontology-keyword-graph-body">
+          <div className="ontology-keyword-graph-canvas" ref={graphRef} />
+          {graphError ? <div className="empty-box compact">{graphError}</div> : null}
+          {!graphError && (!graphElements?.nodes?.length || !graphElements?.edges?.length) ? (
+            <div className="empty-box compact">연결 그래프 데이터가 부족합니다. 다른 키워드를 클릭해보세요.</div>
+          ) : null}
+          <p className="ontology-keyword-graph-hint">질문 키워드 → 대표 feature → 연관 feature 순서로 연결을 보여줍니다.</p>
+        </div>
+      </motion.section>
+    </motion.div>
   );
 }
 
@@ -304,7 +567,9 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
   const scenarioRows = (tool.scenario_rows || []).slice(0, 6);
   const segmentImpacts = (tool.segment_impacts || []).slice(0, 3);
   const isStrategyTool = tool?.id === 'strategy';
+  const isExplainabilityTool = tool?.id === 'explainability';
   const hasStrategyScenario = isStrategyTool && scenarioRows.length > 0;
+  const explainabilityTop3 = shapValues.slice(0, 3);
   const maxScenarioAbs = Math.max(
     1,
     ...scenarioRows.flatMap((item) => [
@@ -464,12 +729,33 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
         </details>
       ) : null}
       {!isClusterTool ? <p>{tool.summary || '대화 흐름에 필요한 분석 도구를 실행했습니다.'}</p> : null}
-      {!isClusterTool && metrics.length ? (
+      {!isClusterTool && tool?.id !== 'explainability' && metrics.length ? (
         <div className="tool-metric-row">
           {metrics.map((item) => <div key={item.label} className={`tool-metric is-${item.tone || 'neutral'}`}><span>{item.label}</span><strong>{item.value}</strong></div>)}
         </div>
       ) : null}
-      {!isClusterTool && shapValues.length ? (
+      {!isClusterTool && isExplainabilityTool && explainabilityTop3.length ? (
+        <div className="tool-top3-chart" aria-label="Explainability Top 3 차트">
+          {explainabilityTop3.map((item, index) => (
+            <div key={`${tool.id}-top3-${item.feature}`} className={`tool-top3-col rank-${index + 1}`}>
+              <div className="tool-top3-col-head">
+                <div className="tool-top3-rank">{index + 1}</div>
+                <b>{Number(item.impact || 0).toFixed(1)}%</b>
+              </div>
+              <div className="tool-top3-col-body">
+                <div className="tool-top3-meta">
+                  <strong>{item.feature}</strong>
+                  <span>{item.evidence || item.direction || ''}</span>
+                </div>
+                <div className="tool-top3-bar-vertical">
+                  <span style={{ height: `${Math.min(100, Number(item.impact || 0))}%` }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {!isClusterTool && !isExplainabilityTool && shapValues.length ? (
         <div className="tool-impact-list">
           {shapValues.map((item) => (
             <div key={`${tool.id}-${item.feature}`} className="tool-impact-row">
@@ -2548,6 +2834,9 @@ export default function OntologyWorkbench({
   const [productDevelopmentState, setProductDevelopmentState] = useState(INITIAL_PRODUCT_DEVELOPMENT_STATE);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showIntentFlowModal, setShowIntentFlowModal] = useState(false);
+  const [showKeywordGraphModal, setShowKeywordGraphModal] = useState(false);
+  const [selectedGraphKeyword, setSelectedGraphKeyword] = useState('');
+  const [selectedGraphElementsSnapshot, setSelectedGraphElementsSnapshot] = useState({ nodes: [], edges: [] });
   const [isRoniHovered, setIsRoniHovered] = useState(false);
   const [isNewsBadgeHovered, setIsNewsBadgeHovered] = useState(false);
   const [showRoniSuccess, setShowRoniSuccess] = useState(false);
@@ -2814,6 +3103,23 @@ export default function OntologyWorkbench({
         error: String(error?.message || error || '뉴스 상세 정보를 불러오지 못했습니다.'),
       }));
     }
+  }
+
+  function handleKeywordGraphOpen(keyword) {
+    const normalized = String(keyword || '').trim();
+    if (!normalized) return;
+    setSelectedGraphKeyword(normalized);
+    const snapshot = buildKeywordGraphElements({
+      keyword: normalized,
+      selectedFeature,
+      representativeFeatures,
+      relatedFeatures,
+      primaryTopCandidates,
+      questionTokenMappings,
+      representativeAxisDetails,
+    });
+    setSelectedGraphElementsSnapshot(snapshot);
+    setShowKeywordGraphModal(true);
   }
 
   useEffect(() => {
@@ -3692,12 +3998,15 @@ export default function OntologyWorkbench({
       return undefined;
     }
     let cancelled = false;
+    let transientFailureCount = 0;
+    const maxTransientFailures = 8;
     const poll = async () => {
       try {
         const statusPayload = await fetchProductDevelopmentDebateJob(productDevelopmentState.debateJobId);
         if (cancelled) {
           return;
         }
+        transientFailureCount = 0;
         const nextStatus = String(statusPayload?.status || '').toLowerCase();
         const stage = String(statusPayload?.stage || '');
         const detail = String(statusPayload?.detail || '');
@@ -3739,10 +4048,21 @@ export default function OntologyWorkbench({
         if (cancelled) {
           return;
         }
+        transientFailureCount += 1;
+        if (transientFailureCount < maxTransientFailures) {
+          const retryAfterMs = Math.min(4000, 600 * transientFailureCount);
+          setProductDevelopmentState((previous) => ({
+            ...previous,
+            debateStage: 'network-retry',
+            debateStageDetail: `상태 조회 연결이 일시적으로 불안정합니다. 자동 재시도 중... (${transientFailureCount}/${maxTransientFailures - 1})`,
+          }));
+          window.setTimeout(poll, retryAfterMs);
+          return;
+        }
         setProductDevelopmentState((previous) => ({
           ...previous,
           debateLoading: false,
-          debateError: String(error.message || error),
+          debateError: `상태 조회 연결이 반복 실패했습니다. (${String(error.message || error)})`,
         }));
       }
     };
@@ -4593,7 +4913,7 @@ export default function OntologyWorkbench({
                                   <span aria-hidden="true">🐰</span>
                                   <div>
                                     <strong>
-                                      <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '분석 요약을 준비했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                      <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '분석 요약을 준비했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
                                     </strong>
                                     <button
                                       type="button"
@@ -4604,7 +4924,7 @@ export default function OntologyWorkbench({
                                       {intentInterpretationMessage}
                                     </button>
                                     <p>
-                                      <HighlightedAnswerText text={finalAnswerBody || '핵심 결과를 실제 로그와 고객군집 기준으로 정리했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                      <HighlightedAnswerText text={finalAnswerBody || '핵심 결과를 실제 로그와 고객군집 기준으로 정리했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
                                     </p>
                                   </div>
                                 </article>
@@ -4634,10 +4954,10 @@ export default function OntologyWorkbench({
                                       </div>
                                       <div className="ontology-answer-stream-shell">
                                         <strong className="ontology-answer-stream-headline">
-                                          <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '답변 기록'} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                          <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '답변 기록'} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
                                         </strong>
                                         <p className="ontology-answer-stream-body">
-                                          <HighlightedAnswerText text={finalAnswerBody || '답변 내용을 불러오는 중입니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} className="ontology-answer-stream-copy" />
+                                          <HighlightedAnswerText text={finalAnswerBody || '답변 내용을 불러오는 중입니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} className="ontology-answer-stream-copy" onKeywordClick={handleKeywordGraphOpen} />
                                         </p>
                                       </div>
                                     </div>
@@ -4647,30 +4967,7 @@ export default function OntologyWorkbench({
                                   <span className="sample-pill">{summaryPriorityMessage}</span>
                                 </div>
                                 {/* K코드별 통계 표 노출 (summary 영역) */}
-                                {resolvedAnswerSummary?.top_reject_codes?.length ? (
-                                  <div className="summary-reject-code-table" style={{ margin: '16px 0', overflowX: 'auto' }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                                      <thead>
-                                        <tr style={{ background: '#f7f7fa' }}>
-                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>K코드</th>
-                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>설명</th>
-                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>건수</th>
-                                          <th style={{ padding: '4px 8px', border: '1px solid #eee' }}>비중</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {resolvedAnswerSummary.top_reject_codes.slice(0, 3).map((code) => (
-                                          <tr key={code.code}>
-                                            <td style={{ padding: '4px 8px', border: '1px solid #eee', fontWeight: 600 }}>{code.code}</td>
-                                            <td style={{ padding: '4px 8px', border: '1px solid #eee' }}>{code.description || '-'}</td>
-                                            <td style={{ padding: '4px 8px', border: '1px solid #eee', textAlign: 'right' }}>{Number(code.count || 0).toLocaleString('ko-KR')}</td>
-                                            <td style={{ padding: '4px 8px', border: '1px solid #eee', textAlign: 'right' }}>{(Number(code.share || 0) * 100).toFixed(1)}%</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                ) : null}
+                                {null}
                               </div>
                               {!isEvidenceBlockedAnswer ? (
                               <div className="workspace-summary-tools">
@@ -4774,19 +5071,19 @@ export default function OntologyWorkbench({
                           <div className="ontology-answer-stream-shell">
                             <strong className="ontology-answer-stream-headline">
                               {turn.answerHeadline
-                                ? <HighlightedAnswerText key={`headline-${answerStreamToken}`} text={turn.answerHeadline} terms={answerHighlightTerms} termMeta={answerTermMeta} />
+                                ? <HighlightedAnswerText key={`headline-${answerStreamToken}`} text={turn.answerHeadline} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
                                 : '답변 준비 중'}
                             </strong>
                             <p className="ontology-answer-stream-body">
                               {turn.answerBody
-                                ? <HighlightedAnswerText key={`body-${answerStreamToken}`} text={turn.answerBody} terms={answerHighlightTerms} termMeta={answerTermMeta} className="ontology-answer-stream-copy" />
+                                ? <HighlightedAnswerText key={`body-${answerStreamToken}`} text={turn.answerBody} terms={answerHighlightTerms} termMeta={answerTermMeta} className="ontology-answer-stream-copy" onKeywordClick={handleKeywordGraphOpen} />
                                 : '로니가 현재 질문을 해석하고 답변을 준비하고 있습니다.'}
                               {isLatest && hasAnswer ? <span className="ontology-chat-cursor" aria-hidden="true" /> : null}
                             </p>
                           </div>
                           <div className="ontology-runtime-answer-grid ontology-runtime-answer-grid-compact">
                               {isLatest
-                                ? (resolvedAnswerSummary?.highlights || []).slice(0, 4).map((item) => <div key={`${turn.id}-${item.label}-${item.value}`} className="ontology-runtime-answer-chip"><span>{item.label}</span><strong><HighlightedAnswerText text={String(item.value || '')} terms={answerHighlightTerms} termMeta={answerTermMeta} /></strong></div>)
+                                ? (resolvedAnswerSummary?.highlights || []).slice(0, 4).map((item) => <div key={`${turn.id}-${item.label}-${item.value}`} className="ontology-runtime-answer-chip"><span>{item.label}</span><strong><HighlightedAnswerText text={String(item.value || '')} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} /></strong></div>)
                                 : <div className="ontology-runtime-answer-chip"><span>핵심 축</span><strong>{turn.axis || '-'}</strong></div>}
                           </div>
                           {isLatest && !workspaceToolTabs.length && (answerMode === 'product' ? productModeToolCards.length : activeToolCards.length) ? (
@@ -4901,6 +5198,14 @@ export default function OntologyWorkbench({
       </div>
 
       <AnimatePresence>
+        {showKeywordGraphModal ? (
+          <KeywordGraphModal
+            open={showKeywordGraphModal}
+            keyword={selectedGraphKeyword}
+            graphElements={selectedGraphElementsSnapshot}
+            onClose={() => setShowKeywordGraphModal(false)}
+          />
+        ) : null}
         {showIntentFlowModal ? (
           <motion.div className="prompt-modal-backdrop ontology-intent-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowIntentFlowModal(false)}>
             <motion.section className="prompt-modal ontology-intent-modal" style={{ maxWidth: '920px', width: '100%' }} initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>

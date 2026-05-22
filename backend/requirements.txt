@@ -21,3 +21,4 @@ beautifulsoup4
 readability-lxml
 trafilatura
 newspaper3k
+neo4j>=5.22.0

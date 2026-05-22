@@ -165,10 +165,10 @@ def _ollama_generate(
     parts: list[str] = []
     lock_acquired = False
     busy_message = (
-        "Ollama가 다른 작업을 처리 중입니다. "
+        "[lock-busy] Ollama가 다른 작업을 처리 중입니다. "
         "workbench 응답은 fallback summary 로 먼저 표시하고, 잠시 뒤 다시 시도하세요."
     )
-    priority_message = "온톨로지 질의가 우선 처리 중입니다. 현재 요청은 잠시 뒤 다시 시도하세요."
+    priority_message = "[priority-busy] 온톨로지 질의가 우선 처리 중입니다. 현재 요청은 잠시 뒤 다시 시도하세요."
     priority_scope_enabled = _begin_ontology_priority_scope(priority_group)
     try:
         if priority_group != "ontology" and _has_pending_ontology_priority():
@@ -230,13 +230,45 @@ def _ollama_generate(
         finally:
             if lock_acquired:
                 OLLAMA_EXECUTION_LOCK.release()
-    except requests.RequestException as error:
+    except requests.Timeout as error:
+        timeout_message = (
+            "[timeout] Ollama 응답 지연(timeout)으로 요청이 종료되었습니다. "
+            "모델 추론 시간이 길어졌거나 현재 부하가 높습니다."
+        )
         if progress_callback is not None:
             progress_callback(
                 "failed",
-                {"model": model, "error": _build_ollama_unavailable_message()},
+                {"model": model, "error": timeout_message},
             )
-        raise OllamaUnavailableError(_build_ollama_unavailable_message()) from error
+        raise OllamaUnavailableError(timeout_message) from error
+    except requests.ConnectionError as error:
+        connection_message = f"[connection] {_build_ollama_unavailable_message()}"
+        if progress_callback is not None:
+            progress_callback(
+                "failed",
+                {"model": model, "error": connection_message},
+            )
+        raise OllamaUnavailableError(connection_message) from error
+    except requests.HTTPError as error:
+        http_status = int(getattr(getattr(error, "response", None), "status_code", 0) or 0)
+        http_message = f"[http-error] Ollama HTTP 오류가 발생했습니다. (status={http_status})"
+        if progress_callback is not None:
+            progress_callback(
+                "failed",
+                {"model": model, "error": http_message},
+            )
+        raise OllamaUnavailableError(http_message) from error
+    except requests.RequestException as error:
+        unknown_request_message = (
+            "[request-error] Ollama 요청 중 네트워크 오류가 발생했습니다. "
+            "잠시 후 다시 시도해 주세요."
+        )
+        if progress_callback is not None:
+            progress_callback(
+                "failed",
+                {"model": model, "error": unknown_request_message},
+            )
+        raise OllamaUnavailableError(unknown_request_message) from error
     except Exception as error:
         if progress_callback is not None:
             progress_callback(
