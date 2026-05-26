@@ -264,7 +264,58 @@ def _env_int(name: str, default: int, minimum: int | None = None) -> int:
     return value
 
 
-PRODUCT_DEBATE_FORCE_AUTOGEN = _env_flag("PRODUCT_DEBATE_FORCE_AUTOGEN", False)
+def _product_debate_setting(name: str, fallback: object) -> object:
+    value = PRODUCT_DEBATE_RUNTIME_SETTINGS.get(name, fallback)
+    return fallback if value is None else value
+
+
+def _product_debate_setting_int(name: str, fallback: int, minimum: int | None = None) -> int:
+    try:
+        value = int(_product_debate_setting(name, fallback))
+    except Exception:
+        value = fallback
+    if minimum is not None:
+        value = max(minimum, value)
+    return value
+
+
+def _product_debate_setting_bool(name: str, fallback: bool) -> bool:
+    value = _product_debate_setting(name, fallback)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _product_debate_setting_float(name: str, fallback: float, minimum: float | None = None, maximum: float | None = None) -> float:
+    try:
+        value = float(_product_debate_setting(name, fallback))
+    except Exception:
+        value = fallback
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+PRODUCT_DEBATE_FORCE_AUTOGEN = _env_flag("PRODUCT_DEBATE_FORCE_AUTOGEN", True)
+PRODUCT_DEBATE_RUNTIME_SETTINGS: dict[str, object] = {
+    "force_autogen": PRODUCT_DEBATE_FORCE_AUTOGEN,
+    "use_autogen": _env_flag("PRODUCT_DEBATE_USE_AUTOGEN", True),
+    "ollama_timeout_sec": _env_int("PRODUCT_DEBATE_OLLAMA_TIMEOUT_SEC", 90, minimum=12),
+    "acquire_timeout_sec": _env_int("PRODUCT_DEBATE_ACQUIRE_TIMEOUT_SEC", 12, minimum=6),
+    "fail_fast_if_busy": _env_flag("PRODUCT_DEBATE_FAIL_FAST_IF_BUSY", False),
+    "use_semaphore_gate": _env_flag("PRODUCT_DEBATE_USE_SEMAPHORE_GATE", False),
+    "prompt_max_chars": _env_int("PRODUCT_DEBATE_PROMPT_MAX_CHARS", 1600, minimum=700),
+    "ollama_num_ctx": _env_int("PRODUCT_DEBATE_OLLAMA_NUM_CTX", 896, minimum=512),
+    "ollama_num_predict": _env_int("PRODUCT_DEBATE_OLLAMA_NUM_PREDICT", 72, minimum=32),
+    "ollama_temperature": max(0.0, min(1.0, float(os.environ.get("PRODUCT_DEBATE_OLLAMA_TEMPERATURE", "0.05") or 0.05))),
+    "ollama_num_thread": _env_int("PRODUCT_DEBATE_OLLAMA_NUM_THREAD", 0, minimum=0),
+    "turn_wait_seconds": _env_int("PRODUCT_DEBATE_TURN_WAIT_SECONDS", 3, minimum=1),
+    "max_turns": _env_int("PRODUCT_DEBATE_MAX_TURNS", _env_int("PRODUCT_DEBATE_MAX_ROUNDS", 1, minimum=1), minimum=1),
+    "retries": _env_int("PRODUCT_DEBATE_RETRIES", 1, minimum=0),
+    "consensus_threshold": float(os.environ.get("PRODUCT_DEBATE_CONSENSUS_THRESHOLD", "0.72") or 0.72),
+}
 
 try:
     from websockets.exceptions import ConnectionClosed
@@ -295,7 +346,8 @@ AUTO_START_WORKER = _env_flag("AUTO_START_WORKER", False)
 AUTO_START_SEMANTIC_REFRESH = _env_flag("AUTO_START_SEMANTIC_REFRESH", False)
 WORKER_START_INTERVAL_SECONDS = _env_int("WORKER_START_INTERVAL_SECONDS", 30, minimum=1)
 HEALTH_CHECK_OLLAMA = _env_flag("HEALTH_CHECK_OLLAMA", False)
-WORKBENCH_OLLAMA_TIMEOUT_SECONDS = 8
+WORKBENCH_OLLAMA_TIMEOUT_SECONDS = _env_int("WORKBENCH_OLLAMA_TIMEOUT_SECONDS", 20, minimum=8)
+WORKBENCH_OLLAMA_NUM_PREDICT = _env_int("WORKBENCH_OLLAMA_NUM_PREDICT", 420, minimum=128)
 REGULATION_STATE_PATH = ROOT / "data" / "regulation_state.json"
 REGULATION_UPLOAD_DIR = ROOT / "data" / "regulation_uploads"
 PRODUCT_QUERY_ALIASES = {
@@ -3069,12 +3121,47 @@ def _query_has_creative_intent(query: str) -> bool:
 def _query_requests_loan_calculator(query: str) -> bool:
     compact_query = _compact_search_text(query)
     if not compact_query:
-        return False
+        compact_query = ""
     calculator_markers = [
         "원리금계산기", "원리금", "상환계산기", "대출계산기", "월상환",
         "amortization", "loancalculator", "repaymentcalculator", "calculator",
     ]
-    return any(marker in compact_query for marker in calculator_markers)
+    if compact_query and any(marker in compact_query for marker in calculator_markers):
+        return True
+    # Fallback on raw text because compact aliases can miss Korean tokens in mixed-encoding data.
+    raw = str(query or "").lower()
+    korean_markers = [
+        "원리금", "상환", "상환표", "스케줄", "시뮬레이션", "계산기", "월상환", "총상환", "이자율", "연이율",
+    ]
+    english_markers = [
+        "repayment", "amortization", "schedule", "simulation", "calculator", "monthly payment",
+    ]
+    marker_hits = sum(1 for marker in [*korean_markers, *english_markers] if marker in raw)
+    if marker_hits >= 2:
+        return True
+
+    slot_name_hits = sum(
+        1 for marker in ["원금", "연이율", "이자율", "금리", "기간", "개월", "상환방식", "repayment type"]
+        if marker in raw
+    )
+    hints = _extract_calculator_input_hints(query)
+    structured_hits = sum(
+        1 for key in ["principal_amount", "annual_rate_percent", "term_months", "repayment_type"]
+        if hints.get(key) not in (None, "", 0)
+    )
+    return slot_name_hits >= 2 or structured_hits >= 2
+
+
+def _query_has_loan_repayment_conversation_intent(query: str) -> bool:
+    text = str(query or "").lower()
+    if not text.strip():
+        return False
+    markers = [
+        "원리금", "상환", "상환표", "상환 스케줄", "대출 상환", "월상환", "총상환", "원금", "연이율", "기간",
+        "repayment", "amortization", "loan schedule", "monthly payment",
+    ]
+    hits = sum(1 for marker in markers if marker in text)
+    return hits >= 2 or _query_requests_loan_calculator(query)
 
 
 def _extract_calculator_input_hints(query: str) -> dict[str, object]:
@@ -3128,6 +3215,42 @@ def _extract_calculator_input_hints(query: str) -> dict[str, object]:
     }
 
 
+def _extract_runtime_query_hints(query: str) -> tuple[str, dict[str, object]]:
+    text = str(query or "")
+    hints: dict[str, object] = {
+        "force_intent": "",
+        "has_followup_guide": False,
+    }
+    intent_lock_match = re.search(r"\[intent_lock\s*:\s*([a-z_]+)\]", text, flags=re.IGNORECASE)
+    if intent_lock_match:
+        hints["force_intent"] = str(intent_lock_match.group(1) or "").strip().lower()
+        text = re.sub(r"\[intent_lock\s*:\s*[a-z_]+\]", "", text, flags=re.IGNORECASE)
+    if "[FOLLOWUP_GUIDE]" in text:
+        hints["has_followup_guide"] = True
+        text = text.split("[FOLLOWUP_GUIDE]", 1)[0].strip()
+    return text.strip(), hints
+
+
+def _should_force_creative_followup_intent(
+    query: str,
+    conversation_profile: dict[str, object] | None,
+    query_hints: dict[str, object] | None = None,
+) -> bool:
+    hints = query_hints or {}
+    if str(hints.get("force_intent") or "") == "creative_ideation":
+        return True
+    if bool(hints.get("has_followup_guide")):
+        return True
+    if not _query_requests_loan_calculator(query):
+        return False
+    profile = conversation_profile or {}
+    recent_queries = list(profile.get("history_queries") or [])[-6:]
+    if any(_query_has_creative_intent(item) and _query_requests_loan_calculator(item) for item in recent_queries):
+        return True
+    loan_context_markers = ["상환", "원리금", "대출", "스케줄", "계산기", "연이율", "원금", "기간"]
+    return any(any(marker in str(item or "") for marker in loan_context_markers) for item in recent_queries)
+
+
 def _rule_based_query_intent(
     query: str,
     selected_feature: dict | None,
@@ -3137,6 +3260,8 @@ def _rule_based_query_intent(
 ) -> str:
     if not str(query or "").strip():
         return "general_fallback"
+    if _query_has_loan_repayment_conversation_intent(query):
+        return "creative_ideation"
     if _query_has_screening_consult_intent(query):
         return "screening_consult_response"
     if regulation_first_route:
@@ -5616,6 +5741,63 @@ def _build_department_persona_profiles() -> list[dict[str, object]]:
     ]
 
 
+def _resolve_product_debate_mode(mode: object | None) -> str:
+    normalized = str(mode or "").strip().lower()
+    return "product2" if normalized == "product2" else "product"
+
+
+def _build_department_persona_profiles_by_mode(mode: object | None = None) -> list[dict[str, object]]:
+    resolved_mode = _resolve_product_debate_mode(mode)
+    if resolved_mode == "product2":
+        return [
+            {
+                "name": "FinanceSolutionPM",
+                "department": "금융솔루션부",
+                "role": "회의 진행, 상품 방향, 의사결정, 최종정리 담당",
+                "skills": ["회의 진행", "의사결정 정리", "부서 의견 종합"],
+                "memory": ["최종 응답은 결정사항/미해결 이슈/액션아이템 중심"],
+                "constraints": ["리스크와 수익성을 함께 고려", "근거 없는 과장 금지"],
+                "stance": "balanced",
+                "goal": "최종정리 도출",
+                "tone": "moderator",
+            },
+            {
+                "name": "CreditPlanningDept",
+                "department": "신용기획부",
+                "role": "심사정책, 한도, 금리, 리스크, 규제 관점 검토",
+                "skills": ["심사정책", "리스크 검토", "규제 준수 점검"],
+                "memory": ["무리한 구조는 반대 의견 제시"],
+                "constraints": ["연체/부실 위험 우선 차단", "규제 위반 가능성 제거"],
+                "stance": "conservative",
+                "goal": "리스크 통제 가능한 상품 설계",
+                "tone": "risk",
+            },
+            {
+                "name": "FinancialSalesDept",
+                "department": "금융영업부",
+                "role": "고객 니즈, 판매 가능성, 채널 전략 검토",
+                "skills": ["타깃 고객 설정", "채널 전략", "세일즈 포인트 도출"],
+                "memory": ["현장에서 팔기 어려운 요소를 조기 탐지"],
+                "constraints": ["현장 실행 가능성 유지", "고객 커뮤니케이션 명확화"],
+                "stance": "growth",
+                "goal": "판매 가능한 상품 구조 확보",
+                "tone": "sales",
+            },
+            {
+                "name": "ITDeveloper",
+                "department": "IT개발자",
+                "role": "구현 가능성, API/데이터 연계, 보안, 일정 검토",
+                "skills": ["시스템 연계", "API 설계", "개발 일정/병목 분석"],
+                "memory": ["MVP 축소 범위를 먼저 제안"],
+                "constraints": ["보안/품질 기준 유지", "개발 일정 현실화"],
+                "stance": "pragmatic",
+                "goal": "구현 가능한 MVP 범위 확정",
+                "tone": "tech",
+            },
+        ]
+    return _build_department_persona_profiles()
+
+
 def _build_department_agent_prompt_blocks(personas: list[dict[str, object]]) -> str:
     blocks: list[str] = []
     for persona in personas:
@@ -5654,8 +5836,14 @@ def _build_department_agent_prompt_blocks(personas: list[dict[str, object]]) -> 
     return "\n\n".join(blocks)
 
 
-def _build_product_debate_prompt(selected_agenda: dict[str, object], context: dict[str, object], concepts: list[dict[str, object]]) -> str:
-    personas = _build_department_persona_profiles()
+def _build_product_debate_prompt(
+    selected_agenda: dict[str, object],
+    context: dict[str, object],
+    concepts: list[dict[str, object]],
+    *,
+    debate_mode: object | None = None,
+) -> str:
+    personas = _build_department_persona_profiles_by_mode(debate_mode)
     persona_json = json.dumps({"agents": personas}, ensure_ascii=False, indent=2)
     persona_prompt_blocks = _build_department_agent_prompt_blocks(personas)
     agenda_type = str(selected_agenda.get("type") or "").strip().lower()
@@ -5844,7 +6032,7 @@ def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
 
 def _product_ollama_generate_fast_v2(prompt: str, wait_seconds: int) -> str:
     def _compact_product_debate_prompt(value: str) -> str:
-        max_chars = max(700, _env_int("PRODUCT_DEBATE_PROMPT_MAX_CHARS", 1600, minimum=700))
+        max_chars = _product_debate_setting_int("prompt_max_chars", 1600, minimum=700)
         compact = " ".join(str(value or "").split())
         if len(compact) <= max_chars:
             return compact
@@ -5852,29 +6040,29 @@ def _product_ollama_generate_fast_v2(prompt: str, wait_seconds: int) -> str:
 
     def _product_debate_ollama_options() -> dict[str, object]:
         options: dict[str, object] = {
-            "num_ctx": max(512, _env_int("PRODUCT_DEBATE_OLLAMA_NUM_CTX", 896, minimum=512)),
-            "num_predict": max(32, _env_int("PRODUCT_DEBATE_OLLAMA_NUM_PREDICT", 72, minimum=32)),
-            "temperature": max(0.0, min(1.0, float(os.environ.get("PRODUCT_DEBATE_OLLAMA_TEMPERATURE", "0.05") or 0.05))),
+            "num_ctx": _product_debate_setting_int("ollama_num_ctx", 896, minimum=512),
+            "num_predict": _product_debate_setting_int("ollama_num_predict", 72, minimum=32),
+            "temperature": _product_debate_setting_float("ollama_temperature", 0.05, minimum=0.0, maximum=1.0),
         }
-        num_thread = _env_int("PRODUCT_DEBATE_OLLAMA_NUM_THREAD", 0, minimum=0)
+        num_thread = _product_debate_setting_int("ollama_num_thread", 0, minimum=0)
         if num_thread > 0:
             options["num_thread"] = num_thread
         return options
 
     debate_timeout_sec = max(
         12,
-        _env_int("PRODUCT_DEBATE_OLLAMA_TIMEOUT_SEC", max(wait_seconds + 3, 90), minimum=12),
+        _product_debate_setting_int("ollama_timeout_sec", max(wait_seconds + 3, 90), minimum=12),
     )
-    debate_fail_fast_if_busy = _env_flag("PRODUCT_DEBATE_FAIL_FAST_IF_BUSY", False)
+    debate_fail_fast_if_busy = _product_debate_setting_bool("fail_fast_if_busy", False)
     # NOTE: lightweight_ollama_generate already has process-wide lock.
     # We disable extra semaphore gate by default to avoid double-lock contention.
-    use_semaphore_gate = _env_flag("PRODUCT_DEBATE_USE_SEMAPHORE_GATE", False)
+    use_semaphore_gate = _product_debate_setting_bool("use_semaphore_gate", False)
     acquired = False
     acquire_timeout_sec = max(
         6,
         min(
             debate_timeout_sec,
-            _env_int("PRODUCT_DEBATE_ACQUIRE_TIMEOUT_SEC", max(wait_seconds + 6, 12), minimum=6),
+            _product_debate_setting_int("acquire_timeout_sec", max(wait_seconds + 6, 12), minimum=6),
         ),
     )
     if use_semaphore_gate:
@@ -5963,15 +6151,18 @@ def _generate_product_development_debate(
     selected_agenda: dict[str, object],
     concepts: list[dict[str, object]],
     *,
+    debate_mode: object | None = None,
     require_autogen: bool | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
 ) -> dict[str, object]:
+    resolved_mode = _resolve_product_debate_mode(debate_mode)
     context = _build_product_development_context()
     fallback = _fallback_product_debate(selected_agenda, context, concepts)
-    personas = _build_department_persona_profiles()
-    turn_wait_seconds = max(1, _env_int("PRODUCT_DEBATE_TURN_WAIT_SECONDS", 3, minimum=1))
-    max_turns = max(1, _env_int("PRODUCT_DEBATE_MAX_TURNS", _env_int("PRODUCT_DEBATE_MAX_ROUNDS", 1, minimum=1), minimum=1))
-    force_autogen = PRODUCT_DEBATE_FORCE_AUTOGEN if require_autogen is None else bool(require_autogen)
+    personas = _build_department_persona_profiles_by_mode(resolved_mode)
+    turn_wait_seconds = _product_debate_setting_int("turn_wait_seconds", 3, minimum=1)
+    max_turns = _product_debate_setting_int("max_turns", 1, minimum=1)
+    force_autogen_default = _product_debate_setting_bool("force_autogen", PRODUCT_DEBATE_FORCE_AUTOGEN)
+    force_autogen = force_autogen_default if require_autogen is None else bool(require_autogen)
     if progress_callback:
         progress_callback("orchestration-start", "AutoGen 오케스트레이션을 시작합니다.")
     orchestrated = run_product_debate_orchestration(
@@ -5984,9 +6175,10 @@ def _generate_product_development_debate(
         fallback_result=fallback,
         memory_path=PRODUCT_DEBATE_MEMORY_PATH,
         max_rounds=max_turns,
-        retries=max(0, _env_int("PRODUCT_DEBATE_RETRIES", 1, minimum=0)),
-        consensus_threshold=float(os.environ.get("PRODUCT_DEBATE_CONSENSUS_THRESHOLD", "0.72") or 0.72),
+        retries=_product_debate_setting_int("retries", 1, minimum=0),
+        consensus_threshold=_product_debate_setting_float("consensus_threshold", 0.72, minimum=0.3, maximum=0.99),
         require_autogen=force_autogen,
+        use_autogen_enabled=_product_debate_setting_bool("use_autogen", True),
         progress_callback=progress_callback,
     )
     # Safety fallback: if orchestration failed to create a valid result payload, preserve legacy behavior.
@@ -6001,7 +6193,7 @@ def _generate_product_development_debate(
     if not isinstance(result_payload.get("final"), dict) or not isinstance(result_payload.get("messages"), list):
         if force_autogen:
             raise RuntimeError("AutoGen 토론 결과가 유효하지 않습니다. 커스텀 루프로 전환하지 않도록 설정되어 실패 처리합니다.")
-        prompt = _build_product_debate_prompt(selected_agenda, context, concepts)
+        prompt = _build_product_debate_prompt(selected_agenda, context, concepts, debate_mode=resolved_mode)
         response_text = ""
         result = fallback
         source = "fallback"
@@ -6030,12 +6222,14 @@ def _generate_product_development_debate(
             "source": source,
             "context": context,
             "result": result,
+            "mode": resolved_mode,
             "llm": {
                 "model": OLLAMA_LIGHTWEIGHT_MODEL,
                 "prompt": prompt,
                 "response_text": response_text,
             },
         }
+    orchestrated["mode"] = resolved_mode
     return orchestrated
 
 
@@ -6550,6 +6744,8 @@ def _query_has_underwriting_scope(query: str) -> bool:
 
 
 def _query_requires_regulation_first(query: str) -> bool:
+    if _query_has_loan_repayment_conversation_intent(query):
+        return False
     if _query_has_regulation_intent(query):
         return True
     return not _query_has_underwriting_scope(query)
@@ -7067,6 +7263,7 @@ def _run_general_ollama_fallback(
             timeout_seconds=WORKBENCH_OLLAMA_TIMEOUT_SECONDS,
             fail_fast_if_busy=True,
             priority_group="general",
+            options_override={"num_predict": WORKBENCH_OLLAMA_NUM_PREDICT},
         )
         normalized_text = _replace_product_codes_for_display(_normalize_ollama_text(response_text))
         runtime["status"] = "completed"
@@ -7522,6 +7719,7 @@ def _run_ollama_for_workbench(prompt_pack: dict[str, object], answer_summary: di
             timeout_seconds=WORKBENCH_OLLAMA_TIMEOUT_SECONDS,
             fail_fast_if_busy=True,
             priority_group="ontology",
+            options_override={"num_predict": WORKBENCH_OLLAMA_NUM_PREDICT},
         )
         normalized_text = _normalize_ollama_text(response_text)
         normalized_text = _strip_principal_axis_generalities(normalized_text)
@@ -7588,6 +7786,7 @@ def _build_feature_workbench_payload(
     job_id: str | None = None,
     conversation_profile: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    query, runtime_query_hints = _extract_runtime_query_hints(query)
     if job_id:
         _update_workbench_job(job_id, "extraction", "running", "commonfeature.json 과 full_text_records.json 을 읽는 중입니다.")
     ontology = _read_json_file(ONTOLOGY_PATH)
@@ -7797,15 +7996,29 @@ def _build_feature_workbench_payload(
         expansion_feature_ids=related_feature_ids,
     )
     raw_regulation_evidence_count = len(raw_regulation_evidence)
-    creative_ideation_route = _query_has_creative_intent(query)
-    regulation_first_route = _query_requires_regulation_first(query) and not creative_ideation_route
-    strategy_simulation_route = _query_requires_strategy_simulation(query)
+    creative_followup_lock = _should_force_creative_followup_intent(
+        query,
+        conversation_profile,
+        runtime_query_hints,
+    )
+    creative_ideation_route = creative_followup_lock or _query_has_creative_intent(query)
+    regulation_first_route = (not creative_followup_lock) and _query_requires_regulation_first(query) and not creative_ideation_route
+    strategy_simulation_route = (not creative_followup_lock) and _query_requires_strategy_simulation(query)
     intent_classification = _classify_query_intent(
         query,
         selected_feature,
         regulation_first_route=regulation_first_route,
         strategy_simulation_route=strategy_simulation_route,
     )
+    if creative_followup_lock:
+        intent_classification = {
+            **dict(intent_classification or {}),
+            "intent": "creative_ideation",
+            "rule_intent": "creative_ideation",
+            "llm_intent": "creative_ideation",
+            "method": "conversation_lock",
+            "confidence": max(0.96, float((intent_classification or {}).get("confidence") or 0.0)),
+        }
     if regulation_first_route:
         regulation_evidence, regulation_evidence_reason = _select_regulation_first_evidence(
             query,
@@ -7871,11 +8084,12 @@ def _build_feature_workbench_payload(
         regulation_evidence=regulation_evidence,
         customer_clusters=customer_clusters,
     )
-    if evidence_gate.get("allowed"):
+    allow_ungrounded_followup = bool(creative_followup_lock)
+    if evidence_gate.get("allowed") or allow_ungrounded_followup:
         prompt_pack = apply_grounded_prompt_rules(prompt_pack, evidence_gate)
     server_answer_summary = _build_answer_summary(query, selected_product, selected_feature, representative_features, customer_clusters, retrieval_results, profiles, related_features=related_features, reject_code_summary=reject_code_summary)
     server_answer_summary["citations"] = list((prompt_pack.get("semantic_context") or {}).get("regulation_citations") or [])
-    if not evidence_gate.get("allowed"):
+    if not evidence_gate.get("allowed") and not allow_ungrounded_followup:
         ollama_runtime, answer_summary = build_blocked_runtime_answer(
             query=query,
             evaluation=evidence_gate,
@@ -7960,7 +8174,7 @@ def _build_feature_workbench_payload(
             _normalize_regulation_citation(item)
             for item in regulation_evidence[:4]
         ]
-    if evidence_gate.get("allowed"):
+    if evidence_gate.get("allowed") and not allow_ungrounded_followup:
         answer_summary = decorate_grounded_answer_summary(answer_summary, evidence_gate)
     reject_code_line = _format_reject_code_summary(reject_code_summary)
     if reject_code_line and not strategy_simulation_route and _query_has_reject_intent(query, selected_feature):
@@ -8273,6 +8487,90 @@ def feature_ontology_product_development_agendas(payload: dict[str, object] = Bo
     return _generate_product_development_agendas(concepts)
 
 
+@app.get("/feature-ontology/product-development/autogen-settings")
+def feature_ontology_product_development_autogen_settings() -> dict[str, object]:
+    with PRODUCT_DEBATE_JOB_STATUS_LOCK:
+        running_jobs = [
+            {
+                "job_id": str(job_id),
+                "stage": str(item.get("stage") or ""),
+                "detail": str(item.get("detail") or ""),
+                "updated_at": str(item.get("updated_at") or ""),
+            }
+            for job_id, item in PRODUCT_DEBATE_JOB_STATUS.items()
+            if str(item.get("status") or "") == "running"
+        ]
+        recent_jobs = sorted(
+            [
+                {
+                    "job_id": str(job_id),
+                    "status": str(item.get("status") or ""),
+                    "stage": str(item.get("stage") or ""),
+                    "detail": str(item.get("detail") or ""),
+                    "mode": str(item.get("mode") or "product"),
+                    "updated_at": str(item.get("updated_at") or ""),
+                    "created_at": str(item.get("created_at") or ""),
+                }
+                for job_id, item in PRODUCT_DEBATE_JOB_STATUS.items()
+            ],
+            key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""),
+            reverse=True,
+        )[:12]
+    return {
+        "status": "ok",
+        "settings": dict(PRODUCT_DEBATE_RUNTIME_SETTINGS),
+        "runtime": get_ollama_runtime_monitor(),
+        "running_jobs": running_jobs,
+        "recent_jobs": recent_jobs,
+        "max_concurrency": PRODUCT_DEBATE_MAX_CONCURRENCY,
+        "model": OLLAMA_LIGHTWEIGHT_MODEL,
+    }
+
+
+@app.post("/feature-ontology/product-development/autogen-settings")
+def feature_ontology_product_development_autogen_settings_update(payload: dict[str, object] = Body(default_factory=dict)) -> dict[str, object]:
+    incoming = dict(payload or {})
+    next_settings = dict(PRODUCT_DEBATE_RUNTIME_SETTINGS)
+    int_fields = {
+        "ollama_timeout_sec": (12, 600),
+        "acquire_timeout_sec": (6, 600),
+        "prompt_max_chars": (700, 12000),
+        "ollama_num_ctx": (512, 32768),
+        "ollama_num_predict": (32, 4096),
+        "ollama_num_thread": (0, 64),
+        "turn_wait_seconds": (1, 60),
+        "max_turns": (1, 12),
+        "retries": (0, 8),
+    }
+    float_fields = {
+        "ollama_temperature": (0.0, 1.0),
+        "consensus_threshold": (0.3, 0.99),
+    }
+    bool_fields = {"force_autogen", "use_autogen", "fail_fast_if_busy", "use_semaphore_gate"}
+
+    for key, (minimum, maximum) in int_fields.items():
+        if key in incoming:
+            try:
+                value = int(incoming.get(key))
+            except Exception:
+                continue
+            next_settings[key] = max(minimum, min(maximum, value))
+    for key, (minimum, maximum) in float_fields.items():
+        if key in incoming:
+            try:
+                value = float(incoming.get(key))
+            except Exception:
+                continue
+            next_settings[key] = max(minimum, min(maximum, value))
+    for key in bool_fields:
+        if key in incoming:
+            value = incoming.get(key)
+            next_settings[key] = value if isinstance(value, bool) else str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    PRODUCT_DEBATE_RUNTIME_SETTINGS.update(next_settings)
+    return {"status": "ok", "settings": dict(PRODUCT_DEBATE_RUNTIME_SETTINGS)}
+
+
 def _update_product_debate_job(job_id: str, **updates: object) -> None:
     with PRODUCT_DEBATE_JOB_STATUS_LOCK:
         current = dict(PRODUCT_DEBATE_JOB_STATUS.get(job_id) or {})
@@ -8287,6 +8585,7 @@ def feature_ontology_product_development_debate_job_start(payload: dict[str, obj
     if not isinstance(selected_agenda, dict):
         raise HTTPException(status_code=400, detail="selected_agenda is required")
     concepts = _normalize_department_concepts(payload.get("department_concepts") or payload.get("concepts") or {})
+    debate_mode = _resolve_product_debate_mode(payload.get("mode"))
     job_id = f"pd-{uuid.uuid4().hex[:12]}"
     now_iso = datetime.datetime.now().isoformat(timespec="seconds")
     with PRODUCT_DEBATE_JOB_STATUS_LOCK:
@@ -8297,6 +8596,7 @@ def feature_ontology_product_development_debate_job_start(payload: dict[str, obj
             "detail": "토론 작업을 큐에 등록했습니다.",
             "created_at": now_iso,
             "updated_at": now_iso,
+            "mode": debate_mode,
             "result": None,
             "error": "",
         }
@@ -8310,7 +8610,8 @@ def feature_ontology_product_development_debate_job_start(payload: dict[str, obj
             result = _generate_product_development_debate(
                 selected_agenda,
                 concepts,
-                require_autogen=False,
+                debate_mode=debate_mode,
+                require_autogen=None,
                 progress_callback=_progress,
             )
             _update_product_debate_job(
@@ -8340,7 +8641,15 @@ def feature_ontology_product_development_debate_job_status(job_id: str) -> dict[
         payload = PRODUCT_DEBATE_JOB_STATUS.get(job_id)
         if not payload:
             raise HTTPException(status_code=404, detail="debate job not found")
-        return {"status": "ok", **payload}
+        return {
+            "status": "ok",
+            "job_status": str(payload.get("status") or ""),
+            "job_stage": str(payload.get("stage") or ""),
+            "job_detail": str(payload.get("detail") or ""),
+            "job_result": payload.get("result"),
+            "job_error": str(payload.get("error") or ""),
+            **payload,
+        }
 
 
 @app.post("/feature-ontology/product-development/debate")
@@ -8349,7 +8658,8 @@ def feature_ontology_product_development_debate(payload: dict[str, object] = Bod
     if not isinstance(selected_agenda, dict):
         raise HTTPException(status_code=400, detail="selected_agenda is required")
     concepts = _normalize_department_concepts(payload.get("department_concepts") or payload.get("concepts") or {})
-    return _generate_product_development_debate(selected_agenda, concepts, require_autogen=False)
+    debate_mode = _resolve_product_debate_mode(payload.get("mode"))
+    return _generate_product_development_debate(selected_agenda, concepts, debate_mode=debate_mode, require_autogen=None)
 
 
 @app.post("/feature-ontology/ollama")

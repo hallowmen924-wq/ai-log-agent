@@ -561,6 +561,7 @@ def run_product_debate_orchestration(
     retries: int = 1,
     consensus_threshold: float = 0.72,
     require_autogen: bool = False,
+    use_autogen_enabled: bool | None = None,
     progress_callback: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
     max_agents = min(3, max(1, int(os.getenv("PRODUCT_DEBATE_MAX_AGENTS", "3") or 3)))
@@ -582,8 +583,9 @@ def run_product_debate_orchestration(
             progress_callback("memory-recall", f"롱텀메모리 회수 {len(memory_hits)}건 · {memory_elapsed_ms}ms")
         else:
             progress_callback("memory-disabled", "롱텀메모리 조회/주입 비활성화")
-    env_use_autogen = str(os.getenv("PRODUCT_DEBATE_USE_AUTOGEN", "0")).strip().lower() in {"1", "true", "yes", "on"}
-    use_autogen = bool(require_autogen and env_use_autogen)
+    env_use_autogen = str(os.getenv("PRODUCT_DEBATE_USE_AUTOGEN", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    effective_use_autogen_enabled = env_use_autogen if use_autogen_enabled is None else bool(use_autogen_enabled)
+    use_autogen = bool(require_autogen and effective_use_autogen_enabled)
     autogen_error = ""
 
     def _append_memory_from_result(result_obj: dict[str, Any], consensus_score: float = 0.0) -> None:

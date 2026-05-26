@@ -140,6 +140,18 @@ export function fetchProductDevelopmentDebateJob(jobId) {
   return request(`/feature-ontology/product-development/debate-jobs/${encodeURIComponent(String(jobId || ''))}`);
 }
 
+export function fetchProductDevelopmentAutogenSettings() {
+  return request('/feature-ontology/product-development/autogen-settings');
+}
+
+export function updateProductDevelopmentAutogenSettings(payload) {
+  return request('/feature-ontology/product-development/autogen-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function rebuildFeatureOntologyClusters(payload) {
   return request('/feature-ontology/clusters/rebuild', {
     method: 'POST',

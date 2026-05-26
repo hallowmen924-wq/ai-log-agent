@@ -9,7 +9,7 @@ import 'reactflow/dist/style.css';
 import './OntologyWorkbench.local.css';
 import promptSubmitAnimation from '../assets/prompt-submit.json';
 import cardLoanNewsAnimation from '../assets/card-loan-news.json';
-import { API_BASE_URL, createProductDevelopmentAgendas, createPromptFromImage, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, fetchProductDevelopmentDebateJob, startFeatureOntologyRuntimeJob, startProductDevelopmentDebateJob } from '../api';
+import { API_BASE_URL, createProductDevelopmentAgendas, createPromptFromImage, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, fetchProductDevelopmentAutogenSettings, fetchProductDevelopmentDebateJob, startFeatureOntologyRuntimeJob, startProductDevelopmentDebateJob, updateProductDevelopmentAutogenSettings } from '../api';
 import { RUNTIME_STAGES, useOntologyRuntimeStore } from './ontologyRuntimeStore';
 
 const ONTOLOGY_PROMPT_EXAMPLES = [
@@ -1805,6 +1805,7 @@ const ANSWER_MODES = Object.freeze([
   { id: 'general', label: '일반답변모드', icon: '💬', hint: '현재 대화형 답변' },
   { id: 'memo', label: '메모모드', icon: '📝', hint: '부서 메모 우선 반영' },
   { id: 'product', label: '상품개발모드', icon: '✨', hint: '전략·부서 관점 중심' },
+  { id: 'product2', label: '상품개발모드2', icon: '🧠', hint: 'AutoGen 회의실 재구성' },
 ]);
 
 const MEMO_DEPARTMENTS = Object.freeze([
@@ -1838,6 +1839,13 @@ const PRODUCT_DEBATE_WARMUP_LINES = Object.freeze([
   { id: 'debate-6', speaker: '신프로', department: '신용기획부', tone: 'risk', message: '합의 직전 점검합니다. 연체민감 구간은 조건부 승인으로만 열고, 관찰 KPI를 반드시 붙이는 조건으로 갑니다.' },
   { id: 'debate-7', speaker: '영프로', department: '금융영업부', tone: 'sales', message: '현장 적용성 확인 완료. 메시지/조건/제외대상만 명확하면 바로 시범 운영 가능하겠습니다.' },
   { id: 'debate-8', speaker: '아프로', department: 'IT개발자', tone: 'tech', message: '결과 JSON 정리 대기 중입니다. 최종안 수신 즉시 상품안/룰개선안 카드로 반영하겠습니다.' },
+]);
+
+const PRODUCT_V2_PARTICIPANTS = Object.freeze([
+  { id: 'pm', key: 'FinanceSolutionPM', label: 'FinanceSolutionPM', dept: '금융솔루션부 PM', desc: '회의 진행·최종 의사결정·최종정리', badge: 'PM' },
+  { id: 'credit', key: 'CreditPlanningDept', label: 'CreditPlanningDept', dept: '신용기획부', desc: '심사정책·한도·금리·리스크·규제', badge: 'CR' },
+  { id: 'sales', key: 'FinancialSalesDept', label: 'FinancialSalesDept', dept: '금융영업부', desc: '고객 니즈·판매전략·채널·경쟁상품', badge: 'SA' },
+  { id: 'dev', key: 'ITDeveloper', label: 'ITDeveloper', dept: 'IT개발자', desc: '시스템·API·보안·일정·MVP 범위', badge: 'IT' },
 ]);
 
 const MEMO_STORAGE_KEY = 'ontology-workbench-memo-preferences';
@@ -2405,10 +2413,11 @@ function resolveDebatePerson(message = {}) {
   return PRODUCT_DEBATE_PEOPLE.find((person) => person.tone === message.tone) || PRODUCT_DEBATE_PEOPLE[0];
 }
 
-function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null, stage = '', stageDetail = '', trace = [] }) {
+function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgenda = null, stage = '', stageDetail = '', trace = [], llmMeta = null }) {
   const [tick, setTick] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [typedCaption, setTypedCaption] = useState('');
+  const [showOllamaTrace, setShowOllamaTrace] = useState(false);
 
   useEffect(() => {
     if (!loading) {
@@ -2477,6 +2486,36 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
   const speakerSoftLine = loading
     ? `지금은 ${activePerson.name}(${activePerson.department})가 차분하게 의견을 설명하고 있어요.`
     : `${activePerson.name}(${activePerson.department})가 최종 발언을 정리했어요.`;
+  const llmTraces = Array.isArray(llmMeta?.traces) ? llmMeta.traces : [];
+  const ollamaPromptJoined = llmTraces
+    .map((item, index) => {
+      const agent = String(item?.agent || `agent-${index + 1}`);
+      const prompt = String(item?.prompt || '').trim();
+      if (!prompt) {
+        return '';
+      }
+      return `[${agent}]\n${prompt}`;
+    })
+    .filter(Boolean)
+    .join('\n\n--------------------\n\n');
+  const ollamaResultJoined = llmTraces
+    .map((item, index) => {
+      const agent = String(item?.agent || `agent-${index + 1}`);
+      const response = String(item?.response || '').trim();
+      if (!response) {
+        return '';
+      }
+      return `[${agent}]\n${response}`;
+    })
+    .filter(Boolean)
+    .join('\n\n--------------------\n\n');
+  const hasOllamaTrace = Boolean(ollamaPromptJoined || ollamaResultJoined);
+  const handleToggleOllamaTrace = () => {
+    if (!hasOllamaTrace) {
+      return;
+    }
+    setShowOllamaTrace((prev) => !prev);
+  };
 
   useEffect(() => {
     const text = String(activeMessage?.message || '');
@@ -2513,14 +2552,20 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
       <div className="product-debate-table">
         <div className="product-debate-ambient product-debate-ambient-left" aria-hidden="true" />
         <div className="product-debate-ambient product-debate-ambient-right" aria-hidden="true" />
-        <div className="product-debate-table-surface">
+        <button
+          type="button"
+          className={`product-debate-table-surface product-debate-clickable ${showOllamaTrace ? 'is-open' : ''}`}
+          onClick={handleToggleOllamaTrace}
+          aria-expanded={showOllamaTrace}
+          title={hasOllamaTrace ? '클릭하여 Ollama 프롬프트/결과 보기' : '아직 Ollama trace가 없습니다'}
+        >
           <span>{agendaTitle}</span>
           <strong>{loading ? 'OLLAMA 결과를 기다리는 동안 사전 토론 중' : '토론 정리 완료'}</strong>
           <div className="product-debate-topic-note">
             <p>{speakerSoftLine}</p>
             <small>{activeMessage?.speaker ? `${activeMessage.speaker} 발언 진행 중` : '발언자를 기다리는 중'}</small>
           </div>
-        </div>
+        </button>
         {PRODUCT_DEBATE_PEOPLE.map((person, index) => {
           const isSpeaking = person.id === activePerson.id;
           const speech = stagedMessages
@@ -2551,11 +2596,13 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
           {activeMessage ? (
             <motion.article
               key={`${activeMessage.id || activeMessage.speaker}-${activeMessage.message}`}
-              className="product-debate-live-caption tailwind-caption w-full md:w-[92%] max-w-5xl mx-auto rounded-2xl"
+              className={`product-debate-live-caption product-debate-clickable ${showOllamaTrace ? 'is-open' : ''} tailwind-caption w-full md:w-[92%] max-w-5xl mx-auto rounded-2xl`}
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.98 }}
               transition={{ duration: 0.26, ease: 'easeOut' }}
+              onClick={handleToggleOllamaTrace}
+              title={hasOllamaTrace ? '클릭하여 Ollama 프롬프트/결과 보기' : '아직 Ollama trace가 없습니다'}
             >
               <div className="product-debate-live-caption-head">
                 <span>{activePerson.short}</span>
@@ -2566,6 +2613,24 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
             </motion.article>
           ) : null}
         </AnimatePresence>
+        {showOllamaTrace ? (
+          <article className="product-debate-ollama-trace">
+            <div className="product-debate-ollama-trace-head">
+              <strong>Ollama 프롬프트 / 결과</strong>
+              <small>클릭해서 접기</small>
+            </div>
+            <div className="product-debate-ollama-trace-grid">
+              <section>
+                <span>입력 프롬프트</span>
+                <pre>{ollamaPromptJoined || '표시할 프롬프트가 아직 없습니다.'}</pre>
+              </section>
+              <section>
+                <span>출력 결과</span>
+                <pre>{ollamaResultJoined || '표시할 결과가 아직 없습니다.'}</pre>
+              </section>
+            </div>
+          </article>
+        ) : null}
       </div>
 
       <div className="product-debate-live-feed">
@@ -2594,21 +2659,358 @@ function ProductDebateMeetingRoom({ loading = false, messages = [], selectedAgen
   );
 }
 
+function ProductDebateMeetingRoomV2({ loading = false, messages = [], selectedAgenda = null, stage = '', stageDetail = '', llmMeta = null }) {
+  const [showTrace, setShowTrace] = useState(false);
+  const agendaTitle = selectedAgenda?.title || '선택된 안건';
+  const stagedMessages = loading
+    ? PRODUCT_DEBATE_WARMUP_LINES.slice(0, 4)
+    : messages.map((message, index) => ({
+      id: `v2-${index}`,
+      speaker: String(message?.speaker || '').trim() || 'FinanceSolutionPM',
+      department: String(message?.department || '').trim(),
+      message: String(message?.message || message?.content || '').trim(),
+    }));
+  const lastMessage = stagedMessages[stagedMessages.length - 1] || null;
+  const llmTraces = Array.isArray(llmMeta?.traces) ? llmMeta.traces : [];
+  const promptJoined = llmTraces
+    .map((item, index) => {
+      const agent = String(item?.agent || `agent-${index + 1}`);
+      const prompt = String(item?.prompt || '').trim();
+      if (!prompt) return '';
+      return `[${agent}]\n${prompt}`;
+    })
+    .filter(Boolean)
+    .join('\n\n--------------------\n\n');
+  const responseJoined = llmTraces
+    .map((item, index) => {
+      const agent = String(item?.agent || `agent-${index + 1}`);
+      const response = String(item?.response || '').trim();
+      if (!response) return '';
+      return `[${agent}]\n${response}`;
+    })
+    .filter(Boolean)
+    .join('\n\n--------------------\n\n');
+  const stageLabel = String(stageDetail || '').trim() || (loading ? '회의 진행 중' : '회의 종료');
+  const normalizedStageText = `${String(stage || '')} ${String(stageDetail || '')}`.toLowerCase();
+  const participantAliasMap = useMemo(() => ([
+    { key: 'FinanceSolutionPM', aliases: ['financesolutionpm', 'pm', '금융솔루션부', '금프로'] },
+    { key: 'CreditPlanningDept', aliases: ['creditplanningdept', 'credit', 'cr', '신용기획부', '신프로'] },
+    { key: 'FinancialSalesDept', aliases: ['financialsalesdept', 'sales', 'sa', '금융영업부', '영프로'] },
+    { key: 'ITDeveloper', aliases: ['itdeveloper', 'developer', 'it', 'it개발자', '아프로'] },
+  ]), []);
+  const getParticipantKey = (rawValue) => {
+    const text = String(rawValue || '').trim().toLowerCase();
+    if (!text) return '';
+    const found = participantAliasMap.find((item) => item.aliases.some((alias) => text.includes(alias)));
+    return found?.key || '';
+  };
+  const stageActorKey = useMemo(() => {
+    const found = participantAliasMap.find((item) => item.aliases.some((alias) => normalizedStageText.includes(alias)));
+    return found?.key || '';
+  }, [normalizedStageText, participantAliasMap]);
+  const traceActorKey = useMemo(() => {
+    const lastTrace = [...llmTraces].reverse().find((item) => String(item?.agent || '').trim());
+    return getParticipantKey(lastTrace?.agent);
+  }, [llmTraces]);
+  const flowMessages = stagedMessages
+    .map((item, index) => {
+      const fromKey = getParticipantKey(item?.speaker);
+      const toKey = getParticipantKey(stagedMessages[index + 1]?.speaker);
+      const text = String(item?.message || '').trim();
+      if (!fromKey) return null;
+      return {
+        id: `flow-${index}`,
+        fromKey,
+        toKey,
+        message: text,
+      };
+    })
+    .filter(Boolean);
+  const latestSpeakerKey = getParticipantKey(lastMessage?.speaker);
+  const activeOllamaKey = loading ? (stageActorKey || traceActorKey || latestSpeakerKey) : '';
+  const flowEdges = flowMessages.reduce((acc, row) => {
+    if (!row?.fromKey || !row?.toKey || row.fromKey === row.toKey) {
+      return acc;
+    }
+    const edgeId = `${row.fromKey}->${row.toKey}`;
+    const existing = acc.find((item) => item.id === edgeId);
+    if (existing) {
+      existing.count += 1;
+      existing.sample = row.message || existing.sample;
+      return acc;
+    }
+    acc.push({
+      id: edgeId,
+      from: row.fromKey,
+      to: row.toKey,
+      count: 1,
+      sample: row.message || '',
+    });
+    return acc;
+  }, []);
+  const nodePositionMap = {
+    FinanceSolutionPM: { x: 22, y: 26 },
+    CreditPlanningDept: { x: 78, y: 26 },
+    FinancialSalesDept: { x: 22, y: 74 },
+    ITDeveloper: { x: 78, y: 74 },
+  };
+  const participantActivity = PRODUCT_V2_PARTICIPANTS.map((item) => {
+    const answeredCount = stagedMessages.filter((msg) => getParticipantKey(msg?.speaker) === item.key).length;
+    const isSpeaking = latestSpeakerKey === item.key;
+    const isThinking = loading && activeOllamaKey === item.key;
+    return {
+      ...item,
+      answeredCount,
+      isSpeaking,
+      isThinking,
+    };
+  });
+
+  return (
+    <div className={`product-debate-room-v2 ${loading ? 'is-live' : 'is-complete'}`}>
+      <div className="product-debate-room-head">
+        <div>
+          <span className="panel-kicker">AutoGen SelectorGroupChat</span>
+          <strong>{loading ? '상품개발모드2 회의 진행 중' : '상품개발모드2 회의 요약'}</strong>
+        </div>
+        <span className="sample-pill">{loading ? stageLabel : `${stagedMessages.length}개 메시지`}</span>
+      </div>
+
+      <article className="product-v2-brief">
+        <strong>{agendaTitle}</strong>
+        <p>논의 목표: 타깃 고객, 상품구조, 심사/금리/한도, 영업 가능성, IT 구현성, MVP 액션아이템</p>
+      </article>
+
+      <div className="product-v2-participant-grid">
+        {participantActivity.map((item) => {
+          return (
+            <article key={item.id} className={`product-v2-participant ${item.isSpeaking ? 'is-speaking' : ''} ${item.isThinking ? 'is-thinking' : ''}`}>
+              <span>{item.badge}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{item.dept}</small>
+                <p>{item.desc}</p>
+                <div className="product-v2-meta-row">
+                  <em>{item.isThinking ? 'Ollama 호출 중' : item.isSpeaking ? '방금 발언' : '대기 중'}</em>
+                  <em>발언 {item.answeredCount}회</em>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <article className="product-v2-flow-board">
+        <div className="product-v2-flow-head">
+          <strong>실시간 질문/응답 흐름</strong>
+          <small>{activeOllamaKey ? `${activeOllamaKey} 에이전트가 Ollama 응답 대기/생성 중` : '현재 호출 중인 에이전트를 추적하는 중'}</small>
+        </div>
+        <div className="product-v2-flow-canvas">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="product-v2-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L8,4 L0,8 z" fill="rgba(45, 112, 184, 0.85)" />
+              </marker>
+            </defs>
+            {flowEdges.map((edge) => {
+              const from = nodePositionMap[edge.from];
+              const to = nodePositionMap[edge.to];
+              if (!from || !to) return null;
+              const mx = (from.x + to.x) / 2;
+              const my = (from.y + to.y) / 2;
+              return (
+                <g key={edge.id}>
+                  <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} markerEnd="url(#product-v2-arrow)" className="product-v2-flow-line" />
+                  <text x={mx} y={my} className="product-v2-flow-count">{edge.count}</text>
+                </g>
+              );
+            })}
+          </svg>
+          {PRODUCT_V2_PARTICIPANTS.map((item) => {
+            const pos = nodePositionMap[item.key];
+            if (!pos) return null;
+            const isLive = activeOllamaKey === item.key;
+            return (
+              <div
+                key={`node-${item.key}`}
+                className={`product-v2-flow-node ${isLive ? 'is-live' : ''}`}
+                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+              >
+                <span>{item.badge}</span>
+                <strong>{item.key}</strong>
+              </div>
+            );
+          })}
+        </div>
+        <div className="product-v2-flow-list">
+          {flowEdges.length ? flowEdges.slice(-6).map((edge) => (
+            <div key={`edge-item-${edge.id}`} className="sample-pill">
+              {edge.from} → {edge.to} · {edge.count}회
+            </div>
+          )) : <div className="empty-box compact">질문/응답 흐름을 수집하는 중입니다.</div>}
+        </div>
+      </article>
+
+      <div className="product-v2-chatlog">
+        {(stagedMessages.length ? stagedMessages : [{ id: 'empty', speaker: 'system', message: '메시지를 준비 중입니다.' }]).slice(-8).map((item) => (
+          <article key={item.id} className="product-v2-chatline">
+            <strong>{item.speaker}</strong>
+            <p>{item.message || '메시지를 준비 중입니다.'}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="product-v2-trace-actions">
+        <button type="button" className="secondary-button" onClick={() => setShowTrace((prev) => !prev)}>
+          {showTrace ? '프롬프트/결과 접기' : '프롬프트/결과 보기'}
+        </button>
+        <span className="sample-pill">termination: MaxMessage(20) | TextMention("회의종료")</span>
+      </div>
+
+      {showTrace ? (
+        <article className="product-debate-ollama-trace">
+          <div className="product-debate-ollama-trace-head">
+            <strong>AutoGen/Ollama Trace</strong>
+            <small>입력 프롬프트와 응답 결과</small>
+          </div>
+          <div className="product-debate-ollama-trace-grid">
+            <section>
+              <span>프롬프트</span>
+              <pre>{promptJoined || '표시할 프롬프트가 아직 없습니다.'}</pre>
+            </section>
+            <section>
+              <span>결과</span>
+              <pre>{responseJoined || '표시할 결과가 아직 없습니다.'}</pre>
+            </section>
+          </div>
+        </article>
+      ) : null}
+    </div>
+  );
+}
+
+function ProductAutogenControlModal({
+  open = false,
+  onClose,
+  settings = null,
+  monitor = null,
+  runningJobs = [],
+  recentJobs = [],
+  onRefresh,
+  onSave,
+  onLoadJob,
+  saving = false,
+}) {
+  const [draft, setDraft] = useState({});
+  const [loadingJobId, setLoadingJobId] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setDraft(settings || {});
+  }, [open, settings]);
+
+  if (!open) {
+    return null;
+  }
+
+  const bind = (key, parser = (v) => v) => ({
+    value: draft?.[key] ?? '',
+    onChange: (event) => setDraft((prev) => ({ ...prev, [key]: parser(event.target.value) })),
+  });
+
+  return (
+    <motion.div className="prompt-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.section className="prompt-modal product-autogen-modal" initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.98 }} transition={{ duration: 0.2, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
+        <div className="prompt-modal-head">
+          <h3>AutoGen 모니터링 / 설정</h3>
+          <p>멈춤 구간을 추적하고 토론 실행 파라미터를 즉시 조정합니다.</p>
+        </div>
+        <div className="product-autogen-monitor">
+          <span>Ollama lock busy: {String(monitor?.lock_busy ?? '-')}</span>
+          <span>pending product_debate: {Number(monitor?.pending_product_debate_requests || 0)}</span>
+          <span>running jobs: {runningJobs.length}</span>
+          <span>priority: {String(monitor?.ontology_priority_enabled ?? '-')}</span>
+        </div>
+        <div className="product-autogen-running">
+          {runningJobs.length ? runningJobs.map((job) => (
+            <div key={job.job_id} className="sample-pill">{job.job_id} · {job.stage} · {job.detail || '-'}</div>
+          )) : <div className="empty-box compact">현재 실행 중인 상품개발 토론 job이 없습니다. 아래 최근 이력을 확인해주세요.</div>}
+        </div>
+        <div className="product-autogen-running">
+          <strong style={{ fontSize: 12, opacity: 0.8 }}>최근 작업 이력</strong>
+          {recentJobs.length ? recentJobs.map((job) => (
+            <div key={`recent-${job.job_id}`} className="sample-pill" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span>{job.job_id} · {job.mode || 'product'} · {job.status || '-'} · {job.stage || '-'} · {job.detail || '-'}</span>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={loadingJobId === String(job.job_id || '')}
+                onClick={async () => {
+                  const targetJobId = String(job.job_id || '');
+                  if (!targetJobId || !onLoadJob) {
+                    return;
+                  }
+                  setLoadingJobId(targetJobId);
+                  try {
+                    await onLoadJob(targetJobId);
+                  } finally {
+                    setLoadingJobId('');
+                  }
+                }}
+              >
+                {loadingJobId === String(job.job_id || '') ? '불러오는 중' : '결과 불러오기'}
+              </button>
+            </div>
+          )) : <div className="empty-box compact">최근 작업 이력이 없습니다.</div>}
+        </div>
+        <div className="product-autogen-grid">
+          <label><span>force_autogen</span><input type="checkbox" checked={Boolean(draft?.force_autogen)} onChange={(e) => setDraft((prev) => ({ ...prev, force_autogen: e.target.checked }))} /></label>
+          <label><span>use_autogen</span><input type="checkbox" checked={Boolean(draft?.use_autogen)} onChange={(e) => setDraft((prev) => ({ ...prev, use_autogen: e.target.checked }))} /></label>
+          <label><span>timeout(sec)</span><input type="number" {...bind('ollama_timeout_sec', (v) => Number(v || 0))} /></label>
+          <label><span>num_ctx</span><input type="number" {...bind('ollama_num_ctx', (v) => Number(v || 0))} /></label>
+          <label><span>num_predict</span><input type="number" {...bind('ollama_num_predict', (v) => Number(v || 0))} /></label>
+          <label><span>temperature</span><input type="number" step="0.01" {...bind('ollama_temperature', (v) => Number(v || 0))} /></label>
+          <label><span>turn_wait(sec)</span><input type="number" {...bind('turn_wait_seconds', (v) => Number(v || 0))} /></label>
+          <label><span>max_turns</span><input type="number" {...bind('max_turns', (v) => Number(v || 0))} /></label>
+          <label><span>retries</span><input type="number" {...bind('retries', (v) => Number(v || 0))} /></label>
+          <label><span>consensus_threshold</span><input type="number" step="0.01" {...bind('consensus_threshold', (v) => Number(v || 0))} /></label>
+          <label><span>fail_fast_if_busy</span><input type="checkbox" checked={Boolean(draft?.fail_fast_if_busy)} onChange={(e) => setDraft((prev) => ({ ...prev, fail_fast_if_busy: e.target.checked }))} /></label>
+        </div>
+        <div className="prompt-modal-actions">
+          <button type="button" className="secondary-button" onClick={onRefresh}>새로고침</button>
+          <button type="button" className="secondary-button" onClick={onClose}>닫기</button>
+          <button type="button" className="primary-button" onClick={() => onSave?.(draft)} disabled={saving}>{saving ? '저장 중' : '저장'}</button>
+        </div>
+      </motion.section>
+    </motion.div>
+  );
+}
+
 function ProductDevelopmentWorkspace({
   state,
   concepts = [],
   semanticRefresh = {},
+  mode = 'product',
   onRefreshAgendas,
   onSelectAgenda,
   onStartDebate,
   onOpenConcepts,
   onCompleteFinal,
+  onRestoreDebateJob,
 }) {
   const [showEnginePanel, setShowEnginePanel] = useState(false);
   const [pendingAgenda, setPendingAgenda] = useState(null);
   const [showAgendaConfirmModal, setShowAgendaConfirmModal] = useState(false);
   const [step2Armed, setStep2Armed] = useState(false);
   const [showFinalModal, setShowFinalModal] = useState(false);
+  const [showAutogenModal, setShowAutogenModal] = useState(false);
+  const [autogenSettings, setAutogenSettings] = useState(null);
+  const [autogenMonitor, setAutogenMonitor] = useState(null);
+  const [autogenRunningJobs, setAutogenRunningJobs] = useState([]);
+  const [autogenRecentJobs, setAutogenRecentJobs] = useState([]);
+  const [autogenSaving, setAutogenSaving] = useState(false);
   const [lastFinalOpenKey, setLastFinalOpenKey] = useState('');
   const agendas = state.agendas || [];
   const debatePayload = state.debate || null;
@@ -2653,7 +3055,7 @@ function ProductDevelopmentWorkspace({
   const agendaWhyDescription = isNewProductAgenda
     ? '승인 전환 가능성이 높은 세그먼트를 빠르게 상품화해 신규 실행액을 확보하고, 기존 거절군의 재유입 루트를 만들기 위해 개발합니다.'
     : '현재 심사 로직의 누락 구간을 보완해 과거 거절 고객 중 재평가 가능한 구간을 살리고, 리스크를 통제한 상태에서 승인률을 끌어올리기 위해 개발합니다.';
-  const showStep2 = Boolean(step2Armed || state.debateLoading || messages.length);
+  const showStep2 = Boolean(step2Armed || state.debateLoading || messages.length || state.debate);
   const hasFinalResult = Boolean(
     (newProduct && Object.keys(newProduct).length)
     || newProductCandidates.length
@@ -2687,6 +3089,25 @@ function ProductDevelopmentWorkspace({
     onCompleteFinal?.();
   };
 
+  const handleRefreshAutogenPanel = async () => {
+    const payload = await fetchProductDevelopmentAutogenSettings();
+    setAutogenSettings(payload?.settings || null);
+    setAutogenMonitor(payload?.runtime || null);
+    setAutogenRunningJobs(Array.isArray(payload?.running_jobs) ? payload.running_jobs : []);
+    setAutogenRecentJobs(Array.isArray(payload?.recent_jobs) ? payload.recent_jobs : []);
+  };
+
+  const handleSaveAutogenPanel = async (draft) => {
+    setAutogenSaving(true);
+    try {
+      const payload = await updateProductDevelopmentAutogenSettings(draft || {});
+      setAutogenSettings(payload?.settings || null);
+      await handleRefreshAutogenPanel();
+    } finally {
+      setAutogenSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!showStep2 || state.debateLoading || !hasFinalResult) {
       return;
@@ -2698,12 +3119,19 @@ function ProductDevelopmentWorkspace({
     setLastFinalOpenKey(finalOpenKey);
   }, [showStep2, state.debateLoading, hasFinalResult, finalOpenKey, lastFinalOpenKey]);
 
+  useEffect(() => {
+    if (!showAutogenModal) {
+      return;
+    }
+    void handleRefreshAutogenPanel();
+  }, [showAutogenModal]);
+
   return (
     <motion.article className="product-development-workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, ease: 'easeOut' }}>
       {!showStep2 ? (
       <div className="product-dev-hero">
         <div>
-          <span className="panel-kicker">상품개발모드</span>
+          <span className="panel-kicker">{mode === 'product2' ? '상품개발모드2' : '상품개발모드'}</span>
           <h2>통계 CUBE X Clsuter 분석을 기반 신상품 설계</h2>
           <div className="product-dev-reason-box product-dev-reason-box-hero">
             <strong>후보 생성 근거</strong>
@@ -2770,16 +3198,31 @@ function ProductDevelopmentWorkspace({
         <section className="product-dev-section">
           <div className="product-dev-section-head">
             <span className="panel-kicker">Step 2</span>
-            <strong>{state.debateLoading ? '4개 부서 실시간 회의' : '4개 부서 토론'}</strong>
+            <strong>{mode === 'product2' ? (state.debateLoading ? 'SelectorGroupChat 실시간 회의' : 'SelectorGroupChat 토론') : (state.debateLoading ? '4개 부서 실시간 회의' : '4개 부서 토론')}</strong>
+            <button type="button" className="secondary-button" onClick={() => setShowAutogenModal(true)}>
+              AutoGen 모니터링/설정
+            </button>
           </div>
-          <ProductDebateMeetingRoom
-            loading={state.debateLoading}
-            messages={messages}
-            selectedAgenda={state.selectedAgenda}
-            stage={state.debateStage}
-            stageDetail={state.debateStageDetail}
-            trace={state.debateTrace}
-          />
+          {mode === 'product2' ? (
+            <ProductDebateMeetingRoomV2
+              loading={state.debateLoading}
+              messages={messages}
+              selectedAgenda={state.selectedAgenda}
+              stage={state.debateStage}
+              stageDetail={state.debateStageDetail}
+              llmMeta={llmMeta}
+            />
+          ) : (
+            <ProductDebateMeetingRoom
+              loading={state.debateLoading}
+              messages={messages}
+              selectedAgenda={state.selectedAgenda}
+              stage={state.debateStage}
+              stageDetail={state.debateStageDetail}
+              trace={state.debateTrace}
+              llmMeta={llmMeta}
+            />
+          )}
         </section>
       ) : null}
 
@@ -2794,6 +3237,22 @@ function ProductDevelopmentWorkspace({
       <div className="product-dev-concept-row">
         {concepts.map((item) => <span key={item.id}>{item.icon} {item.label}</span>)}
       </div>
+      <AnimatePresence>
+        {showAutogenModal ? (
+          <ProductAutogenControlModal
+            open={showAutogenModal}
+            onClose={() => setShowAutogenModal(false)}
+            settings={autogenSettings}
+            monitor={autogenMonitor}
+            runningJobs={autogenRunningJobs}
+            recentJobs={autogenRecentJobs}
+            onRefresh={handleRefreshAutogenPanel}
+            onSave={handleSaveAutogenPanel}
+            onLoadJob={onRestoreDebateJob}
+            saving={autogenSaving}
+          />
+        ) : null}
+      </AnimatePresence>
       <AnimatePresence>
         {typeof document !== 'undefined' && showFinalModal && hasFinalResult
           ? createPortal(
@@ -2943,6 +3402,7 @@ export default function OntologyWorkbench({
   const [activeWorkspaceResultTab, setActiveWorkspaceResultTab] = useState('summary');
   const [workspaceMode, setWorkspaceMode] = useState('conversation');
   const [answerMode, setAnswerMode] = useState('general');
+  const isProductAnswerMode = answerMode === 'product' || answerMode === 'product2';
   const [memoDepartment, setMemoDepartment] = useState('solution');
   const [memoNotes, setMemoNotes] = useState('');
   const [memoDepartmentNotes, setMemoDepartmentNotes] = useState({});
@@ -2993,6 +3453,9 @@ export default function OntologyWorkbench({
   const [conversationTurns, setConversationTurns] = useState([]);
   const [avoidedFeatureIds, setAvoidedFeatureIds] = useState([]);
   const [clarificationAnswered, setClarificationAnswered] = useState(false);
+  const [pendingClarificationOption, setPendingClarificationOption] = useState(null);
+  const [typedSummaryBody, setTypedSummaryBody] = useState('');
+  const [historyRevealed, setHistoryRevealed] = useState(false);
   const avoidedFeatureIdsRef = useRef([]);
   const onErrorRef = useRef(onError);
   const runtimeRequestRef = useRef('');
@@ -3160,7 +3623,7 @@ export default function OntologyWorkbench({
   }, [answerMode, departmentConcepts, memoDepartment, memoDepartmentNotes, memoNotes]);
 
   useEffect(() => {
-    if (answerMode === 'product') {
+    if (isProductAnswerMode) {
       setWorkspaceMode('strategy');
     } else if (workspaceMode === 'strategy') {
       setWorkspaceMode('conversation');
@@ -3251,7 +3714,7 @@ export default function OntologyWorkbench({
       // ignore storage failures and still try to open the modal
     }
     setOnboardingStep('department');
-    setOnboardingMode(answerMode === 'product' ? 'product' : 'general');
+    setOnboardingMode(isProductAnswerMode ? 'product' : 'general');
     setOnboardingDepartment('');
     setOnboardingQuestionIndex(0);
     setOnboardingAnswers({});
@@ -4027,20 +4490,75 @@ export default function OntologyWorkbench({
 
   const latestConversationTurnId = displayedConversationTurns[displayedConversationTurns.length - 1]?.id;
   const orderedConversationTurns = latestConversationTurnId
-    ? [
-        ...displayedConversationTurns.filter((turn) => turn.id === latestConversationTurnId),
-        ...displayedConversationTurns.filter((turn) => turn.id !== latestConversationTurnId).reverse(),
-      ]
+    ? (historyRevealed
+      ? [
+          ...displayedConversationTurns.filter((turn) => turn.id !== latestConversationTurnId).reverse(),
+          ...displayedConversationTurns.filter((turn) => turn.id === latestConversationTurnId),
+        ]
+      : displayedConversationTurns.filter((turn) => turn.id === latestConversationTurnId))
     : displayedConversationTurns;
+
+  function handleConversationWheel(event) {
+    if (event.deltaY < 0) {
+      setHistoryRevealed(true);
+    }
+  }
+
+  function parseRepaymentInputSlots(text) {
+    const raw = String(text || '');
+    const compact = raw.replace(/\s+/g, '').toLowerCase();
+    const principalMatched = /(원금|대출금|principal|loanamount)/i.test(raw) && /(\d[\d,]*(?:\.\d+)?)(만|만원|원|m|k|천|백)?/i.test(raw);
+    const rateMatched = /(연이율|금리|interest|rate)/i.test(raw) && /(\d{1,2}(?:\.\d{1,2})?)\s*%?/i.test(raw);
+    const termMatched = /(기간|개월|month|term|년)/i.test(raw) && /(\d{1,3})\s*(개월|month|년|yr|years)?/i.test(raw);
+    const repaymentMatched = /(상환방식|원리금균등|원금균등|만기일시)/i.test(raw) || /(equalpayment|equalprincipal|bullet)/i.test(compact);
+    return {
+      principal: principalMatched,
+      rate: rateMatched,
+      term: termMatched,
+      repayment: repaymentMatched,
+    };
+  }
+
+  function buildMissingRepaymentFieldsText(slotState, repaymentOptional) {
+    const missing = [];
+    if (!slotState.principal) missing.push('원금');
+    if (!slotState.rate) missing.push('연이율(%)');
+    if (!slotState.term) missing.push('기간(개월)');
+    if (!repaymentOptional && !slotState.repayment) missing.push('상환방식');
+    return missing;
+  }
 
   function handleRunQuery() {
     const nextQuestion = queryInput.trim();
     if (!nextQuestion) {
       return;
     }
+    const finalAnswerBodyLower = String(finalAnswerBody || '').toLowerCase();
+    const isInputCollectionTurn = (
+      /(원금|연이율|금리|기간|개월|상환방식|원리금)/i.test(finalAnswerBody || '')
+      && (
+        finalAnswerBodyLower.includes('입력')
+        || finalAnswerBodyLower.includes('알려주')
+        || finalAnswerBodyLower.includes('정보가 필요')
+      )
+    );
+    const isGenericFollowupTurn = (
+      Boolean(backendState?.workbench?.clarification?.needed)
+      || /(추가\s*질문|다음\s*질문|다음\s*단계|부족한\s*정보|누락된\s*정보|확인할게요|선택해주세요|알려주세요|입력해주세요|더\s*알려)/i.test(finalAnswerBody || '')
+    );
+    const repaymentOptionalInTurn = /상환방식.{0,20}(선택|선택사항)/i.test(finalAnswerBody || '');
+    const slotState = parseRepaymentInputSlots(nextQuestion);
+    const missingFields = isInputCollectionTurn
+      ? buildMissingRepaymentFieldsText(slotState, repaymentOptionalInTurn)
+      : [];
     const runtimeQuestion = pendingImageQuestionPayload && nextQuestion === SCREENING_IMAGE_PROMPT_TEXT
       ? pendingImageQuestionPayload
       : nextQuestion;
+    const runtimeQuestionWithFollowupHint = missingFields.length > 0
+      ? `${runtimeQuestion}\n\n[intent_lock:creative_ideation]\n[FOLLOWUP_GUIDE] 아직 누락된 항목: ${missingFields.join(', ')}. 누락 항목만 짧게 다시 질문해줘. 이미 입력된 값은 반복해서 요구하지 마.`
+      : isGenericFollowupTurn
+        ? `${runtimeQuestion}\n\n[intent_lock:creative_ideation]\n[FOLLOWUP_GUIDE] 직전 답변이 후속 확인 질문이었습니다. 사용자가 방금 준 답을 반영해 대화를 계속 진행하고, 불필요한 재질문은 피해주세요.`
+        : runtimeQuestion;
     const nextProductCode = resolveProductForQuestion(runtimeQuestion, products);
     setConversationTurns((previous) => ([
       ...previous,
@@ -4059,8 +4577,22 @@ export default function OntologyWorkbench({
     ].slice(-12)));
     setBackendState((previous) => ({ ...previous, loading: true, error: '', workbench: null }));
     setClarificationAnswered(false);
-    submitQuestion(runtimeQuestion);
+    setPendingClarificationOption(null);
+    setHistoryRevealed(false);
+    submitQuestion(runtimeQuestionWithFollowupHint);
     setPendingImageQuestionPayload('');
+    if (missingFields.length > 0 || isGenericFollowupTurn) {
+      onToast?.({
+        id: `ontology-missing-fields-${Date.now()}`,
+        kicker: 'Follow-up',
+        title: '후속 대화 intent lock 적용',
+        meta: missingFields.length > 0 ? missingFields.join(', ') : 'generic follow-up',
+        message: missingFields.length > 0
+          ? '부분 입력을 인식했습니다. 남은 항목만 이어서 물어보겠습니다.'
+          : '직전 후속질문 맥락을 유지해 creative_ideation으로 이어갑니다.',
+        tone: 'cyan',
+      });
+    }
     onToast?.({
       id: `ontology-runtime-${Date.now()}`,
       kicker: 'Semantic Runtime',
@@ -4177,6 +4709,7 @@ export default function OntologyWorkbench({
       const job = await startProductDevelopmentDebateJob({
         selected_agenda: agenda,
         department_concepts: departmentConceptsRef.current,
+        mode: answerMode,
       });
       const jobId = String(job?.job_id || '');
       if (!jobId) {
@@ -4201,6 +4734,39 @@ export default function OntologyWorkbench({
   async function handleResetProductDevelopmentMode() {
     setProductDevelopmentState(INITIAL_PRODUCT_DEVELOPMENT_STATE);
     await handleLoadProductDevelopmentAgendas(true);
+  }
+
+  async function handleRestoreProductDevelopmentDebateJob(jobId) {
+    const targetJobId = String(jobId || '').trim();
+    if (!targetJobId) {
+      return;
+    }
+    const statusPayload = await fetchProductDevelopmentDebateJob(targetJobId);
+    const payload = statusPayload?.result || null;
+    if (!payload) {
+      throw new Error('해당 job에 복원 가능한 결과가 없습니다.');
+    }
+    const restoredDebate = payload?.result || payload || null;
+    const restoredAgenda = restoredDebate?.selected_agenda || productDevelopmentState.selectedAgenda || null;
+    setProductDevelopmentState((previous) => ({
+      ...previous,
+      selectedAgenda: restoredAgenda,
+      debateLoading: false,
+      debateJobId: targetJobId,
+      debateStage: String(statusPayload?.stage || 'completed'),
+      debateStageDetail: String(statusPayload?.detail || '완료된 토론 결과를 불러왔습니다.'),
+      debateError: String(statusPayload?.error || ''),
+      debate: payload,
+      debateSource: payload?.source || '',
+    }));
+    onToast?.({
+      id: `product-dev-restore-${Date.now()}`,
+      kicker: 'Product Workshop',
+      title: '완료된 토론 결과 불러오기 완료',
+      meta: targetJobId,
+      message: '최근 완료된 상품개발 토론 결과를 화면에 복원했습니다.',
+      tone: 'completed',
+    });
   }
 
   function buildQuestionFromDroppedImage(file) {
@@ -4402,23 +4968,26 @@ export default function OntologyWorkbench({
         }
         transientFailureCount = 0;
         const nextStatus = String(
-          statusPayload?.status
-          || statusPayload?.job_status
+          statusPayload?.job_status
+          || statusPayload?.status
           || statusPayload?.job?.status
           || '',
         ).toLowerCase();
         const stage = String(
-          statusPayload?.stage
-          || statusPayload?.job_stage
+          statusPayload?.job_stage
+          || statusPayload?.stage
           || statusPayload?.job?.stage
           || '',
         );
         const detail = String(
-          statusPayload?.detail
-          || statusPayload?.job_detail
+          statusPayload?.job_detail
+          || statusPayload?.detail
           || statusPayload?.job?.detail
           || '',
         );
+        const normalizedStage = stage.toLowerCase();
+        const isCompletedStatus = nextStatus === 'completed' || normalizedStage === 'completed';
+        const isFailedStatus = nextStatus === 'failed' || normalizedStage === 'failed';
         const fingerprint = `${nextStatus}::${stage}::${detail}`;
         if (fingerprint !== lastProgressFingerprint) {
           lastProgressFingerprint = fingerprint;
@@ -4463,8 +5032,8 @@ export default function OntologyWorkbench({
             return [...prevTrace, nextItem].slice(-5);
           })(),
         }));
-        if (nextStatus === 'completed') {
-          const payload = statusPayload?.result || null;
+        if (isCompletedStatus) {
+          const payload = statusPayload?.job_result || statusPayload?.result || null;
           const isFallback = String(payload?.source || '').toLowerCase().includes('fallback');
           const llmErrorText = String(payload?.llm?.error || '').trim();
           const fallbackReason = classifyDebateFallbackReason(llmErrorText);
@@ -4498,8 +5067,8 @@ export default function OntologyWorkbench({
           });
           return;
         }
-        if (nextStatus === 'failed') {
-          const errorText = String(statusPayload?.error || '상품개발 토론 생성에 실패했습니다.');
+        if (isFailedStatus) {
+          const errorText = String(statusPayload?.job_error || statusPayload?.error || '상품개발 토론 생성에 실패했습니다.');
           const failedReason = classifyDebateFallbackReason(errorText);
           setProductDevelopmentState((previous) => ({
             ...previous,
@@ -4538,15 +5107,76 @@ export default function OntologyWorkbench({
   }, [productDevelopmentState.debateLoading, productDevelopmentState.debateJobId, onToast]);
 
   useEffect(() => {
-    if (answerMode !== 'product') {
+    if (!productDevelopmentState.debateLoading) {
+      return undefined;
+    }
+    let cancelled = false;
+    const recoverFromRecentCompleted = async () => {
+      try {
+        const monitorPayload = await fetchProductDevelopmentAutogenSettings();
+        if (cancelled) return;
+        const runningJobs = Array.isArray(monitorPayload?.running_jobs) ? monitorPayload.running_jobs : [];
+        if (runningJobs.length > 0) {
+          return;
+        }
+        const recentJobs = Array.isArray(monitorPayload?.recent_jobs) ? monitorPayload.recent_jobs : [];
+        const preferredJob = recentJobs.find((job) => String(job?.job_id || '') === String(productDevelopmentState.debateJobId || ''));
+        const completedJob = preferredJob && String(preferredJob?.status || '').toLowerCase() === 'completed'
+          ? preferredJob
+          : recentJobs.find((job) => String(job?.status || '').toLowerCase() === 'completed');
+        if (!completedJob?.job_id) {
+          return;
+        }
+        const snapshot = await fetchProductDevelopmentDebateJob(String(completedJob.job_id));
+        if (cancelled) return;
+        const statusText = String(snapshot?.status || snapshot?.job_status || '').toLowerCase();
+        if (statusText !== 'completed' || !snapshot?.result) {
+          return;
+        }
+        const restored = snapshot.result;
+        const restoredDebate = restored?.result || restored || null;
+        const restoredAgenda = restoredDebate?.selected_agenda || null;
+        setProductDevelopmentState((previous) => ({
+          ...previous,
+          selectedAgenda: restoredAgenda || previous.selectedAgenda,
+          debateLoading: false,
+          debateJobId: String(completedJob.job_id),
+          debateStage: String(snapshot?.stage || 'completed'),
+          debateStageDetail: String(snapshot?.detail || '완료된 토론 결과를 자동 복원했습니다.'),
+          debateError: '',
+          debate: restored,
+          debateSource: restored?.source || previous.debateSource || '',
+        }));
+        onToast?.({
+          id: `product-dev-auto-recover-${Date.now()}`,
+          kicker: 'Product Workshop',
+          title: '토론 결과 자동 복원',
+          meta: String(completedJob.job_id),
+          message: '실시간 표시가 멈춘 상태를 감지해 완료 결과를 자동으로 복원했습니다.',
+          tone: 'completed',
+        });
+      } catch {
+        // silent: polling loop handles normal error path
+      }
+    };
+    const timerId = window.setTimeout(recoverFromRecentCompleted, 5500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [productDevelopmentState.debateLoading, productDevelopmentState.debateJobId, onToast]);
+
+  useEffect(() => {
+    if (!isProductAnswerMode) {
       return;
     }
     void handleLoadProductDevelopmentAgendas(false);
   }, [answerMode]);
 
-  function handleClarificationSelect(option) {
+  function submitClarificationOption(option) {
     const clarificationQuery = `${currentQuestion} - ${option.feature_name || option.feature_id}`;
     setClarificationAnswered(true);
+    setPendingClarificationOption(null);
     setConversationTurns((previous) => ([
       ...previous,
       {
@@ -4564,6 +5194,21 @@ export default function OntologyWorkbench({
     ].slice(-12)));
     setBackendState((previous) => ({ ...previous, loading: true, error: '', workbench: null }));
     submitQuestion(clarificationQuery);
+  }
+
+  function handleClarificationSelect(option) {
+    setPendingClarificationOption(option || null);
+  }
+
+  function handleClarificationConfirm() {
+    if (!pendingClarificationOption) {
+      return;
+    }
+    submitClarificationOption(pendingClarificationOption);
+  }
+
+  function handleClarificationReject() {
+    setPendingClarificationOption(null);
   }
 
   function handleToggleAvoidedFeature(featureId) {
@@ -4664,11 +5309,11 @@ export default function OntologyWorkbench({
     .map((stage) => ({ ...stage, status: isAgentIdle ? 'pending' : stage.status }))
     .slice(0, 5);
   const agentPanelHeadline = isAgentIdle ? '질문 대기 중' : (isRuntimeComplete ? '분석 완료' : progressHeadline);
-  const activeToolSummary = (answerMode === 'product' ? productModeToolCards : activeToolCards)
+  const activeToolSummary = (isProductAnswerMode ? productModeToolCards : activeToolCards)
     .map((tool) => tool.title || tool.id)
     .filter(Boolean)
     .slice(0, 3);
-  const runtimeToolCards = answerMode === 'product' ? productModeToolCards : activeToolCards;
+  const runtimeToolCards = isProductAnswerMode ? productModeToolCards : activeToolCards;
   const semanticRefresh = semanticRefreshState.refresh || {};
   const semanticRefreshStatus = String(semanticRefresh.status || '');
   const semanticRefreshLabel = semanticRefreshState.error
@@ -4720,6 +5365,13 @@ export default function OntologyWorkbench({
     ...(insightToolCard?.metrics || []).slice(0, 2),
   ].slice(0, 4);
   const normalizedIntent = String(intentClassification?.intent || resultSummary.intent || intentLabel || '').toLowerCase();
+  const isCreativeIdeationIntent = (
+    normalizedIntent.includes('creative')
+    || normalizedIntent.includes('ideation')
+    || normalizedIntent.includes('brainstorm')
+  );
+  const shouldHideCustomerCluster = isCreativeIdeationIntent;
+  const shouldHideExplainability = isCreativeIdeationIntent;
   const intentInterpretationMessage = `질문을 '${intentLabel}${intentConfidence ? ` (${(intentConfidence * 100).toFixed(0)}%)` : ''}' intent로 해석했습니다.`;
   const isRejectReasonIntent = (
     compactQuestionText.includes('거절')
@@ -4780,8 +5432,10 @@ export default function OntologyWorkbench({
   };
   const prioritizedSummaryTools = summaryToolPriority
     .map((key) => ({ key, tool: summaryToolMap[key] }))
+    .filter((item) => !(shouldHideExplainability && item.key === 'explainability'))
+    .filter((item) => !(shouldHideCustomerCluster && item.key === 'cluster'))
     .filter((item) => Boolean(item.tool));
-  const shouldPinExplainabilityInSummaryMain = !forcePolicyOnlyInSummary && Boolean(insightToolCard);
+  const shouldPinExplainabilityInSummaryMain = !forcePolicyOnlyInSummary && !shouldHideExplainability && Boolean(insightToolCard);
   const prioritizedSummarySideTools = prioritizedSummaryTools.filter((item) => item.key !== 'explainability');
   const summaryPriorityLabelMap = {
     cluster: 'Cluster',
@@ -4791,6 +5445,79 @@ export default function OntologyWorkbench({
   const summaryPriorityMessage = prioritizedSummaryTools.length
     ? `TOOL AGENT 우선 노출: ${prioritizedSummaryTools.map((item) => summaryPriorityLabelMap[item.key]).join(' → ')}`
     : 'TOOL AGENT 우선 노출: 연결된 카드가 없어 기본 요약만 표시합니다.';
+  const clarificationData = backendState.workbench?.clarification || {};
+  const finalAnswerBodyNormalized = String(finalAnswerBody || '').toLowerCase();
+  const mentionsInputRequest = (
+    finalAnswerBodyNormalized.includes('입력해주세요')
+    || finalAnswerBodyNormalized.includes('입력해 주세요')
+    || finalAnswerBodyNormalized.includes('알려주시면')
+    || finalAnswerBodyNormalized.includes('정보가 필요')
+    || finalAnswerBodyNormalized.includes('필요한 입력값')
+  );
+  const requestedInputFields = [
+    /(원금|대출금|loan amount|principal)/i.test(finalAnswerBody) ? { feature_id: 'missing_principal', feature_name: '원금', axis_key: 'input.required' } : null,
+    /(연이율|금리|interest|rate)/i.test(finalAnswerBody) ? { feature_id: 'missing_rate', feature_name: '연이율(%)', axis_key: 'input.required' } : null,
+    /(기간|개월|month|term)/i.test(finalAnswerBody) ? { feature_id: 'missing_term', feature_name: '기간(개월)', axis_key: 'input.required' } : null,
+    /(상환방식|원리금균등|원금균등|만기일시)/i.test(finalAnswerBody) ? { feature_id: 'missing_repayment', feature_name: '상환방식', axis_key: 'input.required' } : null,
+  ].filter(Boolean);
+  const looksLikeInputRequirementAnswer = mentionsInputRequest && requestedInputFields.length > 0;
+  const repaymentIsOptional = /상환방식.{0,20}(선택|선택사항)/i.test(finalAnswerBody || '');
+  const clarificationQuestionText = clarificationData.question
+    || (looksLikeInputRequirementAnswer
+      ? `추가 정보가 필요해요. ${requestedInputFields.map((item) => item.feature_name).join(', ')} 값을 알려주세요.`
+      : '어떤 축을 우선해서 볼까요?');
+  const clarificationOptions = (clarificationData.options || []).length
+    ? (clarificationData.options || [])
+    : requestedInputFields.length
+      ? requestedInputFields
+    : representativeFeatures
+      .map((feature) => ({
+        feature_id: feature.feature_id || feature.feature_name,
+        feature_name: feature.feature_name || feature.feature_id,
+        axis_key: feature.axis_key || '',
+      }))
+      .filter((item) => Boolean(item.feature_id))
+      .slice(0, 4);
+  const shouldShowClarificationBlock = !clarificationAnswered && (
+    Boolean(clarificationData?.needed)
+    || looksLikeInputRequirementAnswer
+  );
+  const followupPromptTemplate = looksLikeInputRequirementAnswer
+    ? `원금 1000만원, 연이율 5.0%, 기간 36개월${repaymentIsOptional ? '' : ', 상환방식 원리금균등'}`
+    : '';
+  const clarificationAutoFillHints = [
+    representativeFeatures[0]?.feature_name ? `온톨로지 축: ${representativeFeatures[0].feature_name}` : null,
+    !shouldHideCustomerCluster && resultTopCluster?.label ? `고객군집: ${resultTopCluster.label}` : null,
+    selectedProductCode ? `상품: ${getProductDisplayName(selectedProductCode)}` : null,
+  ].filter(Boolean).slice(0, 2);
+  const summaryBodyFallback = '핵심 결과를 실제 로그와 온톨로지 근거를 중심으로 정리했습니다.';
+  const summaryBodyText = finalAnswerBody || summaryBodyFallback;
+  const summaryBodyCompact = String(summaryBodyText || '').replace(/\s+/g, '').toLowerCase();
+  const isInputCollectionPhase = (
+    summaryBodyCompact.includes('입력')
+    && (
+      summaryBodyCompact.includes('원금')
+      || summaryBodyCompact.includes('연이율')
+      || summaryBodyCompact.includes('기간')
+      || summaryBodyCompact.includes('상환방식')
+    )
+  );
+  const runtimePromptPlaceholder = isInputCollectionPhase
+    ? '후속 입력을 이어서 적어주세요. 예: 원금 1000만원, 연이율 5.2%, 기간 36개월, 상환방식 원리금균등'
+    : '로니에게 이어서 질문하세요. 예: 40대 중 직위험군 기준으로 한도는?';
+
+  useEffect(() => {
+    setTypedSummaryBody('');
+    let index = 0;
+    const timerId = window.setInterval(() => {
+      index += 1;
+      setTypedSummaryBody(summaryBodyText.slice(0, index));
+      if (index >= summaryBodyText.length) {
+        window.clearInterval(timerId);
+      }
+    }, 20);
+    return () => window.clearInterval(timerId);
+  }, [summaryBodyText]);
   const ruleIntentId = String(intentClassification?.rule_intent || '').trim();
   const embeddingIntentId = String(intentClassification?.embedding_intent || '').trim();
   const finalIntentId = String(intentClassification?.intent || resultSummary.intent || '').trim();
@@ -4879,7 +5606,7 @@ export default function OntologyWorkbench({
             value={queryInput}
             onChange={(event) => handlePromptInputChange(event.target.value)}
             onKeyDown={handlePromptTextareaKeyDown}
-            placeholder="추가로 궁금한 점을 입력해 주세요. 예: 승인군과 거절군의 평균 금리 차이는?"
+            placeholder={runtimePromptPlaceholder}
             rows={2}
           />
           <PromptLottieActionButton
@@ -5063,7 +5790,7 @@ export default function OntologyWorkbench({
                 </p>
                 <span><i aria-hidden="true"><b /><b /><b /></i>{roniCaption.detail}</span>
               </div>
-              {answerMode === 'product' ? (
+              {isProductAnswerMode ? (
                 <div className="agent-panel-status-card product-left-status-card">
                   <div className="agent-panel-card-head">
                     <div>
@@ -5115,29 +5842,29 @@ export default function OntologyWorkbench({
                 className="agent-metric-cube-launcher"
                 whileHover={reduceMotion ? undefined : { y: -3, scale: 1.015 }}
                 whileTap={reduceMotion ? undefined : { scale: 0.985 }}
-                onClick={() => handleOpenMetricCubeModal(answerMode === 'product' ? 'persona' : 'cube')}
-                aria-label={answerMode === 'product' ? '선택 부서 페르소나와 Ollama 흐름 보기' : '통계 큐브와 군집분석 보기'}
+                onClick={() => handleOpenMetricCubeModal(isProductAnswerMode ? 'persona' : 'cube')}
+                aria-label={isProductAnswerMode ? '선택 부서 페르소나와 Ollama 흐름 보기' : '통계 큐브와 군집분석 보기'}
               >
                 <span className="agent-metric-cube-orb" aria-hidden="true"><i /><i /><i /></span>
                 <span className="agent-metric-cube-copy">
-                  <small>{answerMode === 'product' ? '선택 부서 페르소나' : '통계 큐브'}</small>
-                  <strong>{answerMode === 'product' ? `${activeProductDept.icon} ${activeProductDept.label} 관점으로 토론 보기` : '평균 · 승인률 · 연체위험 보기'}</strong>
+                  <small>{isProductAnswerMode ? '선택 부서 페르소나' : '통계 큐브'}</small>
+                  <strong>{isProductAnswerMode ? `${activeProductDept.icon} ${activeProductDept.label} 관점으로 토론 보기` : '평균 · 승인률 · 연체위험 보기'}</strong>
                   <em>
-                    {answerMode === 'product'
+                    {isProductAnswerMode
                       ? `${activeProductDeptMemo || activeProductDept.defaultConcept}`
                       : (
                         metricCubeState.data?.meta?.segment_count
                           ? `${Number(metricCubeState.data.meta.segment_count).toLocaleString('ko-KR')}개 세그먼트`
                           : 'data/segment_metric_cube.json'
                       )}
-                    {answerMode === 'product'
+                    {isProductAnswerMode
                       ? ''
                       : ` · ${metricCubeState.data?.cluster_summary?.total_clusters
                         ? `군집 ${Number(metricCubeState.data.cluster_summary.total_clusters).toLocaleString('ko-KR')}개`
                         : '군집분석 함께 보기'}`}
                   </em>
                   <small className={`agent-metric-cube-refresh ${semanticRefreshStatus === 'running' ? 'is-running' : ''}`}>
-                    {answerMode === 'product' ? '클릭하면 Ollama 입력/출력 Trace를 확인할 수 있어요' : `${semanticRefreshLabel} · ${semanticRefreshDetail}`}
+                    {isProductAnswerMode ? '클릭하면 Ollama 입력/출력 Trace를 확인할 수 있어요' : `${semanticRefreshLabel} · ${semanticRefreshDetail}`}
                   </small>
                 </span>
                 <span className="agent-metric-cube-arrow" aria-hidden="true">↗</span>
@@ -5169,7 +5896,7 @@ export default function OntologyWorkbench({
                       value={queryInput}
                       onChange={(event) => handlePromptInputChange(event.target.value)}
                       onKeyDown={handlePromptTextareaKeyDown}
-                      placeholder="로니에게 이어서 질문하세요. 예: 40대 중 직위험군 기준으로 한도는?"
+                      placeholder={runtimePromptPlaceholder}
                       rows={2}
                     />
                   </div>
@@ -5267,9 +5994,10 @@ export default function OntologyWorkbench({
           </section>
 
           <section className="panel ontology-chat-shell copilot-thread-shell" style={{ maxWidth: '100%', minWidth: 0 }}>
-            <div className="ontology-conversation-stack ontology-conversation-thread">
-              {answerMode === 'product' ? (
+            <div className="ontology-conversation-stack ontology-conversation-thread" onWheel={handleConversationWheel}>
+              {isProductAnswerMode ? (
                 <ProductDevelopmentWorkspace
+                  mode={answerMode}
                   state={productDevelopmentState}
                   concepts={departmentConceptList}
                   semanticRefresh={semanticRefresh}
@@ -5278,9 +6006,10 @@ export default function OntologyWorkbench({
                   onStartDebate={handleStartProductDevelopmentDebate}
                   onOpenConcepts={() => setShowConceptModal(true)}
                   onCompleteFinal={handleResetProductDevelopmentMode}
+                  onRestoreDebateJob={handleRestoreProductDevelopmentDebateJob}
                 />
               ) : null}
-              {!displayedConversationTurns.length && answerMode !== 'product' ? (
+              {!displayedConversationTurns.length && !isProductAnswerMode ? (
                 <article className="ontology-empty-thread">
                   <GeneralAnswerModeIntro />
                   <span className="panel-kicker">일반답변모드</span>
@@ -5288,7 +6017,7 @@ export default function OntologyWorkbench({
                   <p>버니가 질문에 맞는 심사 로그, 고객군 정보, 규제 근거를 필요한 만큼만 찾아보고 쉬운 말로 정리해드려요. 복잡한 분석 화면을 먼저 볼 필요 없이, 질문을 쓰고 보내기만 누르면 됩니다.</p>
                 </article>
               ) : null}
-              {answerMode !== 'product' ? orderedConversationTurns.map((turn) => {
+              {!isProductAnswerMode ? orderedConversationTurns.map((turn) => {
                 const isLatest = turn.id === latestConversationTurnId;
                 const isRuntimePending = backendState.loading || runtimeJobStatus === 'queued' || runtimeJobStatus === 'running';
                 const showAnswerProgress = isLatest && isRuntimePending && !hasResolvedRuntimeAnswer;
@@ -5298,8 +6027,19 @@ export default function OntologyWorkbench({
                   ? (resolvedAnswerSummary?.highlights || []).flatMap((item) => [item.label, item.value]).filter(Boolean)
                   : [turn.product, turn.axis].filter(Boolean);
                 if (!isLatest) {
+                  if (!historyRevealed) {
+                    return null;
+                  }
                   return (
-                    <details key={turn.id} className="ontology-history-accordion">
+                    <motion.div
+                      key={turn.id}
+                      className="ontology-turn-stack"
+                      layout
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.24, ease: 'easeOut' }}
+                    >
+                    <details className="ontology-history-accordion">
                       <summary>
                         <div className="ontology-history-summary-main">
                           <span className="panel-kicker">이전 대화</span>
@@ -5343,10 +6083,18 @@ export default function OntologyWorkbench({
                         </article>
                       </div>
                     </details>
+                    </motion.div>
                   );
                 }
                 return (
-                  <React.Fragment key={turn.id}>
+                  <motion.div
+                    key={turn.id}
+                    className="ontology-turn-stack"
+                    layout
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.24, ease: 'easeOut' }}
+                  >
                     <article className="ontology-chat-bubble ontology-chat-bubble-user">
                       <div className="ontology-chat-meta-row">
                         <span className="ontology-chat-role-with-avatar">
@@ -5359,7 +6107,7 @@ export default function OntologyWorkbench({
                     </article>
 
                     {isLatest && workspaceToolTabs.length ? (
-                      <section className="workspace-result-panel" aria-label="질문 결과 분석 탭">
+                      <section className={`workspace-result-panel ${backendState.loading ? 'is-prompt-pushing' : ''}`} aria-label="질문 결과 분석 탭">
                         <div className="workspace-tool-tabs" role="tablist" aria-label="대화형 도구 뷰">
                           {workspaceToolTabs.map((tab) => (
                             <button
@@ -5377,7 +6125,7 @@ export default function OntologyWorkbench({
 
                         <div className="workspace-result-tab-body">
                           {selectedWorkspaceResultTab === 'summary' ? (
-                            <div className="workspace-summary-view">
+                            <div className={`workspace-summary-view ${isCreativeIdeationIntent ? 'is-creative-ideation' : ''}`}>
                               <div className="workspace-summary-main">
                                 <article className="workspace-summary-callout">
                                   <span aria-hidden="true">🐰</span>
@@ -5393,8 +6141,9 @@ export default function OntologyWorkbench({
                                     >
                                       {intentInterpretationMessage}
                                     </button>
-                                    <p>
-                                      <HighlightedAnswerText text={finalAnswerBody || '핵심 결과를 실제 로그와 고객군집 기준으로 정리했습니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
+                                    <p className="workspace-summary-typing">
+                                      <HighlightedAnswerText text={typedSummaryBody} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
+                                      {typedSummaryBody.length < summaryBodyText.length ? <span className="ontology-chat-cursor" aria-hidden="true" /> : null}
                                     </p>
                                   </div>
                                 </article>
@@ -5414,9 +6163,7 @@ export default function OntologyWorkbench({
                                   >
                                     더보기
                                   </button>
-                                </div>
-                                <div className="detail-chip-row" style={{ marginTop: 8, marginBottom: 8 }}>
-                                  <span className="sample-pill">{summaryPriorityMessage}</span>
+                                  <span className="sample-pill workspace-summary-priority-pill">{summaryPriorityMessage}</span>
                                 </div>
                                 {/* K코드별 통계 표 노출 (summary 영역) */}
                                 {null}
@@ -5431,12 +6178,12 @@ export default function OntologyWorkbench({
                                   return <FinancialToolCard key={`summary-tool-${item.key}`} tool={item.tool} />;
                                 })}
                                 {/* 군집/로그/지표가 없을 때 Explainability Agent 결과로 대체 */}
-                                {!isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
+                                {!shouldHideCustomerCluster && !isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && !clusterInsightItems.length && !resolvedAnswerSummary?.top_reject_codes?.length ? (
                                   !insightToolCard
                                     ? <div className="empty-box compact">조건에 맞는 고객군, 로그, 지표가 없습니다.<br />상품, 연령, 기간 등 필터를 넓혀보세요.</div>
                                     : null
                                 ) : null}
-                                {!isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && clusterInsightItems.length ? (
+                                {!shouldHideCustomerCluster && !isRegulationGroundedAnswer && !strategyToolCard && !clusterToolCard && clusterInsightItems.length ? (
                                   <div className="tool-mini-grid">
                                     {clusterInsightItems.map((cluster) => (
                                       <div key={cluster.cluster_id || cluster.label} className="tool-mini-card">
@@ -5452,7 +6199,7 @@ export default function OntologyWorkbench({
                             </div>
                           ) : null}
 
-                          {selectedWorkspaceResultTab === 'cluster' ? (
+                          {selectedWorkspaceResultTab === 'cluster' && !shouldHideCustomerCluster ? (
                             <div className="workspace-cluster-view">
                               {clusterToolCard ? <FinancialToolCard tool={clusterToolCard} /> : null}
                               {!clusterToolCard && clusterInsightItems.length ? (
@@ -5538,9 +6285,9 @@ export default function OntologyWorkbench({
                                 ? (resolvedAnswerSummary?.highlights || []).slice(0, 4).map((item) => <div key={`${turn.id}-${item.label}-${item.value}`} className="ontology-runtime-answer-chip"><span>{item.label}</span><strong><HighlightedAnswerText text={String(item.value || '')} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} /></strong></div>)
                                 : <div className="ontology-runtime-answer-chip"><span>핵심 축</span><strong>{turn.axis || '-'}</strong></div>}
                           </div>
-                          {isLatest && !workspaceToolTabs.length && (answerMode === 'product' ? productModeToolCards.length : activeToolCards.length) ? (
-                            <div className={`financial-tool-card-stack ${answerMode === 'product' ? 'is-product-mode' : ''}`}>
-                              {(answerMode === 'product' ? productModeToolCards : activeToolCards).map((tool) => <FinancialToolCard key={tool.id || tool.title} tool={tool} />)}
+                          {isLatest && !workspaceToolTabs.length && (isProductAnswerMode ? productModeToolCards.length : activeToolCards.length) ? (
+                            <div className={`financial-tool-card-stack ${isProductAnswerMode ? 'is-product-mode' : ''}`}>
+                              {(isProductAnswerMode ? productModeToolCards : activeToolCards).map((tool) => <FinancialToolCard key={tool.id || tool.title} tool={tool} />)}
                             </div>
                           ) : null}
                         </>
@@ -5573,16 +6320,33 @@ export default function OntologyWorkbench({
                         </div>
                       )}
 
-                      {isLatest && !backendState.loading && !isDocumentOrGeneralAnswer && !clarificationAnswered && backendState.workbench?.clarification?.needed && (
+                      {isLatest && !backendState.loading && shouldShowClarificationBlock && (
                         <div className="ontology-clarification-block">
                           <div className="ontology-clarification-question">
                             <span className="ontology-clarification-icon" aria-hidden="true">?</span>
-                            <strong>{backendState.workbench.clarification.question || '어떤 축을 우선해서 볼까요?'}</strong>
+                            <strong>{clarificationQuestionText}</strong>
                           </div>
-                          <div className="ontology-clarification-options">
-                            {(backendState.workbench.clarification.options || []).map((option) => (
+                          {followupPromptTemplate ? (
+                            <div className="detail-chip-row" style={{ marginTop: 8 }}>
+                              <span className="sample-pill">바로 답변 예시</span>
                               <button
-                                key={option.feature_id}
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => setQueryInput(followupPromptTemplate)}
+                              >
+                                예시 입력 채우기
+                              </button>
+                            </div>
+                          ) : null}
+                          {clarificationAutoFillHints.length > 0 ? (
+                            <p className="ontology-side-copy">
+                              현재 데이터 기준으로 {clarificationAutoFillHints.join(' / ')} 을(를) 우선 반영했습니다. 이 기준으로 진행할지 선택해주세요.
+                            </p>
+                          ) : null}
+                          <div className="ontology-clarification-options">
+                            {clarificationOptions.map((option) => (
+                              <button
+                                key={option.feature_id || option.feature_name}
                                 type="button"
                                 className="ontology-clarification-option-btn"
                                 onClick={() => handleClarificationSelect(option)}
@@ -5592,6 +6356,27 @@ export default function OntologyWorkbench({
                               </button>
                             ))}
                           </div>
+                          {pendingClarificationOption ? (
+                            <div className="detail-chip-row" style={{ marginTop: 10 }}>
+                              <span className="sample-pill">
+                                선택: {pendingClarificationOption.feature_name || pendingClarificationOption.feature_id}
+                              </span>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={handleClarificationConfirm}
+                              >
+                                예, 이 기준으로 진행
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={handleClarificationReject}
+                              >
+                                아니오, 다시 선택
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       )}
 
@@ -5639,7 +6424,7 @@ export default function OntologyWorkbench({
                       )}
                     </article>
                     ) : null}
-                  </React.Fragment>
+                  </motion.div>
                 );
               }) : null}
             </div>
@@ -5995,7 +6780,7 @@ export default function OntologyWorkbench({
             onTabChange={setMetricCubeTab}
             onClose={() => setShowMetricCubeModal(false)}
             onRefresh={() => handleOpenMetricCubeModal(metricCubeTab, true)}
-            isProductMode={answerMode === 'product'}
+            isProductMode={isProductAnswerMode}
             selectedDepartment={activeProductDept}
             selectedDepartmentMemo={activeProductDeptMemo}
             productDebatePayload={productDevelopmentState.debate}
