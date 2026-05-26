@@ -52,6 +52,12 @@ from rag.regulation_retrieval import (
     retrieve_relevant_documents,
 )
 from rag.regulation_metadata import build_upload_documents
+from rag.regulation_knowledge import (
+    build_knowledge_entries_from_documents,
+    search_regulation_knowledge,
+    summarize_regulation_knowledge,
+    update_regulation_knowledge_index,
+)
 
 import io
 import json
@@ -1019,6 +1025,21 @@ def search_regulation_evidence(
         bm25_k=10,
         top_k=max(6, int(k or 6) * 2),
     )
+    knowledge_hits = search_regulation_knowledge(
+        normalized_query,
+        k=max(6, int(k or 6) * 2),
+    )
+    knowledge_by_key: dict[str, dict[str, Any]] = {}
+    for item in knowledge_hits:
+        key = "|".join(
+            [
+                str(item.get("document_name") or ""),
+                str(item.get("page") or ""),
+                str(item.get("article") or ""),
+                str(item.get("chunk_id") or ""),
+            ]
+        )
+        knowledge_by_key[key] = item
     try:
         ingest_logger.info(format_retrieval_debug_info(docs, normalized_query))
     except Exception:
@@ -1034,6 +1055,15 @@ def search_regulation_evidence(
         linked_feature_ids_raw = str(metadata.get("ontology_linked_feature_ids") or "")
         feature_ids = [item.strip() for item in feature_ids_raw.split("|") if item.strip()]
         linked_feature_ids = [item.strip() for item in linked_feature_ids_raw.split("|") if item.strip()]
+        key = "|".join(
+            [
+                str(metadata.get("document_name") or metadata.get("name") or ""),
+                str(metadata.get("page") or ""),
+                str(metadata.get("article") or ""),
+                str(metadata.get("chunk_id") or metadata.get("chunk_index") or ""),
+            ]
+        )
+        knowledge_item = knowledge_by_key.get(key) or {}
 
         base_score = max(0.0, 2.8 - (rank * 0.16))
         token_hit_count = sum(1 for token in query_tokens if token and token in text_lower)
@@ -1041,12 +1071,18 @@ def search_regulation_evidence(
         feature_hit_count = len(set(feature_ids) & target_feature_set)
         linked_hit_count = len(set(linked_feature_ids) & target_feature_set)
         avoided_hit_count = len(set(feature_ids) & avoided_set)
+        knowledge_score = float(knowledge_item.get("knowledge_score") or 0.0)
+        knowledge_bonus = min(1.4, knowledge_score * 0.22)
+        knowledge_tags = list(knowledge_item.get("policy_tags") or [])
+        knowledge_reject_codes = list(knowledge_item.get("reject_codes") or [])
+        knowledge_products = list(knowledge_item.get("product_codes") or [])
 
         score = (
             base_score
             + min(3.0, feature_hit_count * 0.75)
             + min(2.0, linked_hit_count * 0.45)
             + token_bonus
+            + knowledge_bonus
             - min(3.0, avoided_hit_count * 0.9)
         )
 
@@ -1068,10 +1104,41 @@ def search_regulation_evidence(
                 "effective_date": metadata.get("effective_date"),
                 "feature_hits": sorted(set(feature_ids) & target_feature_set),
                 "linked_hits": sorted(set(linked_feature_ids) & target_feature_set),
+                "policy_tags": knowledge_tags,
+                "reject_codes": knowledge_reject_codes,
+                "product_codes": knowledge_products,
+                "knowledge_score": round(knowledge_score, 4),
+                "knowledge_match_terms": list(knowledge_item.get("token_hits") or []),
                 "source": str(metadata.get("source") or ""),
                 "snippet": snippet,
             }
         )
+
+    if not scored and knowledge_hits:
+        for index, item in enumerate(knowledge_hits[: max(1, int(k or 6))], start=1):
+            scored.append(
+                {
+                    "score": round(1.8 - (index * 0.08) + float(item.get("knowledge_score") or 0.0), 4),
+                    "retriever_type": "knowledge-index",
+                    "name": str(item.get("document_name") or "regulation"),
+                    "document_name": str(item.get("document_name") or "regulation"),
+                    "doc_type": "regulation",
+                    "chunk_index": 0,
+                    "chunk_id": str(item.get("chunk_id") or ""),
+                    "page": item.get("page"),
+                    "article": item.get("article"),
+                    "effective_date": item.get("effective_date"),
+                    "feature_hits": [],
+                    "linked_hits": [],
+                    "policy_tags": list(item.get("policy_tags") or []),
+                    "reject_codes": list(item.get("reject_codes") or []),
+                    "product_codes": list(item.get("product_codes") or []),
+                    "knowledge_score": round(float(item.get("knowledge_score") or 0.0), 4),
+                    "knowledge_match_terms": list(item.get("token_hits") or []),
+                    "source": str(item.get("source") or "upload"),
+                    "snippet": str(item.get("snippet") or "")[:260],
+                }
+            )
 
     scored.sort(
         key=lambda item: (
@@ -1394,6 +1461,27 @@ def ingest_files_with_report(
             continue
         chunk_counts_by_file[file_name] = int(chunk_counts_by_file.get(file_name, 0)) + 1
 
+    knowledge_update: dict[str, Any] = {}
+    if target_store == FAISS_STORE_DOCUMENT and str(doc_type or "").strip().lower() in RULE_LIKE_TYPES:
+        try:
+            knowledge_entries = build_knowledge_entries_from_documents(split_docs)
+            replaced_names = [str(name).strip() for name, _ in files_data if str(name).strip()]
+            knowledge_payload = update_regulation_knowledge_index(
+                knowledge_entries,
+                replaced_document_names=replaced_names,
+            )
+            knowledge_stats = dict(knowledge_payload.get("stats") or {})
+            knowledge_update = {
+                "entry_count": int(knowledge_stats.get("entry_count") or 0),
+                "top_policy_tags": list(knowledge_stats.get("top_policy_tags") or [])[:5],
+                "top_reject_codes": list(knowledge_stats.get("top_reject_codes") or [])[:5],
+            }
+        except Exception as error:
+            try:
+                ingest_logger.warning("knowledge index update failed: %s", str(error))
+            except Exception:
+                pass
+
     count_after = _append_split_documents_to_store(target_store, split_docs)
     try:
         ingest_logger.info(
@@ -1444,6 +1532,7 @@ def ingest_files_with_report(
         "added_count": max(0, int(count_after) - int(before_count)),
         "chunk_count": int(len(split_docs)),
         "file_stats": file_stats,
+        "knowledge_update": knowledge_update,
     }
 
 
@@ -1458,6 +1547,10 @@ def ingest_files(
         store_name=store_name,
     )
     return int(report.get("vector_count") or 0)
+
+
+def get_regulation_knowledge_summary(document_names: list[str] | None = None) -> dict[str, Any]:
+    return summarize_regulation_knowledge(document_names=document_names)
 
 
 def _qualify_doc_id(store_name: str, doc_id: str) -> str:

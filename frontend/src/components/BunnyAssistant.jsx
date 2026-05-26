@@ -11,7 +11,7 @@ const RIVE_STATE_MACHINE = 'State Machine 1';
 const INPUT_LISTENING   = 'isListening';   // Boolean input
 const INPUT_THINKING    = 'isThinking';    // Boolean input
 const INPUT_TALKING     = 'isTalking';     // Boolean input
-const RIVE_SOURCE_FILE  = '/interactive-bunny-character.riv';
+const RIVE_SOURCE_FILE  = '/gbunny.riv';
 
 // ──────────────────────────────────────────────────────────────
 //  OpenAI 클라이언트 (VITE_OPENAI_API_KEY 환경 변수 사용)

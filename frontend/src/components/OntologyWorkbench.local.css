@@ -12,3 +12,36 @@
   text-overflow: ellipsis;
   word-break: break-all;
 }
+
+.roni-ollama-runtime-badge {
+  margin: 10px 0 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(83, 138, 255, 0.24);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.roni-ollama-runtime-badge > span {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.roni-ollama-runtime-badge > small {
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(20, 48, 92, 0.78);
+}
+
+.roni-ollama-runtime-badge.is-warning {
+  border-color: rgba(255, 127, 80, 0.42);
+  background: rgba(255, 243, 236, 0.86);
+}
+
+.roni-ollama-runtime-badge.is-completed {
+  border-color: rgba(65, 186, 151, 0.4);
+  background: rgba(236, 255, 248, 0.86);
+}

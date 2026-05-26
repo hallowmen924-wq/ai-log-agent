@@ -215,18 +215,18 @@ def _prompt_single_call_synthesis(
             "name": str(item.get("name") or ""),
             "concept": str(item.get("concept") or item.get("default_concept") or ""),
         }
-        for item in list(concepts[:2])
+        for item in list(concepts[:1])
         if isinstance(item, dict)
     ]
     fallback_min = {
         "new_product": {
             "name": str(((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("name") or ""),
             "target": str(((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("target") or ""),
-            "core_logic": list((((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("core_logic") or []))[:3],
+            "core_logic": list((((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("core_logic") or []))[:2],
             "limit_rate_policy": str(((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("limit_rate_policy") or ""),
-            "risk_guardrails": list((((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("risk_guardrails") or []))[:3],
+            "risk_guardrails": list((((fallback_final.get("new_product") or {}) if isinstance(fallback_final, dict) else {}).get("risk_guardrails") or []))[:2],
         },
-        "kpis": list((fallback_final.get("kpis") if isinstance(fallback_final, dict) else []) or [])[:4],
+        "kpis": list((fallback_final.get("kpis") if isinstance(fallback_final, dict) else []) or [])[:3],
     }
     agenda_min = {
         "id": str(selected_agenda.get("id") or ""),
@@ -656,19 +656,33 @@ def run_product_debate_orchestration(
     source = "fallback"
     llm_traces: list[dict[str, Any]] = []
     persona_retries = 0
-    synthesis_retries = max(0, retries)
+    synthesis_retries = 0
     early_stop_round = max(2, int(os.getenv("PRODUCT_DEBATE_EARLY_STOP_ROUND", "2") or 2))
     early_stop_threshold = float(os.getenv("PRODUCT_DEBATE_EARLY_STOP_THRESHOLD", "0.62") or 0.62)
     single_call_mode = str(os.getenv("PRODUCT_DEBATE_SINGLE_CALL", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    selected_agenda_compact = {
+        "id": str(selected_agenda.get("id") or ""),
+        "type": str(selected_agenda.get("type") or ""),
+        "title": str(selected_agenda.get("title") or "")[:140],
+        "summary": str(selected_agenda.get("summary") or "")[:180],
+        "target": str(selected_agenda.get("target") or "")[:140],
+        "expected_effect": [str(x) for x in list(selected_agenda.get("expected_effect") or [])[:3]],
+        "data_points": [str(x) for x in list(selected_agenda.get("data_points") or [])[:3]],
+    }
 
     try:
         if single_call_mode:
             if progress_callback:
                 progress_callback("custom-single-start", "싱글 콜 결론 모드를 시작합니다.")
             single_prompt = _prompt_single_call_synthesis(
-                selected_agenda=selected_agenda,
-                concepts=concepts,
+                selected_agenda=selected_agenda_compact,
+                concepts=list(concepts[:1]),
                 fallback_final=dict(fallback_result.get("final") or {}),
+            )
+            single_prompt = (
+                f"{single_prompt}\n"
+                "STRICT RULE: Return exactly one valid JSON object only. "
+                "Do not output markdown, code fences, or explanatory text."
             )
             single_elapsed_ms = 0
             parsed_final = {}
@@ -679,14 +693,24 @@ def run_product_debate_orchestration(
                     single_text = _call_with_retry(llm_call, single_prompt, retries=synthesis_retries)
                     single_elapsed_ms = int((time.perf_counter() - started) * 1000)
                     llm_traces.append({"agent": "SingleSynthesizer", "round": 1, "prompt": single_prompt, "response": single_text})
+                    print(
+                        "[product-debate-debug] parse_attempt "
+                        f"stage=single_call raw_chars={len(str(single_text or ''))}"
+                    )
                     payload = _safe_json_obj(parse_json, single_text)
                     parsed_final = payload.get("final") if isinstance(payload.get("final"), dict) else {}
+                    print(
+                        "[product-debate-debug] parse_result "
+                        f"stage=single_call success={bool(parsed_final)}"
+                    )
                 except Exception as single_call_error:  # noqa: BLE001
                     single_error = str(single_call_error)
             if parsed_final:
                 source = "orchestrator-ollama-single"
             else:
                 parsed_final = dict(fallback_result.get("final") or {})
+                if not single_error:
+                    single_error = "[parse-fail] Ollama 응답을 JSON final 스키마로 해석하지 못했습니다."
             result = {
                 **fallback_result,
                 "selected_agenda": selected_agenda,
@@ -750,12 +774,17 @@ def run_product_debate_orchestration(
                     )
                 persona_prompt = _prompt_persona_turn(
                     persona=persona,
-                    selected_agenda=selected_agenda,
-                    memory_hits=memory_hits,
-                    transcript=transcript,
+                    selected_agenda=selected_agenda_compact,
+                    memory_hits=[],
+                    transcript=[],
                     round_index=round_index,
                 )
                 persona_prompt = f"{persona_prompt}\n추가 규칙: message는 최대 2문장/90자."
+                persona_prompt = (
+                    f"{persona_prompt}\n"
+                    "STRICT RULE: Return exactly one valid JSON object only. "
+                    "No markdown, no code fences, no extra explanation."
+                )
                 persona_call_started = time.perf_counter()
                 persona_text = _call_with_retry(llm_call, persona_prompt, retries=persona_retries)
                 call_timings.append(
@@ -772,7 +801,17 @@ def run_product_debate_orchestration(
                         f"라운드 {round_index + 1} · {last.get('agent')} 완료 ({int(last.get('elapsed_ms') or 0)}ms)",
                     )
                 llm_traces.append({"agent": persona.get("name"), "round": round_index + 1, "prompt": persona_prompt, "response": persona_text})
+                print(
+                    "[product-debate-debug] parse_attempt "
+                    f"stage=persona agent={str(persona.get('name') or persona.get('department') or 'Agent')} "
+                    f"raw_chars={len(str(persona_text or ''))}"
+                )
                 obj = _safe_json_obj(parse_json, persona_text)
+                print(
+                    "[product-debate-debug] parse_result "
+                    f"stage=persona agent={str(persona.get('name') or persona.get('department') or 'Agent')} "
+                    f"success={bool(obj)}"
+                )
                 message = _limit_message_text(str(obj.get("message") or "").strip(), max_chars=90, max_sentences=2) or "관점 의견을 보완 중입니다."
                 transcript.append(
                     {
@@ -789,12 +828,17 @@ def run_product_debate_orchestration(
                 )
 
             moderator_prompt = _prompt_moderator_round(
-                selected_agenda=selected_agenda,
-                transcript=transcript,
+                selected_agenda=selected_agenda_compact,
+                transcript=[],
                 round_index=round_index,
                 max_rounds=max_rounds,
             )
             moderator_prompt = f"{moderator_prompt}\n추가 규칙: summary는 최대 2문장."
+            moderator_prompt = (
+                f"{moderator_prompt}\n"
+                "STRICT RULE: Return exactly one valid JSON object only. "
+                "No markdown, no code fences, no extra explanation."
+            )
             if progress_callback:
                 progress_callback("custom-moderator", f"라운드 {round_index + 1} · 모더레이터 합의 정리 중")
             if _budget_exceeded(reserve_sec=1.0):
@@ -823,7 +867,15 @@ def run_product_debate_orchestration(
                     f"라운드 {round_index + 1} · 모더레이터 완료 ({int(last.get('elapsed_ms') or 0)}ms)",
                 )
             llm_traces.append({"agent": "Moderator", "round": round_index + 1, "prompt": moderator_prompt, "response": moderator_text})
+            print(
+                "[product-debate-debug] parse_attempt "
+                f"stage=moderator raw_chars={len(str(moderator_text or ''))}"
+            )
             moderator_obj = _safe_json_obj(parse_json, moderator_text)
+            print(
+                "[product-debate-debug] parse_result "
+                f"stage=moderator success={bool(moderator_obj)}"
+            )
             consensus_score = float(moderator_obj.get("consensus_score") or 0.0)
             stop = bool(moderator_obj.get("stop") or False)
             if (round_index + 1) >= early_stop_round and consensus_score >= early_stop_threshold:
@@ -857,12 +909,17 @@ def run_product_debate_orchestration(
             )
 
         final_prompt = _prompt_final_synthesis(
-            selected_agenda=selected_agenda,
+            selected_agenda=selected_agenda_compact,
             transcript=transcript,
             consensus_history=consensus_history,
             fallback_final=dict(fallback_result.get("final") or {}),
         )
         final_prompt = f"{final_prompt}\n추가 규칙: JSON 이외 설명 최소화."
+        final_prompt = (
+            f"{final_prompt}\n"
+            "STRICT RULE: Return exactly one valid JSON object only. "
+            "No markdown, no code fences, no extra explanation."
+        )
         if progress_callback:
             progress_callback("custom-final", "최종 합의안 JSON 생성 중")
         final_elapsed_ms = 0
@@ -874,8 +931,16 @@ def run_product_debate_orchestration(
             if progress_callback:
                 progress_callback("custom-final-done", f"최종 합의안 생성 완료 ({final_elapsed_ms}ms)")
             llm_traces.append({"agent": "FinalSynthesizer", "round": len(consensus_history), "prompt": final_prompt, "response": final_text})
+            print(
+                "[product-debate-debug] parse_attempt "
+                f"stage=final raw_chars={len(str(final_text or ''))}"
+            )
             final_obj = _safe_json_obj(parse_json, final_text)
             parsed_final = final_obj.get("final") if isinstance(final_obj.get("final"), dict) else {}
+            print(
+                "[product-debate-debug] parse_result "
+                f"stage=final success={bool(parsed_final)}"
+            )
         if parsed_final:
             source = "orchestrator-ollama"
         else:

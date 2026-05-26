@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { useRive } from '@rive-app/react-canvas';
 import {
   createFaissWebSocket,
   fetchFaissEntry,
@@ -2176,6 +2177,29 @@ function saveStoredTheme(theme) {
   window.localStorage.setItem('app_theme', theme);
 }
 
+function RegulationLearningBunny() {
+  const { RiveComponent } = useRive({
+    src: '/gbunny.riv',
+    stateMachines: 'State Machine 1',
+    autoplay: true,
+  });
+
+  return <RiveComponent className="regulation-learning-bunny-rive" aria-label="학습 중인 Bunny" />;
+}
+
+function getRegulationLearningStage(progress, busy) {
+  if (!busy) {
+    if (progress >= 100) {
+      return '학습 완료';
+    }
+    return '학습 대기';
+  }
+  if (progress < 28) return '문서 읽는 중';
+  if (progress < 55) return '청크 생성 중';
+  if (progress < 82) return '벡터 적재 중';
+  return '근거 인덱싱 중';
+}
+
 function mapDepartmentToTheme(departmentId) {
   switch (String(departmentId || '').toLowerCase()) {
     case 'credit':
@@ -2206,6 +2230,7 @@ function App() {
   const [vectorSearchBusy, setVectorSearchBusy] = useState(false);
   const [regulationFiles, setRegulationFiles] = useState([]);
   const [regulationBusy, setRegulationBusy] = useState(false);
+  const [regulationLearningProgress, setRegulationLearningProgress] = useState(0);
   const [showRegulationUploadModal, setShowRegulationUploadModal] = useState(false);
   const [debateBusy, setDebateBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -2496,6 +2521,28 @@ function App() {
     lastRuntimeSignatureRef.current = signature;
     setActiveToast(nextToast);
   }, [status.ollama_runtime]);
+
+  useEffect(() => {
+    if (!regulationBusy) {
+      setRegulationLearningProgress((previous) => {
+        if (previous >= 100) return 100;
+        return previous > 0 ? 100 : 0;
+      });
+      return undefined;
+    }
+
+    setRegulationLearningProgress((previous) => (previous <= 2 ? 8 : previous));
+    const timerId = window.setInterval(() => {
+      setRegulationLearningProgress((previous) => {
+        if (previous >= 94) {
+          return 92 + Math.floor(Math.random() * 3);
+        }
+        return Math.min(94, previous + 3 + Math.floor(Math.random() * 4));
+      });
+    }, 900);
+
+    return () => window.clearInterval(timerId);
+  }, [regulationBusy]);
 
   async function handleToggleAgentOllama(agentKey, enabled) {
     const isNewsAgent = agentKey === 'news';
@@ -2820,6 +2867,8 @@ function App() {
   const uploadedRegulationFiles = Array.isArray(status.regulation_files) ? status.regulation_files : [];
   const uploadedRegulationFileStats = Array.isArray(status.regulation_file_stats) ? status.regulation_file_stats : [];
   const regulationAgentStatus = String(status.agent_statuses?.regulation_agent?.status || (regulationBusy ? 'running' : 'pending'));
+  const normalizedRegulationProgress = regulationBusy ? Math.min(regulationLearningProgress, 96) : (regulationLearningProgress > 0 ? 100 : 0);
+  const regulationLearningStage = getRegulationLearningStage(normalizedRegulationProgress, regulationBusy);
   const debateChatMessages = buildDebateChatMessages({ ...status, cardloan_debate: visibleDebate, ollama_runtime: visibleOllamaRuntime }, debateRunId);
   const sortedDebateMessageIds = debateChatMessages
     .map((message, index) => ({ id: message.id, priority: Number(message.priority || 0), index }))
@@ -3441,21 +3490,6 @@ function App() {
               exit={{ opacity: 0, y: -8, scale: 0.98 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
             >
-              <div className="theme-menu-kicker">Theme Select</div>
-              {THEME_OPTIONS.map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  className={`theme-option ${theme === item.value ? 'active' : ''}`}
-                  onClick={() => {
-                    setTheme(item.value);
-                    setThemeMenuOpen(false);
-                  }}
-                >
-                  <span className="theme-option-title">{item.label}</span>
-                  <span className="theme-option-description">{item.description}</span>
-                </button>
-              ))}
               <div className="theme-menu-kicker theme-menu-kicker-spaced">Agent Ollama</div>
               <div className="theme-agent-ollama-controls">
                 <div className="theme-agent-ollama-card">
@@ -3577,15 +3611,34 @@ function App() {
             >
               <div className="prompt-modal-head">
                 <div>
-                  <div className="panel-kicker">Regulation Upload</div>
-                  <h3>규제 문서 관리</h3>
-                  <p>{regulationBusy ? '문서 적재/학습 진행 중입니다.' : '현재 업로드된 문서 목록입니다.'}</p>
+                  <div className="panel-kicker">Bunny Learning Lab</div>
+                  <h3>버니 규제 문서 학습실</h3>
+                  <p>{regulationBusy ? '버니가 문서를 읽으며 근거 지식을 업데이트하고 있어요.' : '문서를 추가하면 버니가 바로 학습을 시작해요.'}</p>
                 </div>
                 <button className="secondary-button" type="button" onClick={() => setShowRegulationUploadModal(false)} disabled={regulationBusy}>닫기</button>
               </div>
               <div className="detail-meta-row">
                 <span className={`sample-pill ${regulationBusy ? 'is-running' : ''}`}>상태 {regulationAgentStatus}</span>
                 <span className="sample-pill">문서 {uploadedRegulationFiles.length}건</span>
+              </div>
+              <div className="regulation-learning-stage" role="status" aria-live="polite">
+                <div className="regulation-learning-bunny-shell">
+                  <RegulationLearningBunny />
+                </div>
+                <div className="regulation-learning-copy">
+                  <strong>{regulationBusy ? 'Bunny가 실시간으로 학습 중입니다' : 'Bunny가 학습 준비를 마쳤어요'}</strong>
+                  <p>{regulationBusy ? '문서 파싱 → 청크 생성 → 벡터 적재 → 근거 인덱싱 순서로 처리하고 있어요.' : '문서를 추가하면 같은 순서로 학습을 진행하고 결과를 답변에 반영합니다.'}</p>
+                  <small>{status.agent_statuses?.regulation_agent?.detail || '학습 파이프라인을 준비 중입니다.'}</small>
+                </div>
+              </div>
+              <div className="regulation-learning-progress-wrap" aria-label="학습 진행률">
+                <div className="regulation-learning-progress-head">
+                  <strong>{regulationLearningStage}</strong>
+                  <span>{normalizedRegulationProgress}%</span>
+                </div>
+                <div className={`regulation-learning-progress-track ${regulationBusy ? 'is-running' : ''}`}>
+                  <span style={{ width: `${Math.max(4, normalizedRegulationProgress)}%` }} />
+                </div>
               </div>
               <div className={`regulation-upload-live ${regulationBusy ? 'is-running' : ''}`}>
                 <span />

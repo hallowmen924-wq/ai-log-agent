@@ -7,10 +7,9 @@ import ReactFlow, { Background, Controls, Handle, MarkerType, MiniMap, Position 
 import cytoscape from 'cytoscape';
 import 'reactflow/dist/style.css';
 import './OntologyWorkbench.local.css';
-import regulationDocumentAnimation from '../assets/regulation-document.json';
 import promptSubmitAnimation from '../assets/prompt-submit.json';
 import cardLoanNewsAnimation from '../assets/card-loan-news.json';
-import { API_BASE_URL, createProductDevelopmentAgendas, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, fetchProductDevelopmentDebateJob, startFeatureOntologyRuntimeJob, startProductDevelopmentDebateJob } from '../api';
+import { API_BASE_URL, createProductDevelopmentAgendas, createPromptFromImage, fetchFeatureOntologyRuntimeJob, fetchFeatureOntologySegmentMetricCube, fetchFeatureOntologySemanticRefreshStatus, fetchNewsEvidenceDetail, fetchOntologyState, fetchProductDevelopmentDebateJob, startFeatureOntologyRuntimeJob, startProductDevelopmentDebateJob } from '../api';
 import { RUNTIME_STAGES, useOntologyRuntimeStore } from './ontologyRuntimeStore';
 
 const ONTOLOGY_PROMPT_EXAMPLES = [
@@ -783,7 +782,12 @@ function FinancialToolCard({ tool, collapseExploratoryVisuals = false }) {
       ) : null}
       {conflicts.length ? (
         <div className="tool-mini-list">
-          {conflicts.map((item) => <span key={item.title} className={`tool-status-line is-${item.level || 'info'}`}>{item.title}</span>)}
+          {conflicts.map((item, index) => (
+            <div key={`${item.title}-${index}`} className={`tool-status-line is-${item.level || 'info'}`}>
+              <strong>{item.title}</strong>
+              {item.detail ? <small>{item.detail}</small> : null}
+            </div>
+          ))}
         </div>
       ) : null}
       {toolCitations.length ? (
@@ -872,6 +876,44 @@ function statusLabel(status) {
     default:
       return 'Standby';
   }
+}
+
+function classifyDebateFallbackReason(rawErrorText = '') {
+  const text = String(rawErrorText || '').toLowerCase();
+  if (
+    text.includes('[lock-busy]')
+    || text.includes('lock-busy')
+    || text.includes('슬롯')
+    || text.includes('세마포어')
+    || text.includes('혼잡하여 대기')
+    || text.includes('호출이 혼잡')
+    || text.includes('잠시 후 다시 시도')
+  ) {
+    return {
+      code: 'lock-busy',
+      label: '연결불가(lock-busy)',
+      message: 'Ollama 호출 슬롯이 바빠 즉시 처리하지 못했습니다.',
+    };
+  }
+  if (text.includes('[parse-fail]') || text.includes('parse-fail') || text.includes('json') || text.includes('해석하지 못')) {
+    return {
+      code: 'parse-fail',
+      label: '응답해석실패(parse-fail)',
+      message: 'Ollama 응답은 왔지만 JSON 형식 해석에 실패했습니다.',
+    };
+  }
+  if (text.includes('[timeout]') || text.includes('timeout') || text.includes('응답 지연')) {
+    return {
+      code: 'timeout',
+      label: '응답지연(timeout)',
+      message: '모델 추론이 제한시간을 초과했습니다.',
+    };
+  }
+  return {
+    code: 'unknown',
+    label: '원인미상',
+    message: '상세 원인을 확인 중입니다.',
+  };
 }
 
 function formatRuntimeMs(value) {
@@ -1276,6 +1318,7 @@ function RoniAvatar({
   surprised = false,
   success = false,
   onDocumentRequest,
+  onAvatarClick,
 }) {
   const BUNNY_STATE_MACHINE = 'State Machine 1';
   const [manualAction, setManualAction] = useState(null);
@@ -1294,7 +1337,7 @@ function RoniAvatar({
   }[effectiveAgentState] || { aura: 'sky' };
 
   const { RiveComponent, rive } = useRive({
-    src: '/interactive-bunny-character.riv',
+    src: '/gbunny.riv',
     stateMachines: BUNNY_STATE_MACHINE,
     autoplay: true,
     automaticallyHandleEvents: false,
@@ -1399,6 +1442,17 @@ function RoniAvatar({
     return () => rive.off(EventType.RiveEvent, handleRiveEvent);
   }, [buttonInput, clickInput, onDocumentRequest, poseInput, poseTriggerInput, rive]);
 
+  const handleAvatarClick = () => {
+    onAvatarClick?.();
+  };
+
+  const handleAvatarKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onAvatarClick?.();
+    }
+  };
+
   const avatarMotion = reduceMotion
     ? undefined
     : {
@@ -1407,7 +1461,14 @@ function RoniAvatar({
       scale: success || effectiveAgentState === 'learning' ? [1, 1.05, 1] : effectiveAgentState === 'explaining' ? [1, 1.02, 1] : [1, 1.015, 1],
     };
   return (
-    <div className="roni-avatar-shell" aria-label="Bunny semantic runtime indicator">
+    <div
+      className="roni-avatar-shell is-clickable"
+      aria-label="Bunny semantic runtime indicator"
+      role="button"
+      tabIndex={0}
+      onClick={handleAvatarClick}
+      onKeyDown={handleAvatarKeyDown}
+    >
       <motion.div
         className={`roni-cloud-scene roni-cloud-${stageTheme.aura} state-${effectiveAgentState} thinking-${effectiveThinkingPhase} ${manualAction ? 'is-action-triggered' : ''} ${surprised ? 'is-surprised' : ''} ${success ? 'is-success' : ''}`}
         initial={{ opacity: 0, y: 10, scale: 0.98 }}
@@ -1445,6 +1506,22 @@ function RoniAvatar({
         <span className="roni-cloud-stage-tag">{liveSpeech?.detail || agentStateLabel(effectiveAgentState, effectiveThinkingPhase)}</span>
       </motion.div>
     </div>
+  );
+}
+
+function OnboardingBunnyRail() {
+  const { RiveComponent } = useRive({
+    src: '/gbunny.riv',
+    autoplay: true,
+  });
+
+  return (
+    <aside className="department-onboarding-bunny-rail" aria-hidden="true">
+      <div className="department-onboarding-bunny-card">
+        <RiveComponent className="department-onboarding-bunny-rive" />
+        <p>Bunny가 부서 관점 학습을 준비하고 있어요.</p>
+      </div>
+    </aside>
   );
 }
 
@@ -1765,6 +1842,7 @@ const PRODUCT_DEBATE_WARMUP_LINES = Object.freeze([
 
 const MEMO_STORAGE_KEY = 'ontology-workbench-memo-preferences';
 const ONBOARDING_STORAGE_KEY = 'ontology-workbench-department-onboarding-v1';
+const SCREENING_IMAGE_PROMPT_TEXT = '첨부 심사결과 이미지에서 추출된 텍스트를 기준으로 분석해줘.';
 const INITIAL_PRODUCT_DEVELOPMENT_STATE = Object.freeze({
   loadingAgendas: false,
   agendaError: '',
@@ -2559,6 +2637,8 @@ function ProductDevelopmentWorkspace({
   const newProduct = final.new_product || {};
   const newProductCandidates = Array.isArray(final.new_product_candidates) ? final.new_product_candidates : [];
   const improvements = final.product_logic_improvements || [];
+  const implementationPlan = Array.isArray(final.implementation_plan) ? final.implementation_plan : [];
+  const kpis = Array.isArray(final.kpis) ? final.kpis : [];
   const selectedAgendaType = String(state.selectedAgenda?.type || '').trim().toLowerCase();
   const sourceRaw = String(debatePayload?.source || state.debateSource || state.source || '');
   const sourceLabel = sourceRaw.includes('autogen')
@@ -2574,8 +2654,14 @@ function ProductDevelopmentWorkspace({
     ? '승인 전환 가능성이 높은 세그먼트를 빠르게 상품화해 신규 실행액을 확보하고, 기존 거절군의 재유입 루트를 만들기 위해 개발합니다.'
     : '현재 심사 로직의 누락 구간을 보완해 과거 거절 고객 중 재평가 가능한 구간을 살리고, 리스크를 통제한 상태에서 승인률을 끌어올리기 위해 개발합니다.';
   const showStep2 = Boolean(step2Armed || state.debateLoading || messages.length);
-  const hasFinalResult = Boolean(final.new_product || newProductCandidates.length || improvements.length);
-  const finalOpenKey = `${state.selectedAgenda?.id || state.selectedAgenda?.title || 'none'}-${messages.length}-${newProductCandidates.length}-${improvements.length}`;
+  const hasFinalResult = Boolean(
+    (newProduct && Object.keys(newProduct).length)
+    || newProductCandidates.length
+    || improvements.length
+    || implementationPlan.length
+    || kpis.length
+  );
+  const finalOpenKey = `${state.selectedAgenda?.id || state.selectedAgenda?.title || 'none'}-${messages.length}-${newProductCandidates.length}-${improvements.length}-${implementationPlan.length}-${kpis.length}`;
 
   const handleAgendaClick = (agenda) => {
     onSelectAgenda?.(agenda);
@@ -2619,12 +2705,18 @@ function ProductDevelopmentWorkspace({
         <div>
           <span className="panel-kicker">상품개발모드</span>
           <h2>통계 CUBE X Clsuter 분석을 기반 신상품 설계</h2>
-          <p>AutoGen이 부서별 에이전트를 독립 발언 루프로 돌리고, 현재는 롱텀메모리 없이 선택 안건과 부서 컨텍스트만으로 합의안을 만듭니다. 지금 회의실에서 실제처럼 발언, 반박, 정리 단계가 순차 진행됩니다.</p>
+          <div className="product-dev-reason-box product-dev-reason-box-hero">
+            <strong>후보 생성 근거</strong>
+            <p>
+              통계 CUBE에서 상품별 승인률/금리/한도/연체 지표를 읽고, 클러스터 분석에서 위험이 과도하지 않은 세그먼트를 우선 추출했습니다.
+              이후 거절코드 분포와 전환 가능 구간을 교차해, 신상품 후보와 로직 보완 후보를 각각 1개씩 생성했습니다.
+            </p>
+          </div>
         </div>
         <div className="product-dev-actions">
-          <button type="button" className="secondary-button" onClick={onOpenConcepts}>부서 컨셉 보기</button>
-          <button type="button" className="primary-button product-dev-refresh-button" onClick={onRefreshAgendas} disabled={state.loadingAgendas || state.debateLoading}>
-            {state.loadingAgendas ? '안건 생성 중' : '안건 다시 만들기'}
+          <button type="button" className="product-dev-icon-button" onClick={onOpenConcepts} title="부서 컨셉 보기" aria-label="부서 컨셉 보기">🧭</button>
+          <button type="button" className="product-dev-icon-button product-dev-refresh-button" onClick={onRefreshAgendas} disabled={state.loadingAgendas || state.debateLoading} title="안건 다시 만들기" aria-label={state.loadingAgendas ? '안건 생성 중' : '안건 다시 만들기'}>
+            {state.loadingAgendas ? '⏳' : '🔄'}
           </button>
         </div>
       </div>
@@ -2643,15 +2735,6 @@ function ProductDevelopmentWorkspace({
       </div>
       ) : null}
 
-      {!showStep2 ? (
-      <div className="product-dev-meta-row">
-        <span className="sample-pill">{sourceLabel}</span>
-        <span className="sample-pill">{llmModeLabel}</span>
-        <span className="sample-pill">큐브 {Number(context?.cube_meta?.segment_count || semanticRefresh?.segment_count || 0).toLocaleString('ko-KR')}개 세그먼트</span>
-        <span className="sample-pill">군집 {Number(semanticRefresh?.cluster_count || 0).toLocaleString('ko-KR')}개</span>
-      </div>
-      ) : null}
-
       {/* 요청사항: 엔진 상태(1), Consensus Timeline(2) 섹션 숨김 */}
 
       {state.agendaError ? <div className="error-banner">상품개발 안건 생성 실패: {state.agendaError}</div> : null}
@@ -2662,16 +2745,6 @@ function ProductDevelopmentWorkspace({
         <div className="product-dev-section-head">
           <span className="panel-kicker">Step 1</span>
           <strong>금융솔루션부가 던지는 토론 안건 2개</strong>
-        </div>
-        <div className="product-dev-reason-box">
-          <strong>후보 생성 근거</strong>
-          <p>
-            통계 CUBE에서 상품별 승인률/금리/한도/연체 지표를 읽고, 클러스터 분석에서 위험이 과도하지 않은 세그먼트를 우선 추출했습니다.
-            이후 거절코드 분포와 전환 가능 구간을 교차해, 신상품 후보와 로직 보완 후보를 각각 1개씩 생성했습니다.
-          </p>
-          <small>
-            현재 기준: {(productSummaries || []).slice(0, 4).map((item) => `${item.product_label || item.product} 승인률 ${item.approval_rate_percent ?? '-'}%`).join(' · ')}
-          </small>
         </div>
         {state.loadingAgendas ? <div className="empty-box compact">통계자료, 한도, 금리, 거절코드, 연체가능성을 읽고 안건을 만드는 중입니다.</div> : null}
         <div className="product-dev-agenda-grid">
@@ -2867,7 +2940,6 @@ export default function OntologyWorkbench({
   const [queryInput, setQueryInput] = useState(currentQuestion);
   const [backendState, setBackendState] = useState({ loading: true, error: '', workbench: null, ontology: null });
   const [activeSubtab, setActiveSubtab] = useState('question');
-  const [answerTraceTab, setAnswerTraceTab] = useState('input');
   const [activeWorkspaceResultTab, setActiveWorkspaceResultTab] = useState('summary');
   const [workspaceMode, setWorkspaceMode] = useState('conversation');
   const [answerMode, setAnswerMode] = useState('general');
@@ -2887,6 +2959,10 @@ export default function OntologyWorkbench({
   const [activeNewsBubble, setActiveNewsBubble] = useState(null);
   const [showPromptExamples, setShowPromptExamples] = useState(false);
   const [showMetricCubeModal, setShowMetricCubeModal] = useState(false);
+  const [isPromptDragOver, setIsPromptDragOver] = useState(false);
+  const [promptImageStatus, setPromptImageStatus] = useState(null);
+  const [promptImageStatusExpanded, setPromptImageStatusExpanded] = useState(false);
+  const [pendingImageQuestionPayload, setPendingImageQuestionPayload] = useState('');
   const [showDepartmentOnboarding, setShowDepartmentOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState('department');
   const [onboardingMode, setOnboardingMode] = useState('general');
@@ -2906,6 +2982,14 @@ export default function OntologyWorkbench({
   const [metricCubeTab, setMetricCubeTab] = useState('cube');
   const [metricCubeState, setMetricCubeState] = useState({ loading: false, error: '', data: null });
   const [semanticRefreshState, setSemanticRefreshState] = useState({ loading: true, error: '', refresh: null });
+  const [ollamaRuntimeMonitor, setOllamaRuntimeMonitor] = useState({
+    loading: true,
+    error: '',
+    lockBusy: false,
+    pendingOntology: 0,
+    pendingDebate: 0,
+    activeDebateJobs: 0,
+  });
   const [conversationTurns, setConversationTurns] = useState([]);
   const [avoidedFeatureIds, setAvoidedFeatureIds] = useState([]);
   const [clarificationAnswered, setClarificationAnswered] = useState(false);
@@ -2926,6 +3010,46 @@ export default function OntologyWorkbench({
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId;
+
+    const pollRuntimeMonitor = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/health/ollama/runtime`);
+        const payload = await response.json();
+        if (cancelled) return;
+        const runtime = payload?.ollama_runtime || {};
+        const debate = payload?.product_debate || {};
+        setOllamaRuntimeMonitor({
+          loading: false,
+          error: '',
+          lockBusy: Boolean(runtime?.lock_busy),
+          pendingOntology: Number(runtime?.pending_ontology_requests || 0),
+          pendingDebate: Number(runtime?.pending_product_debate_requests || 0),
+          activeDebateJobs: Number(debate?.active_jobs_count || 0),
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setOllamaRuntimeMonitor((previous) => ({
+          ...previous,
+          loading: false,
+          error: String(error?.message || error || 'runtime monitor failed'),
+        }));
+      } finally {
+        if (!cancelled) {
+          timerId = window.setTimeout(pollRuntimeMonitor, 3000);
+        }
+      }
+    };
+
+    pollRuntimeMonitor();
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearTimeout(timerId);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -2997,6 +3121,16 @@ export default function OntologyWorkbench({
     () => MEMO_DEPARTMENTS.map((department) => departmentConcepts[department.id]),
     [departmentConcepts],
   );
+  const activeMemoDepartmentInfo = useMemo(
+    () => MEMO_DEPARTMENTS.find((item) => item.id === memoDepartment) || MEMO_DEPARTMENTS[0],
+    [memoDepartment],
+  );
+  const orderedAnswerModes = useMemo(() => {
+    const memo = ANSWER_MODES.find((mode) => mode.id === 'memo');
+    const general = ANSWER_MODES.find((mode) => mode.id === 'general');
+    const rest = ANSWER_MODES.filter((mode) => mode.id !== 'memo' && mode.id !== 'general');
+    return [memo, general, ...rest].filter(Boolean);
+  }, []);
 
   useEffect(() => {
     departmentConceptsRef.current = departmentConcepts;
@@ -3060,6 +3194,18 @@ export default function OntologyWorkbench({
     { label: '최근 수집', value: newsHealth.lastNewsTime ? formatRelativeTime(newsHealth.lastNewsTime) : '-' },
     { label: '브리핑 시각', value: newsHealth.lastNewsBriefingTime ? formatRelativeTime(newsHealth.lastNewsBriefingTime) : '-' },
   ];
+  const monitorBadgeLabel = ollamaRuntimeMonitor.loading
+    ? 'Ollama 모니터링 중'
+    : ollamaRuntimeMonitor.error
+      ? 'Ollama 상태 확인 실패'
+      : ollamaRuntimeMonitor.lockBusy
+        ? 'Ollama LOCK-BUSY'
+        : 'Ollama READY';
+  const monitorBadgeTone = ollamaRuntimeMonitor.error
+    ? 'is-warning'
+    : ollamaRuntimeMonitor.lockBusy
+      ? 'is-warning'
+      : 'is-completed';
   const operationMetrics = operationsSummary?.metrics || [];
   const operationBriefs = operationsSummary?.briefs || [];
   const operationTimeline = operationsSummary?.timeline || [];
@@ -3892,7 +4038,10 @@ export default function OntologyWorkbench({
     if (!nextQuestion) {
       return;
     }
-    const nextProductCode = resolveProductForQuestion(nextQuestion, products);
+    const runtimeQuestion = pendingImageQuestionPayload && nextQuestion === SCREENING_IMAGE_PROMPT_TEXT
+      ? pendingImageQuestionPayload
+      : nextQuestion;
+    const nextProductCode = resolveProductForQuestion(runtimeQuestion, products);
     setConversationTurns((previous) => ([
       ...previous,
       {
@@ -3910,7 +4059,8 @@ export default function OntologyWorkbench({
     ].slice(-12)));
     setBackendState((previous) => ({ ...previous, loading: true, error: '', workbench: null }));
     setClarificationAnswered(false);
-    submitQuestion(nextQuestion);
+    submitQuestion(runtimeQuestion);
+    setPendingImageQuestionPayload('');
     onToast?.({
       id: `ontology-runtime-${Date.now()}`,
       kicker: 'Semantic Runtime',
@@ -3921,8 +4071,22 @@ export default function OntologyWorkbench({
     });
   }
 
+  function handlePromptTextareaKeyDown(event) {
+    if (event.key !== 'Enter') {
+      return;
+    }
+    if (event.nativeEvent?.isComposing || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    handleRunQuery();
+  }
+
   function handleUsePromptExample(prompt) {
     setQueryInput(prompt);
+    setPromptImageStatus(null);
+    setPromptImageStatusExpanded(false);
+    setPendingImageQuestionPayload('');
     setShowPromptExamples(false);
   }
 
@@ -4039,6 +4203,178 @@ export default function OntologyWorkbench({
     await handleLoadProductDevelopmentAgendas(true);
   }
 
+  function buildQuestionFromDroppedImage(file) {
+    const rawName = String(file?.name || '심사결과 이미지');
+    const cleaned = rawName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    const label = cleaned || '심사결과 이미지';
+    return `${label} 이미지 기준으로 부결 사유와 한도 산정 근거를 요약해줘. 핵심 사유코드/금액/판단 근거를 먼저 알려줘.`;
+  }
+
+  function handlePromptInputChange(nextValue) {
+    setQueryInput(nextValue);
+    if (promptImageStatus) {
+      setPromptImageStatus(null);
+      setPromptImageStatusExpanded(false);
+    }
+    if (pendingImageQuestionPayload) {
+      setPendingImageQuestionPayload('');
+    }
+  }
+
+  function handlePromptDragOver(event) {
+    event.preventDefault();
+    setIsPromptDragOver(true);
+  }
+
+  function handlePromptDragLeave(event) {
+    event.preventDefault();
+    setIsPromptDragOver(false);
+  }
+
+  async function handlePromptDrop(event) {
+    event.preventDefault();
+    setIsPromptDragOver(false);
+    const files = Array.from(event.dataTransfer?.files || []);
+    const imageFile = files.find((file) => String(file.type || '').startsWith('image/'));
+    if (!imageFile) {
+      return;
+    }
+    setPromptImageStatus({
+      fileName: imageFile.name,
+      loading: true,
+      hasOcr: false,
+      engine: '',
+      ocrPreview: '',
+      ocrLength: 0,
+      elapsedMs: 0,
+      ocrError: '',
+      parsed: null,
+      analysisSummary: null,
+      updatedAt: Date.now(),
+    });
+    setPromptImageStatusExpanded(false);
+    const localDraft = buildQuestionFromDroppedImage(imageFile);
+    setQueryInput(SCREENING_IMAGE_PROMPT_TEXT);
+    setPendingImageQuestionPayload(localDraft);
+    let finalQuestion = localDraft;
+    try {
+      const response = await createPromptFromImage(imageFile);
+      const suggested = String(response?.suggested_question || '').trim();
+      if (suggested) {
+        finalQuestion = suggested;
+      }
+      setQueryInput(SCREENING_IMAGE_PROMPT_TEXT);
+      setPendingImageQuestionPayload(finalQuestion);
+      setPromptImageStatus({
+        fileName: imageFile.name,
+        loading: false,
+        hasOcr: Boolean(response?.has_ocr_text),
+        engine: String(response?.ocr_engine_used || ''),
+        ocrPreview: String(response?.ocr_preview || ''),
+        ocrLength: Number(response?.ocr_text_length || 0),
+        elapsedMs: Number(response?.ocr_elapsed_ms || 0),
+        ocrError: String(response?.ocr_error || ''),
+        parsed: response?.ocr_parsed || null,
+        analysisSummary: response?.analysis_summary || null,
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      console.warn('image-to-question failed, fallback to local draft:', error);
+      setPromptImageStatus({
+        fileName: imageFile.name,
+        loading: false,
+        hasOcr: false,
+        engine: 'error',
+        ocrPreview: '',
+        ocrLength: 0,
+        elapsedMs: 0,
+        ocrError: String(error?.message || ''),
+        parsed: null,
+        analysisSummary: null,
+        updatedAt: Date.now(),
+      });
+      setPendingImageQuestionPayload(localDraft);
+    }
+    onToast?.({
+      id: `prompt-drop-${Date.now()}`,
+      kicker: 'Image Drop',
+      title: '이미지 기반 질문 초안 생성',
+      meta: imageFile.name,
+      message: finalQuestion === localDraft
+        ? '드래그한 이미지로 질문 초안을 만들었습니다. 확인 후 바로 실행할 수 있어요.'
+        : '이미지를 분석해 질문 초안을 자동으로 만들었습니다. 확인 후 바로 실행할 수 있어요.',
+      tone: 'cyan',
+    });
+  }
+
+  function renderPromptImageStatusView() {
+    if (!promptImageStatus) {
+      return null;
+    }
+    const statusText = promptImageStatus.loading
+      ? '분석 중'
+      : (promptImageStatus.hasOcr ? '분석 완료' : 'OCR 미검출');
+    const statusMeta = promptImageStatus.loading
+      ? '이미지 텍스트를 분석하는 중입니다.'
+      : (promptImageStatus.hasOcr
+        ? `${promptImageStatus.engine || 'ocr'} · ${promptImageStatus.elapsedMs > 0 ? `${promptImageStatus.elapsedMs}ms` : '완료'}`
+        : '파일명 기반 질문으로 전환');
+    return (
+      <div className={`prompt-image-status-card ${promptImageStatusExpanded ? 'is-expanded' : ''}`} role="status" aria-live="polite">
+        <div className="prompt-image-status-head">
+          <button
+            type="button"
+            className="prompt-image-status-toggle"
+            onClick={() => setPromptImageStatusExpanded((previous) => !previous)}
+            aria-expanded={promptImageStatusExpanded}
+            aria-label="이미지 분석 결과 펼치기"
+          >
+            <strong>이미지 분석</strong>
+            <span className={`prompt-image-status-chip ${promptImageStatus.loading ? 'is-loading' : (promptImageStatus.hasOcr ? 'is-ocr' : 'is-fallback')}`}>
+              <span className="prompt-image-status-chip-dot" aria-hidden="true" />
+              {statusText}
+            </span>
+            <span className="prompt-image-status-meta">{statusMeta}</span>
+            <span className="prompt-image-status-chevron" aria-hidden="true">{promptImageStatusExpanded ? '▴' : '▾'}</span>
+          </button>
+        </div>
+        {promptImageStatusExpanded ? (
+          <>
+            <p className="prompt-image-status-file">{promptImageStatus.fileName}</p>
+            {promptImageStatus.hasOcr && promptImageStatus.ocrPreview ? (
+              <p className="prompt-image-status-preview">추출 텍스트: {promptImageStatus.ocrPreview}</p>
+            ) : null}
+            {!promptImageStatus.loading && promptImageStatus.parsed ? (
+              <div className="prompt-image-parse-grid">
+                {Array.isArray(promptImageStatus.parsed.reject_codes) && promptImageStatus.parsed.reject_codes.length ? (
+                  <p className="prompt-image-status-preview">거절코드: {promptImageStatus.parsed.reject_codes.slice(0, 3).join(', ')}</p>
+                ) : null}
+                {promptImageStatus.parsed.limit_raw ? (
+                  <p className="prompt-image-status-preview">한도 후보: {promptImageStatus.parsed.limit_raw}</p>
+                ) : null}
+                {promptImageStatus.parsed.rate_raw ? (
+                  <p className="prompt-image-status-preview">금리 후보: {promptImageStatus.parsed.rate_raw}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {!promptImageStatus.loading && promptImageStatus.analysisSummary ? (
+              <div className="prompt-image-parse-grid">
+                <p className="prompt-image-status-preview">부결 사유: {promptImageStatus.analysisSummary.reject_reason_summary}</p>
+                <p className="prompt-image-status-preview">한도 근거: {promptImageStatus.analysisSummary.limit_basis_summary}</p>
+                {Array.isArray(promptImageStatus.analysisSummary.action_items) && promptImageStatus.analysisSummary.action_items.length ? (
+                  <p className="prompt-image-status-preview">보완 항목: {promptImageStatus.analysisSummary.action_items.join(' / ')}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {!promptImageStatus.loading && !promptImageStatus.hasOcr && promptImageStatus.ocrError ? (
+              <p className="prompt-image-status-preview">실패 원인: {promptImageStatus.ocrError}</p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   useEffect(() => {
     if (!productDevelopmentState.debateLoading || !productDevelopmentState.debateJobId) {
       return undefined;
@@ -4131,31 +4467,44 @@ export default function OntologyWorkbench({
           const payload = statusPayload?.result || null;
           const isFallback = String(payload?.source || '').toLowerCase().includes('fallback');
           const llmErrorText = String(payload?.llm?.error || '').trim();
+          const fallbackReason = classifyDebateFallbackReason(llmErrorText);
+          const finalPayload = payload?.result?.final || payload?.final || null;
+          const hasRenderableResult = Boolean(
+            finalPayload
+            && (
+              finalPayload.new_product
+              || finalPayload.existing_product_improvements
+              || finalPayload.action_items
+              || finalPayload.execution_plan
+            )
+          );
+          const shouldShowFallbackError = isFallback && !hasRenderableResult;
           setProductDevelopmentState((previous) => ({
             ...previous,
             debateLoading: false,
             debate: payload,
             debateSource: payload?.source || '',
-            debateError: '',
+            debateError: shouldShowFallbackError ? `${fallbackReason.label}: ${llmErrorText || fallbackReason.message}` : '',
           }));
           onToast?.({
             id: `product-dev-debate-${Date.now()}`,
             kicker: '4-Department Debate',
-            title: isFallback ? '상품개발 토론 fallback 완료' : '상품개발 토론 완료',
-            meta: isFallback ? 'LLM timeout/지연으로 fallback 결과를 사용했습니다.' : (payload?.source?.includes('autogen') ? 'AutoGen 경로 완료' : '토론 완료'),
-            message: isFallback
-              ? (llmErrorText || 'Ollama 응답 지연으로 기본 결론 템플릿을 사용했습니다.')
+            title: shouldShowFallbackError ? '상품개발 토론 fallback 완료' : '상품개발 토론 완료',
+            meta: shouldShowFallbackError ? `fallback 원인: ${fallbackReason.label}` : (payload?.source?.includes('autogen') ? 'AutoGen 경로 완료' : '토론 완료'),
+            message: shouldShowFallbackError
+              ? (llmErrorText || fallbackReason.message)
               : '신상품 제안과 기존 상품별 보완 로직을 함께 정리했습니다.',
-            tone: isFallback ? 'warning' : 'completed',
+            tone: shouldShowFallbackError ? 'warning' : 'completed',
           });
           return;
         }
         if (nextStatus === 'failed') {
           const errorText = String(statusPayload?.error || '상품개발 토론 생성에 실패했습니다.');
+          const failedReason = classifyDebateFallbackReason(errorText);
           setProductDevelopmentState((previous) => ({
             ...previous,
             debateLoading: false,
-            debateError: errorText,
+            debateError: `${failedReason.label}: ${errorText}`,
           }));
           return;
         }
@@ -4232,9 +4581,9 @@ export default function OntologyWorkbench({
     onToast?.({
       id: `ontology-regulation-${Date.now()}`,
       kicker: 'Roni Navigator',
-      title: regulationBusy ? '규제 학습 진행 중' : '규제 문서 선택기 열기',
+      title: regulationBusy ? '규제 학습 진행 중' : '학습 팝업 열기',
       meta: 'Ontology regulation intake',
-      message: regulationBusy ? '이미 업로드된 문서를 학습하는 중입니다.' : '학습할 규제 문서를 선택하세요.',
+      message: regulationBusy ? '이미 업로드된 문서를 학습하는 중입니다.' : '학습할 규제 문서를 선택하거나 추가하세요.',
       tone: 'amber',
     });
   }
@@ -4399,8 +4748,24 @@ export default function OntologyWorkbench({
     || normalizedIntent.includes('cluster')
     || normalizedIntent.includes('segment')
   );
+  const isScreeningConsultIntent = (
+    normalizedIntent.includes('screening_consult_response')
+    || normalizedIntent.includes('screening')
+    || compactQuestionText.includes('심사결과')
+    || compactQuestionText.includes('심사캡쳐')
+    || compactQuestionText.includes('ocr')
+  );
+  const isRegulationPolicyIntent = (
+    normalizedIntent.includes('regulation_policy')
+    || normalizedIntent === 'policy'
+    || (normalizedIntent.includes('regulation') && normalizedIntent.includes('policy'))
+    || String(intentLabel || '').toLowerCase().includes('regulation and policy')
+  );
+  const forcePolicyOnlyInSummary = isRegulationPolicyIntent;
   const summaryToolPriority = isRegulationGroundedAnswer
-    ? ['policy', 'explainability', 'cluster']
+    ? (forcePolicyOnlyInSummary ? ['policy'] : ['policy', 'explainability', 'cluster'])
+    : isScreeningConsultIntent
+      ? ['explainability', 'policy', 'cluster']
     : isRejectReasonIntent
       ? ['explainability', 'cluster', 'policy']
       : isClusterIntent
@@ -4416,7 +4781,7 @@ export default function OntologyWorkbench({
   const prioritizedSummaryTools = summaryToolPriority
     .map((key) => ({ key, tool: summaryToolMap[key] }))
     .filter((item) => Boolean(item.tool));
-  const shouldPinExplainabilityInSummaryMain = Boolean(insightToolCard);
+  const shouldPinExplainabilityInSummaryMain = !forcePolicyOnlyInSummary && Boolean(insightToolCard);
   const prioritizedSummarySideTools = prioritizedSummaryTools.filter((item) => item.key !== 'explainability');
   const summaryPriorityLabelMap = {
     cluster: 'Cluster',
@@ -4502,11 +4867,18 @@ export default function OntologyWorkbench({
   const promptDock = (
     <div className="roni-prompt-dock workspace-prompt-dock" style={{ maxWidth: '900px', width: '100%' }}>
       <div className="ontology-chat-input-shell copilot-composer-shell roni-prompt-dock-input-shell">
-        <div className="workspace-prompt-textarea-shell">
+        <div
+          className={`workspace-prompt-textarea-shell ${isPromptDragOver ? 'is-drag-over' : ''}`}
+          onDragOver={handlePromptDragOver}
+          onDragEnter={handlePromptDragOver}
+          onDragLeave={handlePromptDragLeave}
+          onDrop={handlePromptDrop}
+        >
           <textarea
             className="ontology-chat-textarea roni-prompt-textarea"
             value={queryInput}
-            onChange={(event) => setQueryInput(event.target.value)}
+            onChange={(event) => handlePromptInputChange(event.target.value)}
+            onKeyDown={handlePromptTextareaKeyDown}
             placeholder="추가로 궁금한 점을 입력해 주세요. 예: 승인군과 거절군의 평균 금리 차이는?"
             rows={2}
           />
@@ -4518,11 +4890,14 @@ export default function OntologyWorkbench({
             onClick={handleRunQuery}
           />
         </div>
+        {renderPromptImageStatusView()}
         <div className="ontology-chat-action-row">
           <div className="workspace-prompt-state workspace-mode-switcher" aria-label="답변 모드 선택">
             <div className="workspace-mode-choice-row" role="group" aria-label="답변 모드 선택">
-              {ANSWER_MODES.map((mode) => {
+              {orderedAnswerModes.map((mode) => {
                 const isActiveMode = answerMode === mode.id;
+                const modeIcon = mode.id === 'memo' ? activeMemoDepartmentInfo.icon : mode.icon;
+                const modeLabel = mode.id === 'memo' ? activeMemoDepartmentInfo.label : mode.label;
                 return (
                   <motion.button
                     key={mode.id}
@@ -4536,8 +4911,8 @@ export default function OntologyWorkbench({
                     transition={{ type: 'spring', stiffness: 420, damping: 28 }}
                   >
                     {isActiveMode ? <motion.span className="workspace-mode-choice-glow" layoutId="workspace-mode-choice-glow" transition={{ type: 'spring', stiffness: 420, damping: 34 }} /> : null}
-                    <span className="workspace-mode-icon" aria-hidden="true">{mode.icon}</span>
-                    <strong>{mode.label}</strong>
+                    <span className="workspace-mode-icon" aria-hidden="true">{modeIcon}</span>
+                    <strong>{modeLabel}</strong>
                   </motion.button>
                 );
               })}
@@ -4586,21 +4961,9 @@ export default function OntologyWorkbench({
               exit={{ opacity: 0, y: -8, height: 0 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
             >
-              <div className="memo-department-row">
-                {MEMO_DEPARTMENTS.map((department) => (
-                  <button
-                    key={department.id}
-                    type="button"
-                    className={`memo-department-chip ${memoDepartment === department.id ? 'active' : ''}`}
-                    onClick={() => { setMemoDepartment(department.id); onDepartmentThemeChange?.(department.id); }}
-                  >
-                    <span aria-hidden="true">{department.icon}</span>
-                    <strong>{department.label}</strong>
-                  </button>
-                ))}
-                <button type="button" className="memo-concept-button" onClick={() => setShowConceptModal(true)}>
-                  컨셉 보기
-                </button>
+              <div className="memo-mode-fixed-department">
+                <span aria-hidden="true">{activeMemoDepartmentInfo.icon}</span>
+                <strong>{activeMemoDepartmentInfo.label}</strong>
               </div>
               <textarea
                 className="memo-mode-textarea"
@@ -4682,7 +5045,17 @@ export default function OntologyWorkbench({
                   ) : null}
                 </AnimatePresence>
               </div>
-              <RoniAvatar stageKey={activeStage.key} agentState={agentState} thinkingPhase={thinkingPhase} liveSpeech={roniCaption} reduceMotion={reduceMotion} surprised={isRoniHovered && !showRoniSuccess} success={showRoniSuccess} onDocumentRequest={handleLearnClick} />
+              <RoniAvatar
+                stageKey={activeStage.key}
+                agentState={agentState}
+                thinkingPhase={thinkingPhase}
+                liveSpeech={roniCaption}
+                reduceMotion={reduceMotion}
+                surprised={isRoniHovered && !showRoniSuccess}
+                success={showRoniSuccess}
+                onDocumentRequest={handleLearnClick}
+                onAvatarClick={handleLearnClick}
+              />
               <div className={`roni-caption-box mood-${roniCaption.mood || 'idle'}`}>
                 <strong>Bunny</strong>
                 <p>
@@ -4782,50 +5155,43 @@ export default function OntologyWorkbench({
                   </motion.aside>
                 ) : null}
               </AnimatePresence>
-              <AnimatePresence>
-                <motion.button
-                  type="button"
-                  className={`roni-doc-bubble ${regulationBusy ? 'is-busy' : ''}`}
-                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.95 }}
-                  transition={{ duration: 0.18, ease: 'easeOut' }}
-                  onClick={handleLearnClick}
-                  disabled={regulationBusy}
-                  aria-label={regulationBusy ? '규제 문서 학습 진행 중' : '규제 문서 업로드'}
-                  title={regulationBusy ? `규제 문서 학습 진행 중 (${regulationUpdatedAt || '진행 중'})` : '규제 문서 업로드'}
-                >
-                  <span className="roni-doc-lottie-frame" aria-hidden="true">
-                    <DotLottieReact className="roni-doc-lottie" data={regulationDocumentAnimation} loop autoplay />
-                  </span>
-                  {regulationBusy ? <span className="roni-doc-bubble-busy-dot" aria-hidden="true" /> : null}
-                  <span className="roni-doc-bubble-tail" aria-hidden="true" />
-                </motion.button>
-              </AnimatePresence>
-
               <div className="roni-prompt-dock">
                 <div className="ontology-chat-input-shell copilot-composer-shell roni-prompt-dock-input-shell">
-                  <textarea
-                    className="ontology-chat-textarea roni-prompt-textarea"
-                    value={queryInput}
-                    onChange={(event) => setQueryInput(event.target.value)}
-                    placeholder="로니에게 이어서 질문하세요. 예: 40대 중 직위험군 기준으로 한도는?"
-                    rows={2}
-                  />
+                  <div
+                    className={`workspace-prompt-textarea-shell ${isPromptDragOver ? 'is-drag-over' : ''}`}
+                    onDragOver={handlePromptDragOver}
+                    onDragEnter={handlePromptDragOver}
+                    onDragLeave={handlePromptDragLeave}
+                    onDrop={handlePromptDrop}
+                  >
+                    <textarea
+                      className="ontology-chat-textarea roni-prompt-textarea"
+                      value={queryInput}
+                      onChange={(event) => handlePromptInputChange(event.target.value)}
+                      onKeyDown={handlePromptTextareaKeyDown}
+                      placeholder="로니에게 이어서 질문하세요. 예: 40대 중 직위험군 기준으로 한도는?"
+                      rows={2}
+                    />
+                  </div>
+                  {renderPromptImageStatusView()}
                   <div className="ontology-chat-action-row">
                     <div className="answer-mode-nav" aria-label="답변 모드 선택">
-                      {ANSWER_MODES.map((mode) => (
-                        <button
-                          key={mode.id}
-                          type="button"
-                          className={`answer-mode-pill ${answerMode === mode.id ? 'active' : ''}`}
-                          onClick={() => setAnswerMode(mode.id)}
-                          title={mode.hint}
-                        >
-                          <span aria-hidden="true">{mode.icon}</span>
-                          <strong>{mode.label}</strong>
-                        </button>
-                      ))}
+                      {orderedAnswerModes.map((mode) => {
+                        const modeIcon = mode.id === 'memo' ? activeMemoDepartmentInfo.icon : mode.icon;
+                        const modeLabel = mode.id === 'memo' ? activeMemoDepartmentInfo.label : mode.label;
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            className={`answer-mode-pill ${answerMode === mode.id ? 'active' : ''}`}
+                            onClick={() => setAnswerMode(mode.id)}
+                            title={mode.hint}
+                          >
+                            <span aria-hidden="true">{modeIcon}</span>
+                            <strong>{modeLabel}</strong>
+                          </button>
+                        );
+                      })}
                     </div>
                     <div className="ontology-chat-action-buttons">
                       <PromptLottieActionButton
@@ -4876,21 +5242,9 @@ export default function OntologyWorkbench({
                         exit={{ opacity: 0, y: -8, height: 0 }}
                         transition={{ duration: 0.2, ease: 'easeOut' }}
                       >
-                        <div className="memo-department-row">
-                          {MEMO_DEPARTMENTS.map((department) => (
-                            <button
-                              key={department.id}
-                              type="button"
-                              className={`memo-department-chip ${memoDepartment === department.id ? 'active' : ''}`}
-                              onClick={() => { setMemoDepartment(department.id); onDepartmentThemeChange?.(department.id); }}
-                            >
-                              <span aria-hidden="true">{department.icon}</span>
-                              <strong>{department.label}</strong>
-                            </button>
-                          ))}
-                          <button type="button" className="memo-concept-button" onClick={() => setShowConceptModal(true)}>
-                            컨셉 보기
-                          </button>
+                        <div className="memo-mode-fixed-department">
+                          <span aria-hidden="true">{activeMemoDepartmentInfo.icon}</span>
+                          <strong>{activeMemoDepartmentInfo.label}</strong>
                         </div>
                         <textarea
                           className="memo-mode-textarea"
@@ -5053,31 +5407,13 @@ export default function OntologyWorkbench({
                                     title={ollamaCallLabel}
                                     aria-label={ollamaCallLabel}
                                   />
-                                  <details className="workspace-answer-disclosure">
-                                    <summary>더보기</summary>
-                                    <div className="workspace-answer-disclosure-body">
-                                      <div className="ontology-runtime-answer-head">
-                                        <span className="panel-kicker">Answer</span>
-                                        <div className="detail-chip-row">
-                                          <span className="sample-pill">{currentAnswerSourceTag}</span>
-                                          <span className="sample-pill">Intent {intentLabel}{intentConfidence ? ` ${(intentConfidence * 100).toFixed(0)}%` : ''}</span>
-                                          <span className="sample-pill">Output {outputCategoryLabel}</span>
-                                          {shouldShowProductChip(selectedProductCode || backendState.workbench?.input?.product, currentAnswerSourceTag) ? (
-                                            <span className="sample-pill">상품 {getProductDisplayName(selectedProductCode || backendState.workbench?.input?.product)}</span>
-                                          ) : null}
-                                          <button type="button" className="secondary-button ontology-inline-detail-button" onClick={() => handleOpenDetailModal('answer')}>자세히</button>
-                                        </div>
-                                      </div>
-                                      <div className="ontology-answer-stream-shell">
-                                        <strong className="ontology-answer-stream-headline">
-                                          <HighlightedAnswerText text={resolvedAnswerSummary?.headline || '답변 기록'} terms={answerHighlightTerms} termMeta={answerTermMeta} onKeywordClick={handleKeywordGraphOpen} />
-                                        </strong>
-                                        <p className="ontology-answer-stream-body">
-                                          <HighlightedAnswerText text={finalAnswerBody || '답변 내용을 불러오는 중입니다.'} terms={answerHighlightTerms} termMeta={answerTermMeta} className="ontology-answer-stream-copy" onKeywordClick={handleKeywordGraphOpen} />
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </details>
+                                  <button
+                                    type="button"
+                                    className="workspace-answer-disclosure-trigger"
+                                    onClick={() => handleOpenDetailModal('answer')}
+                                  >
+                                    더보기
+                                  </button>
                                 </div>
                                 <div className="detail-chip-row" style={{ marginTop: 8, marginBottom: 8 }}>
                                   <span className="sample-pill">{summaryPriorityMessage}</span>
@@ -5460,11 +5796,12 @@ export default function OntologyWorkbench({
                         </div>
                         <span className="sample-pill">{ollamaStatus}</span>
                       </div>
-                      <div className="ontology-ollama-debug-tabs" role="tablist" aria-label="Ollama trace tabs">
-                        <button type="button" className={answerTraceTab === 'input' ? 'active' : ''} onClick={() => setAnswerTraceTab('input')}>Input</button>
-                        <button type="button" className={answerTraceTab === 'output' ? 'active' : ''} onClick={() => setAnswerTraceTab('output')}>Output</button>
+                      <div className="ontology-ollama-debug-tabs is-static">
+                        <span className="sample-pill">Input</span>
+                        <span className="sample-pill">Output</span>
                       </div>
-                      <pre className="ontology-ollama-debug-pre">{answerTraceTab === 'input' ? ollamaFullInput : ollamaFullOutput}</pre>
+                      <pre className="ontology-ollama-debug-pre">{ollamaFullInput}</pre>
+                      <pre className="ontology-ollama-debug-pre">{ollamaFullOutput}</pre>
                     </aside>
                   </div>
                 ) : null}
@@ -5532,100 +5869,105 @@ export default function OntologyWorkbench({
         {showDepartmentOnboarding ? (
           <motion.div className="prompt-modal-backdrop department-onboarding-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => handleCloseOnboarding(true)}>
             <motion.section className="prompt-modal department-onboarding-modal" initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.98 }} transition={{ duration: 0.22, ease: 'easeOut' }} onClick={(event) => event.stopPropagation()}>
-              <div className="department-onboarding-head">
-                <div>
-                  <span className="panel-kicker">Team Setup</span>
-                  <h3>게임 캐릭터 고르듯, 오늘의 부서 관점을 선택해요</h3>
-                  <p>{onboardingStep === 'department' ? '먼저 메인 부서를 캐릭터처럼 선택해볼까요?' : onboardingStep === 'mode' ? '이 부서 관점으로 사용할 모드를 고릅니다.' : '선택한 부서 관점으로 짧은 설문을 이어갑니다.'}</p>
-                </div>
-                <button type="button" className="secondary-button" onClick={() => handleCloseOnboarding(true)}>나중에</button>
-              </div>
-              {onboardingStep === 'department' ? (
-                <div className="department-onboarding-character-grid">
-                  {MEMO_DEPARTMENTS.map((department) => (
-                    <button key={department.id} type="button" className={`department-character-card department-character-card-poker ${onboardingDepartment === department.id ? 'active' : ''}`} onClick={() => { setOnboardingDepartment(department.id); onDepartmentThemeChange?.(department.id); setOnboardingStep('mode'); }}>
-                      <span aria-hidden="true">{department.icon}</span>
-                      <strong>{department.label}</strong>
-                      <p>{department.defaultConcept}</p>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {onboardingStep === 'mode' ? (
-                <div className="department-onboarding-mode-grid">
-                  {ANSWER_MODES.filter((mode) => mode.id !== 'memo').map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={`department-mode-card department-character-card-poker ${onboardingMode === mode.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setOnboardingMode(mode.id);
-                        setOnboardingQuestionIndex(0);
-                        setOnboardingAnswers({});
-                        setOnboardingFreeText('');
-                        setOnboardingStep('survey');
-                      }}
-                    >
-                      <span>{mode.icon}</span>
-                      <strong>{mode.label}</strong>
-                      <small>{mode.hint}</small>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {onboardingStep === 'survey' ? (
-                <div className="department-onboarding-survey">
-                  <div className="department-onboarding-survey-head">
-                    <strong>{MEMO_DEPARTMENTS.find((item) => item.id === onboardingDepartment)?.label || '부서'} 설문 {onboardingQuestionIndex + 1}/{Math.max(1, onboardingQuestions.length)}</strong>
-                    <p>{activeOnboardingQuestion?.prompt || '마지막으로 추가로 중요하게 보는 기준을 남겨주세요.'}</p>
+              <div className="department-onboarding-layout">
+                <OnboardingBunnyRail />
+                <div className="department-onboarding-content">
+                  <div className="department-onboarding-head">
+                    <div>
+                      <span className="panel-kicker">Team Setup</span>
+                      <h3>게임 캐릭터 고르듯, 오늘의 부서 관점을 선택해요</h3>
+                      <p>{onboardingStep === 'department' ? '먼저 메인 부서를 캐릭터처럼 선택해볼까요?' : onboardingStep === 'mode' ? '이 부서 관점으로 사용할 모드를 고릅니다.' : '선택한 부서 관점으로 짧은 설문을 이어갑니다.'}</p>
+                    </div>
+                    <button type="button" className="secondary-button" onClick={() => handleCloseOnboarding(true)}>나중에</button>
                   </div>
-                  {activeOnboardingQuestion ? (
-                    <div className="department-onboarding-choice-row">
-                      {(activeOnboardingQuestion.choices || []).map((choice) => (
-                        <button
-                          key={choice}
-                          type="button"
-                          className={`department-onboarding-choice department-character-card-poker ${onboardingAnswers[activeOnboardingQuestion.id] === choice ? 'active' : ''}`}
-                          onClick={() => {
-                            handleOnboardingAnswerPick(activeOnboardingQuestion.id, choice);
-                            if (onboardingQuestionIndex < onboardingQuestions.length - 1) {
-                              setOnboardingQuestionIndex((prev) => prev + 1);
-                              return;
-                            }
-                            handleSubmitOnboarding();
-                          }}
-                        >
-                          {choice}
+                  {onboardingStep === 'department' ? (
+                    <div className="department-onboarding-character-grid">
+                      {MEMO_DEPARTMENTS.map((department) => (
+                        <button key={department.id} type="button" className={`department-character-card department-character-card-poker ${onboardingDepartment === department.id ? 'active' : ''}`} onClick={() => { setOnboardingDepartment(department.id); onDepartmentThemeChange?.(department.id); setOnboardingStep('mode'); }}>
+                          <span aria-hidden="true">{department.icon}</span>
+                          <strong>{department.label}</strong>
+                          <p>{department.defaultConcept}</p>
                         </button>
                       ))}
                     </div>
                   ) : null}
-                  <textarea
-                    className="department-onboarding-textarea"
-                    rows={3}
-                    value={onboardingFreeText}
-                    onChange={(event) => setOnboardingFreeText(event.target.value)}
-                    placeholder="예: 30대 승인률은 올리되, DSR 초과군은 보수적으로 보자"
-                  />
+                  {onboardingStep === 'mode' ? (
+                    <div className="department-onboarding-mode-grid">
+                      {ANSWER_MODES.filter((mode) => mode.id !== 'memo').map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          className={`department-mode-card department-character-card-poker ${onboardingMode === mode.id ? 'active' : ''}`}
+                          onClick={() => {
+                            setOnboardingMode(mode.id);
+                            setOnboardingQuestionIndex(0);
+                            setOnboardingAnswers({});
+                            setOnboardingFreeText('');
+                            setOnboardingStep('survey');
+                          }}
+                        >
+                          <span>{mode.icon}</span>
+                          <strong>{mode.label}</strong>
+                          <small>{mode.hint}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {onboardingStep === 'survey' ? (
+                    <div className="department-onboarding-survey">
+                      <div className="department-onboarding-survey-head">
+                        <strong>{MEMO_DEPARTMENTS.find((item) => item.id === onboardingDepartment)?.label || '부서'} 설문 {onboardingQuestionIndex + 1}/{Math.max(1, onboardingQuestions.length)}</strong>
+                        <p>{activeOnboardingQuestion?.prompt || '마지막으로 추가로 중요하게 보는 기준을 남겨주세요.'}</p>
+                      </div>
+                      {activeOnboardingQuestion ? (
+                        <div className="department-onboarding-choice-row">
+                          {(activeOnboardingQuestion.choices || []).map((choice) => (
+                            <button
+                              key={choice}
+                              type="button"
+                              className={`department-onboarding-choice department-character-card-poker ${onboardingAnswers[activeOnboardingQuestion.id] === choice ? 'active' : ''}`}
+                              onClick={() => {
+                                handleOnboardingAnswerPick(activeOnboardingQuestion.id, choice);
+                                if (onboardingQuestionIndex < onboardingQuestions.length - 1) {
+                                  setOnboardingQuestionIndex((prev) => prev + 1);
+                                  return;
+                                }
+                                handleSubmitOnboarding();
+                              }}
+                            >
+                              {choice}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      <textarea
+                        className="department-onboarding-textarea"
+                        rows={3}
+                        value={onboardingFreeText}
+                        onChange={(event) => setOnboardingFreeText(event.target.value)}
+                        placeholder="예: 30대 승인률은 올리되, DSR 초과군은 보수적으로 보자"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="department-onboarding-actions">
+                    {onboardingStep !== 'department' ? (
+                      <button type="button" className="secondary-button" onClick={() => {
+                        if (onboardingStep === 'survey') {
+                          if (onboardingQuestionIndex > 0) {
+                            setOnboardingQuestionIndex((prev) => Math.max(0, prev - 1));
+                          } else {
+                            setOnboardingStep('mode');
+                          }
+                        } else {
+                          setOnboardingStep('department');
+                        }
+                      }}>이전</button>
+                    ) : <span />}
+                    {onboardingStep === 'department' ? null : null}
+                    {onboardingStep === 'mode' ? null : null}
+                    {onboardingStep === 'survey' ? null : null}
+                  </div>
                 </div>
-              ) : null}
-              <div className="department-onboarding-actions">
-                {onboardingStep !== 'department' ? (
-                  <button type="button" className="secondary-button" onClick={() => {
-                    if (onboardingStep === 'survey') {
-                      if (onboardingQuestionIndex > 0) {
-                        setOnboardingQuestionIndex((prev) => Math.max(0, prev - 1));
-                      } else {
-                        setOnboardingStep('mode');
-                      }
-                    } else {
-                      setOnboardingStep('department');
-                    }
-                  }}>이전</button>
-                ) : <span />}
-                {onboardingStep === 'department' ? null : null}
-                {onboardingStep === 'mode' ? null : null}
-                {onboardingStep === 'survey' ? null : null}
               </div>
             </motion.section>
           </motion.div>

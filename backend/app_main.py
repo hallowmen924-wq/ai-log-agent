@@ -130,6 +130,10 @@ def set_ontology_query_priority_enabled(*args, **kwargs):
     return _strategy_chat_module().set_ontology_query_priority_enabled(*args, **kwargs)
 
 
+def get_ollama_runtime_monitor(*args, **kwargs):
+    return _strategy_chat_module().get_ollama_runtime_monitor(*args, **kwargs)
+
+
 def get_embeddings(*args, **kwargs):
     return _vector_db_module().get_embeddings(*args, **kwargs)
 
@@ -148,6 +152,10 @@ def search_context(*args, **kwargs):
 
 def search_regulation_evidence(*args, **kwargs):
     return _vector_db_module().search_regulation_evidence(*args, **kwargs)
+
+
+def get_regulation_knowledge_summary(*args, **kwargs):
+    return _vector_db_module().get_regulation_knowledge_summary(*args, **kwargs)
 
 
 def get_vector_count(*args, **kwargs):
@@ -484,6 +492,29 @@ INTENT_CLASSIFIER_PROTOTYPES: dict[str, dict[str, object]] = {
             "상품 전략 시뮬레이션을 해줘",
             "what if simulation strategy product conversion",
             "거절 고객을 승인 전환하려면 어떤 전략이 필요해?",
+        ],
+    },
+    "screening_consult_response": {
+        "label": "Screening consult response",
+        "description": "Counselor-facing response for uploaded screening result captures focused on reject code, rate, limit, and response guidance.",
+        "output_categories": ["answer_summary", "reject_code_analysis", "metric_summary", "feature_explainability"],
+        "examples": [
+            "첨부 심사결과 이미지 기준으로 거절사유코드, 금리, 한도 해석해줘",
+            "심사 캡쳐 화면 보고 상담원 응대 문구를 만들어줘",
+            "OCR 텍스트에서 reject code와 한도 근거를 설명해줘",
+            "screening capture consult reject code limit rate",
+        ],
+    },
+    "creative_ideation": {
+        "label": "Creative ideation",
+        "description": "Creative product ideas, prototype tools, calculator concepts, and brainstorming-style conversational answers.",
+        "output_categories": ["answer_summary", "general_answer", "product_strategy", "llm_generated_answer"],
+        "examples": [
+            "당사에서 개발할 수 있는 신선한 상품 아이디어를 제안해줘",
+            "당사 상품 기준 원리금 계산기 콘셉트를 만들어줘",
+            "창의적으로 상품 개선안 브레인스토밍 해줘",
+            "새로운 대출 상품 컨셉을 여러 개 제시해줘",
+            "creative ideation product idea calculator concept",
         ],
     },
     "general_fallback": {
@@ -846,7 +877,35 @@ def _build_answer_summary(query: str, selected_product: str, selected_feature: d
         item.get("feature_name") or item.get("feature_id") or ""
         for item in representative_features[:3]
     ], limit=3)
+    screening_consult_intent = _query_has_screening_consult_intent(query)
     reject_intent = _query_has_reject_intent(query, selected_feature)
+    if screening_consult_intent:
+        parsed = _parse_ocr_financial_signals(query)
+        analysis = _build_ocr_analysis_summary_v2(parsed)
+        product_name = _product_display_name(selected_product) or selected_product or "심사 결과"
+        resolution_tips = [str(item).strip() for item in (analysis.get("resolution_tips") or []) if str(item).strip()]
+        resolution_tip_line = " / ".join(resolution_tips[:2]) if resolution_tips else "재심사 전 체크리스트: 소득자료 최신화, 부채현황 정리, 신청조건 보수 조정"
+        highlights = [
+            {"label": "부결 사유", "value": str(analysis.get("reject_reason_summary") or "-")},
+            {"label": "한도 근거", "value": str(analysis.get("limit_basis_summary") or "-")},
+            {"label": "보완 항목", "value": " / ".join(list(analysis.get("action_items") or [])[:3]) or "-"},
+            {"label": "해결 방법", "value": resolution_tip_line},
+            {"label": "추출 근거", "value": str(analysis.get("evidence_summary") or "-")},
+        ]
+        return {
+            "headline": f"{product_name} 심사 캡쳐 응대 요약입니다.",
+            "explanation": (
+                f"부결 사유는 {analysis.get('reject_reason_summary') or '코드 미검출'} 입니다. "
+                f"한도/금리 해석 근거는 {analysis.get('limit_basis_summary') or '추가 확인 필요'} 입니다. "
+                f"상담원 보완 가이드는 {(' / '.join(list(analysis.get('action_items') or [])[:2]) or '원본 심사로그 교차검증')} 입니다. "
+                f"해결 방법은 {resolution_tip_line} 입니다."
+            ),
+            "highlights": highlights,
+            "metric_summary": [],
+            "ocr_parsed": parsed,
+            "ocr_analysis_summary": analysis,
+            "source": "screening-consult-response",
+        }
     if reject_intent:
         representative_names = [
             name for name in representative_names
@@ -2965,6 +3024,110 @@ def _query_has_cluster_vector_intent(query: str) -> bool:
     return _query_asks_cluster_signals(query) or any(marker in compact_query for marker in markers)
 
 
+def _query_has_screening_consult_intent(query: str) -> bool:
+    compact_query = _compact_search_text(query)
+    if not compact_query:
+        return False
+    context_markers = [
+        "심사결과", "심사캡쳐", "캡쳐", "이미지", "첨부", "ocr",
+        "loanreviewresult", "requestedamount", "creditlimit", "interestrate",
+    ]
+    signal_markers = ["거절", "부결", "reject", "k코드", "금리", "한도", "rate", "limit"]
+    has_context = any(marker in compact_query for marker in context_markers)
+    signal_count = sum(1 for marker in signal_markers if marker in compact_query)
+    return has_context and signal_count >= 2
+
+
+def _query_has_creative_intent(query: str) -> bool:
+    compact_query = _compact_search_text(query)
+    if not compact_query:
+        return False
+    action_markers = [
+        "아이디어", "제안", "기획", "구상", "브레인스토밍", "창의", "신선한",
+        "만들어줘", "설계", "프로토타입", "컨셉", "concept", "idea", "creative",
+        "brainstorm", "prototype", "calculator", "design",
+    ]
+    object_markers = [
+        "상품", "대출상품", "원리금계산기", "계산기", "시뮬레이터", "툴", "서비스", "여정",
+        "product", "loan", "pricing", "offer",
+    ]
+    analysis_only_markers = [
+        "왜", "이유", "사유", "원인", "근거", "최빈", "통계", "분포", "상위", "코드",
+        "rejectreason", "k코드",
+    ]
+    direct_phrases = [
+        "신선한상품", "상품아이디어", "상품제안", "신상품아이디어",
+        "원리금계산기", "상담도구", "계산기만들어",
+    ]
+    action_hit = any(marker in compact_query for marker in action_markers)
+    object_hit = any(marker in compact_query for marker in object_markers)
+    direct_hit = any(phrase in compact_query for phrase in direct_phrases)
+    analysis_only = any(marker in compact_query for marker in analysis_only_markers)
+    return bool(direct_hit or (action_hit and object_hit and not analysis_only))
+
+
+def _query_requests_loan_calculator(query: str) -> bool:
+    compact_query = _compact_search_text(query)
+    if not compact_query:
+        return False
+    calculator_markers = [
+        "원리금계산기", "원리금", "상환계산기", "대출계산기", "월상환",
+        "amortization", "loancalculator", "repaymentcalculator", "calculator",
+    ]
+    return any(marker in compact_query for marker in calculator_markers)
+
+
+def _extract_calculator_input_hints(query: str) -> dict[str, object]:
+    text = str(query or "")
+    compact = _compact_search_text(text)
+    amount_match = re.search(r"(\d[\d,\s]{3,})\s*(원|krw)?", text, flags=re.IGNORECASE)
+    rate_match = re.search(r"(\d{1,2}(?:\.\d{1,2})?)\s*%", text)
+    month_match = re.search(r"(\d{1,3})\s*(개월|달|month|months|m)\b", text, flags=re.IGNORECASE)
+    year_match = re.search(r"(\d{1,2})\s*(년|year|years|y)\b", text, flags=re.IGNORECASE)
+
+    principal_amount = None
+    if amount_match:
+        try:
+            principal_amount = float(re.sub(r"[^\d.]", "", amount_match.group(1)))
+        except Exception:
+            principal_amount = None
+
+    annual_rate = None
+    if rate_match:
+        try:
+            annual_rate = float(rate_match.group(1))
+        except Exception:
+            annual_rate = None
+
+    term_months = None
+    if month_match:
+        try:
+            term_months = int(month_match.group(1))
+        except Exception:
+            term_months = None
+    elif year_match:
+        try:
+            term_months = int(year_match.group(1)) * 12
+        except Exception:
+            term_months = None
+
+    repayment_type = ""
+    if any(token in compact for token in ["원리금균등", "균등상환", "annuity"]):
+        repayment_type = "원리금균등"
+    elif any(token in compact for token in ["원금균등", "equalprincipal"]):
+        repayment_type = "원금균등"
+    elif any(token in compact for token in ["만기일시", "bullet"]):
+        repayment_type = "만기일시"
+
+    return {
+        "principal_amount": principal_amount,
+        "annual_rate_percent": annual_rate,
+        "term_months": term_months,
+        "repayment_type": repayment_type,
+        "has_enough_inputs": bool(principal_amount and annual_rate is not None and term_months),
+    }
+
+
 def _rule_based_query_intent(
     query: str,
     selected_feature: dict | None,
@@ -2974,10 +3137,14 @@ def _rule_based_query_intent(
 ) -> str:
     if not str(query or "").strip():
         return "general_fallback"
+    if _query_has_screening_consult_intent(query):
+        return "screening_consult_response"
     if regulation_first_route:
         return "regulation_policy"
     if strategy_simulation_route:
         return "strategy_simulation"
+    if _query_has_creative_intent(query):
+        return "creative_ideation"
     if _query_has_reject_intent(query, selected_feature):
         return "reject_reason"
     if _query_asks_average_metrics(query) or query_has_segment_metric_intent(query):
@@ -4374,6 +4541,7 @@ def _detect_financial_agent_intents(query: str, selected_feature: dict | None = 
     intents: list[str] = []
     metric_intent = _query_has_metric_intent(query)
     strategy_intent = _query_requires_strategy_simulation(query)
+    creative_intent = _query_has_creative_intent(query)
     reason_intent = _query_has_reject_intent(query, selected_feature) or any(token in compact_query for token in ["왜", "이유", "설명", "사유", "탈락", "거절"])
     if _query_requires_regulation_first(query):
         intents.append("policy")
@@ -4389,6 +4557,8 @@ def _detect_financial_agent_intents(query: str, selected_feature: dict | None = 
         intents.append("policy")
     if any(token in compact_query for token in ["전략", "시뮬레이션", "완화", "신상품", "상품만들", "수익", "부실", "simulation", "strategy"]):
         intents.append("strategy")
+    if creative_intent:
+        intents.extend(["strategy", "persona"])
     if any(token in compact_query for token in ["영업점", "신용기획", "솔루션", "운영", "부서", "관점"]):
         intents.append("persona")
     if strategy_intent:
@@ -4637,6 +4807,56 @@ def _build_policy_conflict_result(
     if not citations and regulation_evidence:
         citations = [_normalize_regulation_citation(item) for item in regulation_evidence[:3]]
     conflicts: list[dict[str, object]] = []
+    policy_tag_counter: dict[str, int] = {}
+    reject_code_counter: dict[str, int] = {}
+    product_code_counter: dict[str, int] = {}
+    for item in regulation_evidence:
+        for tag in list(item.get("policy_tags") or []):
+            tag_text = str(tag).strip()
+            if tag_text:
+                policy_tag_counter[tag_text] = int(policy_tag_counter.get(tag_text, 0)) + 1
+        for code in list(item.get("reject_codes") or []):
+            code_text = str(code).strip().upper()
+            if code_text:
+                reject_code_counter[code_text] = int(reject_code_counter.get(code_text, 0)) + 1
+        for product in list(item.get("product_codes") or []):
+            product_text = str(product).strip().upper()
+            if product_text:
+                product_code_counter[product_text] = int(product_code_counter.get(product_text, 0)) + 1
+
+    top_policy_tags = [
+        f"{key} {int(value)}건"
+        for key, value in sorted(policy_tag_counter.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
+    ]
+    top_reject_codes = [
+        f"{key} {int(value)}건"
+        for key, value in sorted(reject_code_counter.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
+    ]
+    top_product_codes = [
+        f"{key} {int(value)}건"
+        for key, value in sorted(product_code_counter.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:3]
+    ]
+
+    reason_lines: list[str] = []
+    for item in regulation_evidence[:4]:
+        reject_codes = [str(code).strip().upper() for code in (item.get("reject_codes") or []) if str(code).strip()]
+        policy_tags = [str(tag).strip() for tag in (item.get("policy_tags") or []) if str(tag).strip()]
+        article = str(item.get("article") or "").strip()
+        snippet = str(item.get("snippet") or "").strip()
+        doc_name = str(item.get("document_name") or item.get("name") or "규제문서").strip()
+        detail_bits: list[str] = []
+        if reject_codes:
+            detail_bits.append(f"코드 {', '.join(reject_codes[:2])}")
+        if policy_tags:
+            detail_bits.append(f"태그 {', '.join(policy_tags[:2])}")
+        if article:
+            detail_bits.append(article)
+        if snippet:
+            detail_bits.append(snippet[:80])
+        if detail_bits:
+            reason_lines.append(f"{doc_name}: " + " · ".join(detail_bits))
+    reason_lines = _dedupe_text_items(reason_lines, limit=3)
+
     if citations:
         conflicts.append({
             "level": "review",
@@ -4649,15 +4869,54 @@ def _build_policy_conflict_result(
             "title": "답변 관련 규제 충돌 없음",
             "detail": "현재 질문 답변에는 규제 문서 근거가 직접 연결되지 않아 citations를 숨겼습니다.",
         })
+    if top_policy_tags:
+        conflicts.append({
+            "level": "info",
+            "title": f"규제 규칙 태그: {', '.join(top_policy_tags)}",
+            "detail": "업로드 문서에서 추출한 구조화 규칙 태그 기준",
+        })
+    if top_reject_codes:
+        conflicts.append({
+            "level": "info",
+            "title": f"거절사유코드 히트: {', '.join(top_reject_codes)}",
+            "detail": "질문과 연결된 규제 근거에서 검출된 코드",
+        })
+    for index, reason in enumerate(reason_lines, start=1):
+        conflicts.append({
+            "level": "info",
+            "title": f"문서기반 발생 사유 {index}",
+            "detail": reason,
+        })
+
+    metrics: list[dict[str, object]] = []
+    metrics.append({"label": "근거 문서 수", "value": str(len({str(item.get('document_name') or item.get('name') or '') for item in regulation_evidence if str(item.get('document_name') or item.get('name') or '').strip()}))})
+    metrics.append({"label": "근거 청크 수", "value": str(len(regulation_evidence))})
+    if top_policy_tags:
+        metrics.append({"label": "Top 정책 태그", "value": top_policy_tags[0]})
+    if top_product_codes:
+        metrics.append({"label": "Top 상품코드", "value": top_product_codes[0]})
+
+    summary_text = "규제 문서, 내부 Rule, 실제 심사 결과의 연결 여부를 확인합니다."
+    if top_reject_codes or top_policy_tags:
+        reason_parts: list[str] = []
+        if top_reject_codes:
+            reason_parts.append(f"코드 기준 {top_reject_codes[0]}")
+        if top_policy_tags:
+            reason_parts.append(f"정책 태그 {top_policy_tags[0]}")
+        summary_text = f"문서 근거 기준 주요 발생 사유는 {' / '.join(reason_parts)} 입니다."
+
     return {
         "id": "policy",
         "title": "Policy/Ontology Reasoning",
         "status": "ready",
-        "summary": "규제 문서, 내부 Rule, 실제 심사 결과의 연결 여부를 확인합니다.",
+        "summary": summary_text,
         "llm_call": False,
+        "metrics": metrics,
         "citations": citations,
         "conflicts": conflicts,
         "evidence_count": len(regulation_evidence),
+        "policy_tags": top_policy_tags,
+        "reject_code_hits": top_reject_codes,
     }
 
 
@@ -5530,11 +5789,29 @@ def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
         _env_int("PRODUCT_DEBATE_OLLAMA_TIMEOUT_SEC", max(wait_seconds + 3, 30), minimum=12),
     )
     debate_fail_fast_if_busy = _env_flag("PRODUCT_DEBATE_FAIL_FAST_IF_BUSY", False)
-    acquired = PRODUCT_DEBATE_CALL_SEMAPHORE.acquire(timeout=max(1, wait_seconds))
+    use_semaphore_gate = _env_flag("PRODUCT_DEBATE_USE_SEMAPHORE_GATE", False)
+    acquire_timeout_sec = max(
+        6,
+        min(
+            debate_timeout_sec,
+            _env_int("PRODUCT_DEBATE_ACQUIRE_TIMEOUT_SEC", max(wait_seconds + 6, 12), minimum=6),
+        ),
+    )
+    acquired = False
+    if use_semaphore_gate:
+        acquired = PRODUCT_DEBATE_CALL_SEMAPHORE.acquire(timeout=acquire_timeout_sec)
+    if not acquired:
+        raise TimeoutError(f"[lock-busy] Ollama 호출 슬롯 대기 timeout({acquire_timeout_sec}s)")
     if not acquired:
         raise TimeoutError("상품개발 토론 호출이 혼잡하여 대기 중입니다. 잠시 후 다시 시도해 주세요.")
+    call_started_at = datetime.datetime.now(datetime.timezone.utc)
+    print(
+        "[product-debate-debug] ollama_call_start "
+        f"at={call_started_at.isoformat()} timeout_sec={debate_timeout_sec} "
+        f"wait_seconds={wait_seconds} prompt_chars={len(str(prompt or ''))}"
+    )
     try:
-        return str(
+        response_text = str(
             lightweight_ollama_generate(
                 prompt,
                 timeout_seconds=debate_timeout_sec,
@@ -5543,9 +5820,113 @@ def _product_ollama_generate_fast(prompt: str, wait_seconds: int) -> str:
             )
             or ""
         )
+        call_finished_at = datetime.datetime.now(datetime.timezone.utc)
+        elapsed_ms = int((call_finished_at - call_started_at).total_seconds() * 1000)
+        print(
+            "[product-debate-debug] ollama_call_end "
+            f"at={call_finished_at.isoformat()} elapsed_ms={elapsed_ms} "
+            f"response_chars={len(response_text)}"
+        )
+        return response_text
+    except Exception as error:
+        call_failed_at = datetime.datetime.now(datetime.timezone.utc)
+        elapsed_ms = int((call_failed_at - call_started_at).total_seconds() * 1000)
+        print(
+            "[product-debate-debug] ollama_call_error "
+            f"at={call_failed_at.isoformat()} elapsed_ms={elapsed_ms} "
+            f"error={str(error)}"
+        )
+        raise
     finally:
         with contextlib.suppress(Exception):
             PRODUCT_DEBATE_CALL_SEMAPHORE.release()
+
+
+def _product_ollama_generate_fast_v2(prompt: str, wait_seconds: int) -> str:
+    def _compact_product_debate_prompt(value: str) -> str:
+        max_chars = max(700, _env_int("PRODUCT_DEBATE_PROMPT_MAX_CHARS", 1600, minimum=700))
+        compact = " ".join(str(value or "").split())
+        if len(compact) <= max_chars:
+            return compact
+        return compact[:max_chars]
+
+    def _product_debate_ollama_options() -> dict[str, object]:
+        options: dict[str, object] = {
+            "num_ctx": max(512, _env_int("PRODUCT_DEBATE_OLLAMA_NUM_CTX", 896, minimum=512)),
+            "num_predict": max(32, _env_int("PRODUCT_DEBATE_OLLAMA_NUM_PREDICT", 72, minimum=32)),
+            "temperature": max(0.0, min(1.0, float(os.environ.get("PRODUCT_DEBATE_OLLAMA_TEMPERATURE", "0.05") or 0.05))),
+        }
+        num_thread = _env_int("PRODUCT_DEBATE_OLLAMA_NUM_THREAD", 0, minimum=0)
+        if num_thread > 0:
+            options["num_thread"] = num_thread
+        return options
+
+    debate_timeout_sec = max(
+        12,
+        _env_int("PRODUCT_DEBATE_OLLAMA_TIMEOUT_SEC", max(wait_seconds + 3, 90), minimum=12),
+    )
+    debate_fail_fast_if_busy = _env_flag("PRODUCT_DEBATE_FAIL_FAST_IF_BUSY", False)
+    # NOTE: lightweight_ollama_generate already has process-wide lock.
+    # We disable extra semaphore gate by default to avoid double-lock contention.
+    use_semaphore_gate = _env_flag("PRODUCT_DEBATE_USE_SEMAPHORE_GATE", False)
+    acquired = False
+    acquire_timeout_sec = max(
+        6,
+        min(
+            debate_timeout_sec,
+            _env_int("PRODUCT_DEBATE_ACQUIRE_TIMEOUT_SEC", max(wait_seconds + 6, 12), minimum=6),
+        ),
+    )
+    if use_semaphore_gate:
+        acquired = PRODUCT_DEBATE_CALL_SEMAPHORE.acquire(timeout=acquire_timeout_sec)
+        if not acquired:
+            raise TimeoutError(f"[lock-busy] Ollama 호출 슬롯 대기 timeout({acquire_timeout_sec}s)")
+
+    call_started_at = datetime.datetime.now(datetime.timezone.utc)
+    print(
+        "[product-debate-debug] ollama_call_start "
+        f"at={call_started_at.isoformat()} timeout_sec={debate_timeout_sec} "
+        f"wait_seconds={wait_seconds} prompt_chars={len(str(prompt or ''))} "
+        f"semaphore_gate={use_semaphore_gate}"
+    )
+    try:
+        prompt_to_send = _compact_product_debate_prompt(prompt)
+        options_override = _product_debate_ollama_options()
+        print(
+            "[product-debate-debug] ollama_call_options "
+            f"prompt_chars_compact={len(prompt_to_send)} options={json.dumps(options_override, ensure_ascii=False)}"
+        )
+        response_text = str(
+            lightweight_ollama_generate(
+                prompt_to_send,
+                timeout_seconds=debate_timeout_sec,
+                fail_fast_if_busy=debate_fail_fast_if_busy,
+                priority_group="product_debate",
+                options_override=options_override,
+            )
+            or ""
+        )
+        call_finished_at = datetime.datetime.now(datetime.timezone.utc)
+        elapsed_ms = int((call_finished_at - call_started_at).total_seconds() * 1000)
+        print(
+            "[product-debate-debug] ollama_call_end "
+            f"at={call_finished_at.isoformat()} elapsed_ms={elapsed_ms} "
+            f"response_chars={len(response_text)}"
+        )
+        return response_text
+    except Exception as error:
+        call_failed_at = datetime.datetime.now(datetime.timezone.utc)
+        elapsed_ms = int((call_failed_at - call_started_at).total_seconds() * 1000)
+        print(
+            "[product-debate-debug] ollama_call_error "
+            f"at={call_failed_at.isoformat()} elapsed_ms={elapsed_ms} "
+            f"error={str(error)}"
+        )
+        raise
+    finally:
+        if use_semaphore_gate and acquired:
+            with contextlib.suppress(Exception):
+                PRODUCT_DEBATE_CALL_SEMAPHORE.release()
 
 
 def _generate_product_development_agendas(concepts: list[dict[str, object]]) -> dict[str, object]:
@@ -5556,7 +5937,7 @@ def _generate_product_development_agendas(concepts: list[dict[str, object]]) -> 
     response_text = ""
     agendas = fallback
     try:
-        response_text = _product_ollama_generate_fast(prompt, wait_seconds=8)
+        response_text = _product_ollama_generate_fast_v2(prompt, wait_seconds=8)
         parsed = _product_dev_json_from_text(response_text)
         parsed_agendas = parsed.get("agendas") if isinstance(parsed, dict) else None
         if isinstance(parsed_agendas, list) and len(parsed_agendas) >= 2:
@@ -5598,7 +5979,7 @@ def _generate_product_development_debate(
         context=context,
         concepts=concepts,
         personas=personas,
-        llm_call=lambda prompt: _product_ollama_generate_fast(prompt, wait_seconds=turn_wait_seconds),
+        llm_call=lambda prompt: _product_ollama_generate_fast_v2(prompt, wait_seconds=turn_wait_seconds),
         parse_json=_product_dev_json_from_text,
         fallback_result=fallback,
         memory_path=PRODUCT_DEBATE_MEMORY_PATH,
@@ -5625,7 +6006,7 @@ def _generate_product_development_debate(
         result = fallback
         source = "fallback"
         try:
-            response_text = _product_ollama_generate_fast(prompt, wait_seconds=8)
+            response_text = _product_ollama_generate_fast_v2(prompt, wait_seconds=8)
             parsed = _product_dev_json_from_text(response_text)
             if isinstance(parsed.get("final"), dict) and isinstance(parsed.get("messages"), list):
                 normalized_final = _normalize_product_debate_final(
@@ -6022,6 +6403,24 @@ def _filter_regulation_evidence_for_answer(
     if _query_has_regulation_intent(query):
         return evidence[:4], "query_regulation_intent"
 
+    compact_query = _compact_search_text(query)
+    knowledge_matches: list[dict[str, object]] = []
+    for item in evidence:
+        reject_codes = [str(code).strip().lower() for code in (item.get("reject_codes") or []) if str(code).strip()]
+        policy_tags = [str(tag).strip().lower() for tag in (item.get("policy_tags") or []) if str(tag).strip()]
+        product_codes = [str(code).strip().lower() for code in (item.get("product_codes") or []) if str(code).strip()]
+        if any(code in compact_query for code in reject_codes):
+            knowledge_matches.append(item)
+            continue
+        if any(tag in compact_query for tag in policy_tags):
+            knowledge_matches.append(item)
+            continue
+        if any(code in compact_query for code in product_codes):
+            knowledge_matches.append(item)
+            continue
+    if knowledge_matches:
+        return knowledge_matches[:4], "knowledge_tag_overlap"
+
     allowed_feature_ids = {
         str(value).strip()
         for value in [*(representative_feature_ids or []), *(related_feature_ids or [])]
@@ -6403,6 +6802,144 @@ def _build_strategy_simulation_prompt_pack(
     return pack
 
 
+def _build_creative_ideation_prompt_pack(
+    query: str,
+    selected_product: str,
+    base_prompt_pack: dict[str, object] | None = None,
+    *,
+    retrieval_results: list[dict[str, object]] | None = None,
+    customer_clusters: list[dict[str, object]] | None = None,
+    related_features: list[dict[str, object]] | None = None,
+    profiles: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    pack = dict(base_prompt_pack or {})
+    # Creative route uses a compact dedicated prompt so Ollama latency stays stable.
+    system_prompt = ""
+    query_short = str(query or "").strip()[:180]
+    product_name = _product_display_name(selected_product) or selected_product or "당사 상품"
+    calculator_request = _query_requests_loan_calculator(query)
+    calculator_input_hints = _extract_calculator_input_hints(query)
+
+    scope_profiles = [
+        item for item in list(profiles or [])
+        if isinstance(item, dict) and (not selected_product or str(item.get("product") or "") == selected_product)
+    ]
+    rate_values = []
+    amount_values = []
+    for item in scope_profiles:
+        rate_value = item.get("rate")
+        amount_value = item.get("amount")
+        try:
+            if rate_value is not None:
+                rate_values.append(float(rate_value))
+        except Exception:
+            pass
+        try:
+            if amount_value is not None:
+                amount_values.append(float(amount_value))
+        except Exception:
+            pass
+    avg_rate = round(sum(rate_values) / len(rate_values), 4) if rate_values else None
+    avg_amount = round(sum(amount_values) / len(amount_values), 2) if amount_values else None
+
+    compact_retrieval = [
+        {
+            "decision": str(item.get("decision") or ""),
+            "rate": item.get("rate"),
+            "amount": item.get("amount"),
+        }
+        for item in list(retrieval_results or [])[:1]
+        if isinstance(item, dict)
+    ]
+    compact_clusters = [
+        {
+            "cluster_id": str(item.get("cluster_id") or ""),
+            "decision": str(item.get("decision") or ""),
+            "count": int(item.get("count") or 0),
+            "rate": float(item.get("rate") or 0.0),
+            "amount": float(item.get("amount") or 0.0),
+        }
+        for item in list(customer_clusters or [])[:4]
+        if isinstance(item, dict)
+    ]
+    compact_features = [
+        str(item.get("feature_name") or item.get("feature_id") or "")
+        for item in list(related_features or [])[:5]
+        if isinstance(item, dict)
+    ]
+    calculator_reference = {
+        "product": product_name,
+        "avg_rate_percent": avg_rate,
+        "avg_limit_amount": avg_amount,
+        "sample_count": len(scope_profiles),
+        "top_clusters": [
+            {
+                "decision": str(item.get("decision") or ""),
+                "count": int(item.get("count") or 0),
+                "avg_rate_display": str(item.get("avg_rate_display") or ""),
+                "avg_amount_display": str(item.get("avg_amount_display") or ""),
+            }
+            for item in list(customer_clusters or [])[:1]
+            if isinstance(item, dict)
+        ],
+    }
+    pack["available"] = True
+    pack["model"] = str(pack.get("model") or OLLAMA_LIGHTWEIGHT_MODEL)
+    pack["answer_mode"] = "creative_ideation_ollama"
+    pack["system_prompt"] = "\n".join([
+        system_prompt,
+        "[CREATIVE IDEATION MODE]",
+        "- 금융 상담/상품기획 창의 답변을 간결하게 제공합니다.",
+        "- 데이터는 참고치로만 쓰고, 부족하면 먼저 질문합니다.",
+        "- 출력은 12줄 이내로 짧게 답합니다.",
+    ]).strip()
+    if calculator_request:
+        pack["answer_mode"] = "creative_loan_calculator_ollama"
+        calculator_reference_compact = {
+            "product": calculator_reference.get("product"),
+            "avg_rate_percent": calculator_reference.get("avg_rate_percent"),
+            "avg_limit_amount": calculator_reference.get("avg_limit_amount"),
+            "sample_count": calculator_reference.get("sample_count"),
+            "top_cluster": (calculator_reference.get("top_clusters") or [{}])[0],
+            "input_hints_from_query": calculator_input_hints,
+        }
+        pack["user_prompt"] = "\n".join([
+            f"[CREATIVE QUESTION] {query_short}",
+            f"[SELECTED PRODUCT] {product_name}",
+            f"[CALCULATOR REFERENCE] {json.dumps(calculator_reference_compact, ensure_ascii=False, separators=(',', ':'))}",
+            "",
+            "[RULE]",
+            "- 필요값: 원금, 연이율(%), 기간(개월), 상환방식",
+            "- 필요값 누락 시 계산하지 말고 누락값만 최대 4개 질문",
+            "- 값이 충분하면 월상환금/총이자/총상환액만 계산해서 제시",
+            "- 평균금리/한도는 참고치로만 표기",
+            "",
+            "[OUTPUT]",
+            "1) 누락값 질문 또는 계산결과",
+            "2) 상담원 멘트 2줄",
+            "3) 다음 질문 1개",
+        ]).strip()
+    else:
+        pack["user_prompt"] = "\n".join([
+            f"[CREATIVE QUESTION] {query_short}",
+            f"[SELECTED PRODUCT] {product_name}",
+            f"[LIGHT REFERENCE] {json.dumps({'top_features': [item for item in compact_features if item][:3], 'top_clusters': compact_clusters[:1], 'retrieval_examples': compact_retrieval}, ensure_ascii=False, separators=(',', ':'))}",
+            "",
+            "[OUTPUT FORMAT]",
+            "1) 아이디어 2~3개",
+            "2) 각 아이디어의 기대효과/리스크",
+            "3) 바로 실행할 다음 단계 2개",
+            "4) 다음 대화 질문 1개",
+        ]).strip()
+    pack["context_preview"] = [
+        *list(pack.get("context_preview") or []),
+        f"creative ideation route: {query[:120]}",
+        f"creative product scope: {product_name}",
+        f"creative calculator route: {'yes' if calculator_request else 'no'}",
+    ]
+    return pack
+
+
 def _build_strategy_simulation_answer_summary(
     query: str,
     selected_product: str,
@@ -6454,6 +6991,24 @@ def _build_strategy_simulation_answer_summary(
             ],
         ],
         "source": "strategy-simulation-grounding",
+        "citations": [],
+    }
+
+
+def _build_creative_ideation_answer_summary(query: str, selected_product: str) -> dict[str, object]:
+    product_name = _product_display_name(selected_product) or selected_product or "당사 상품"
+    return {
+        "headline": f"{product_name} 창의 제안 모드",
+        "explanation": (
+            f"질문 '{query}'를 Creative ideation intent로 해석했습니다. "
+            "온톨로지/로그는 참고로만 사용하고, 실행 가능한 아이디어 중심으로 대화형 제안을 생성합니다."
+        ),
+        "highlights": [
+            {"label": "Question Type", "value": "Creative Ideation"},
+            {"label": "Answer Mode", "value": "LLM Creative Conversation"},
+            {"label": "Grounding", "value": "Ontology light reference"},
+        ],
+        "source": "creative-ideation",
         "citations": [],
     }
 
@@ -7242,7 +7797,8 @@ def _build_feature_workbench_payload(
         expansion_feature_ids=related_feature_ids,
     )
     raw_regulation_evidence_count = len(raw_regulation_evidence)
-    regulation_first_route = _query_requires_regulation_first(query)
+    creative_ideation_route = _query_has_creative_intent(query)
+    regulation_first_route = _query_requires_regulation_first(query) and not creative_ideation_route
     strategy_simulation_route = _query_requires_strategy_simulation(query)
     intent_classification = _classify_query_intent(
         query,
@@ -7343,6 +7899,18 @@ def _build_feature_workbench_payload(
             reject_code_summary,
         )
         ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, strategy_answer_summary, job_id=job_id)
+    elif str(intent_classification.get("intent") or "") == "creative_ideation":
+        prompt_pack = _build_creative_ideation_prompt_pack(
+            query,
+            selected_product,
+            prompt_pack,
+            retrieval_results=retrieval_results,
+            customer_clusters=customer_clusters,
+            related_features=related_features,
+            profiles=profiles,
+        )
+        creative_answer_summary = _build_creative_ideation_answer_summary(query, selected_product)
+        ollama_runtime, answer_summary = _run_ollama_for_workbench(prompt_pack, creative_answer_summary, job_id=job_id)
     elif _query_asks_average_metrics(query) or query_has_segment_metric_intent(query):
         answer_summary = _build_average_metric_answer_summary(query, selected_product, profiles, customer_clusters)
         ollama_runtime = {
@@ -8044,6 +8612,16 @@ def app_startup() -> None:
             update_status=True,
         )
 
+    if OCR_WARMUP_ON_START:
+        threading.Thread(target=_warmup_ocr_engine, name="ocr-warmup", daemon=True).start()
+    else:
+        record_activity_event(
+            "ocr_warmup",
+            "completed",
+            "OCR warmup disabled by OCR_WARMUP_ON_START=0.",
+            update_status=True,
+        )
+
 
 @app.on_event("shutdown")
 def app_shutdown() -> None:
@@ -8134,6 +8712,34 @@ def health() -> dict:
 @app.get("/health/ollama")
 def health_ollama() -> dict[str, object]:
     return _probe_ollama_health()
+
+
+@app.get("/health/ollama/runtime")
+def health_ollama_runtime() -> dict[str, object]:
+    monitor = get_ollama_runtime_monitor()
+    active_jobs: list[dict[str, object]] = []
+    with PRODUCT_DEBATE_JOB_STATUS_LOCK:
+        for job_id, payload in PRODUCT_DEBATE_JOB_STATUS.items():
+            row = dict(payload or {})
+            status = str(row.get("status") or "").lower()
+            if status in {"queued", "running"}:
+                active_jobs.append({
+                    "job_id": job_id,
+                    "status": status,
+                    "stage": str(row.get("stage") or ""),
+                    "detail": str(row.get("detail") or ""),
+                    "created_at": row.get("created_at"),
+                    "updated_at": row.get("updated_at"),
+                })
+    return {
+        "status": "ok",
+        "ollama_runtime": monitor,
+        "product_debate": {
+            "max_concurrency": PRODUCT_DEBATE_MAX_CONCURRENCY,
+            "active_jobs_count": len(active_jobs),
+            "active_jobs": active_jobs[:20],
+        },
+    }
 
 
 @app.get("/graph/neo4j/health")
@@ -8785,6 +9391,545 @@ def product_pattern_summary() -> ProductSummaryResponse:
     return ProductSummaryResponse(status="ok", payload=payload)
 
 
+def _build_prompt_from_image_name(file_name: str) -> str:
+    stem = pathlib.Path(str(file_name or "심사결과 이미지")).stem
+    cleaned = re.sub(r"[_\-]+", " ", stem).strip()
+    label = cleaned or "심사결과 이미지"
+    return (
+        f"{label} 이미지 기준으로 부결 사유와 한도 산정 근거를 요약해줘. "
+        "핵심 사유코드/금액/판단 근거를 먼저 알려줘."
+    )
+
+
+_PADDLE_OCR_SINGLETON = None
+_PADDLE_OCR_INIT_LOCK = threading.Lock()
+_PADDLE_OCR_INIT_ERROR = ""
+_RAPIDOCR_SINGLETON = None
+_RAPIDOCR_INIT_LOCK = threading.Lock()
+_RAPIDOCR_INIT_ERROR = ""
+_OCR_LAST_ERROR = ""
+OCR_WARMUP_ON_START = str(os.getenv("OCR_WARMUP_ON_START", "1")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_paddle_ocr_singleton():
+    global _PADDLE_OCR_SINGLETON, _PADDLE_OCR_INIT_ERROR, _OCR_LAST_ERROR
+    if _PADDLE_OCR_SINGLETON is not None:
+        return _PADDLE_OCR_SINGLETON
+    with _PADDLE_OCR_INIT_LOCK:
+        if _PADDLE_OCR_SINGLETON is not None:
+            return _PADDLE_OCR_SINGLETON
+        try:
+            from paddleocr import PaddleOCR  # type: ignore
+            # 버전별 인자 호환: show_log 미지원 버전이 있어 fallback 순서로 생성
+            create_attempts = [
+                {"use_angle_cls": True, "lang": "korean", "show_log": False},
+                {"use_angle_cls": True, "lang": "korean"},
+                {"lang": "korean"},
+            ]
+            created = None
+            last_error = ""
+            for kwargs in create_attempts:
+                try:
+                    created = PaddleOCR(**kwargs)
+                    break
+                except Exception as inner_exc:
+                    last_error = str(inner_exc)
+            if created is None:
+                raise RuntimeError(last_error or "PaddleOCR init failed")
+            _PADDLE_OCR_SINGLETON = created
+            _PADDLE_OCR_INIT_ERROR = ""
+            _OCR_LAST_ERROR = ""
+            return _PADDLE_OCR_SINGLETON
+        except Exception as exc:
+            _PADDLE_OCR_INIT_ERROR = str(exc)
+            _OCR_LAST_ERROR = f"paddle init error: {exc}"
+            return None
+
+
+def _get_rapidocr_singleton():
+    global _RAPIDOCR_SINGLETON, _RAPIDOCR_INIT_ERROR
+    if _RAPIDOCR_SINGLETON is not None:
+        return _RAPIDOCR_SINGLETON
+    with _RAPIDOCR_INIT_LOCK:
+        if _RAPIDOCR_SINGLETON is not None:
+            return _RAPIDOCR_SINGLETON
+        try:
+            from rapidocr_onnxruntime import RapidOCR  # type: ignore
+            _RAPIDOCR_SINGLETON = RapidOCR()
+            _RAPIDOCR_INIT_ERROR = ""
+            return _RAPIDOCR_SINGLETON
+        except Exception as exc:
+            _RAPIDOCR_INIT_ERROR = str(exc)
+            return None
+
+
+def _warmup_ocr_engine() -> None:
+    try:
+        engine = str(os.getenv("OCR_ENGINE", "auto") or "auto").strip().lower()
+        if engine == "tesseract":
+            record_activity_event(
+                "ocr_warmup",
+                "completed",
+                "OCR warmup skipped (OCR_ENGINE=tesseract).",
+                update_status=True,
+            )
+            return
+        started_at = time.perf_counter()
+        if engine in {"auto", "rapidocr"}:
+            rapid = _get_rapidocr_singleton()
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            if rapid is not None:
+                record_activity_event(
+                    "ocr_warmup",
+                    "completed",
+                    f"RapidOCR warmup completed in {elapsed_ms}ms.",
+                    update_status=True,
+                )
+                return
+        ocr = _get_paddle_ocr_singleton()
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        if ocr is not None:
+            record_activity_event(
+                "ocr_warmup",
+                "completed",
+                f"PaddleOCR warmup completed in {elapsed_ms}ms.",
+                update_status=True,
+            )
+            # 2차 엔진도 미리 로드
+            _get_rapidocr_singleton()
+        else:
+            detail = _PADDLE_OCR_INIT_ERROR or "unknown init error"
+            record_activity_event(
+                "ocr_warmup",
+                "warning",
+                f"PaddleOCR warmup failed: {detail}",
+                update_status=True,
+            )
+    except Exception as exc:
+        record_activity_event(
+            "ocr_warmup",
+            "warning",
+            f"OCR warmup exception: {exc}",
+            update_status=True,
+        )
+
+
+def _try_extract_image_text(raw_bytes: bytes) -> dict:
+    # OCR_ENGINE:
+    # - "paddle": PaddleOCR만 시도
+    # - "tesseract": pytesseract만 시도
+    # - "auto"(default): PaddleOCR 우선, 실패 시 pytesseract
+    ocr_engine = str(os.getenv("OCR_ENGINE", "auto") or "auto").strip().lower()
+
+    global _OCR_LAST_ERROR
+    _OCR_LAST_ERROR = ""
+
+    def _extract_text_from_paddle_result(result_obj) -> str:
+        lines: list[str] = []
+        try:
+            # PaddleOCR 3.x 계열: dict 응답 (예: rec_texts)
+            if isinstance(result_obj, dict):
+                rec_texts = result_obj.get("rec_texts") or result_obj.get("texts") or []
+                for text in rec_texts:
+                    value = str(text or "").strip()
+                    if value:
+                        lines.append(value)
+            # 구버전 계열: list[list[[box],[text,score]]]
+            elif isinstance(result_obj, list):
+                for block in (result_obj or []):
+                    if isinstance(block, dict):
+                        rec_texts = block.get("rec_texts") or block.get("texts") or []
+                        for text in rec_texts:
+                            value = str(text or "").strip()
+                            if value:
+                                lines.append(value)
+                        continue
+                    for item in (block or []):
+                        if not item or len(item) < 2:
+                            continue
+                        text_info = item[1]
+                        if isinstance(text_info, (list, tuple)) and text_info:
+                            text_value = str(text_info[0] or "").strip()
+                            if text_value:
+                                lines.append(text_value)
+        except Exception:
+            return ""
+        joined = " ".join(lines).strip()
+        return joined
+
+    def _try_paddle_ocr(data: bytes) -> str:
+        try:
+            from PIL import Image, ImageEnhance, ImageFilter  # type: ignore
+            import io
+        except Exception:
+            return ""
+        try:
+            ocr = _get_paddle_ocr_singleton()
+            if ocr is None:
+                if _PADDLE_OCR_INIT_ERROR:
+                    _OCR_LAST_ERROR = f"paddle init error: {_PADDLE_OCR_INIT_ERROR}"
+                return ""
+            image = Image.open(io.BytesIO(data)).convert("RGB")
+            result = ocr.predict(np.array(image)) if hasattr(ocr, "predict") else ocr.ocr(np.array(image), cls=True)
+            joined = _extract_text_from_paddle_result(result)
+            if not joined:
+                # 저해상도/작은 글자 대응: 2배 업스케일 후 재시도
+                upscaled = image.resize((image.width * 2, image.height * 2))
+                retry_result = ocr.predict(np.array(upscaled)) if hasattr(ocr, "predict") else ocr.ocr(np.array(upscaled), cls=True)
+                joined = _extract_text_from_paddle_result(retry_result)
+            if not joined:
+                gray = image.convert("L")
+                boosted = ImageEnhance.Contrast(gray).enhance(1.8).filter(ImageFilter.SHARPEN).convert("RGB")
+                retry2 = ocr.predict(np.array(boosted)) if hasattr(ocr, "predict") else ocr.ocr(np.array(boosted), cls=True)
+                joined = _extract_text_from_paddle_result(retry2)
+            if not joined:
+                _OCR_LAST_ERROR = "paddle returned empty text"
+            if len(joined) > 1800:
+                joined = joined[:1800]
+            return joined
+        except Exception as exc:
+            _OCR_LAST_ERROR = f"paddle run error: {exc}"
+            return ""
+
+    def _try_tesseract_ocr(data: bytes) -> str:
+        try:
+            from PIL import Image  # type: ignore
+            import pytesseract  # type: ignore
+            import io
+        except Exception as exc:
+            _OCR_LAST_ERROR = f"tesseract import error: {exc}"
+            return ""
+        try:
+            tesseract_cmd = str(os.getenv("TESSERACT_CMD", "")).strip()
+            if tesseract_cmd and pathlib.Path(tesseract_cmd).exists():
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            else:
+                common_paths = [
+                    pathlib.Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+                    pathlib.Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+                ]
+                for candidate in common_paths:
+                    if candidate.exists():
+                        pytesseract.pytesseract.tesseract_cmd = str(candidate)
+                        break
+        except Exception as exc:
+            pass
+        try:
+            image = Image.open(io.BytesIO(data))
+            text = str(pytesseract.image_to_string(image, lang="kor+eng") or "").strip()
+            if len(text) > 1800:
+                text = text[:1800]
+            return text
+        except Exception as exc:
+            _OCR_LAST_ERROR = f"tesseract run error: {exc}"
+            return ""
+
+    def _try_rapidocr(data: bytes) -> str:
+        try:
+            from PIL import Image  # type: ignore
+            import io
+        except Exception as exc:
+            _OCR_LAST_ERROR = f"rapidocr import error: {exc}"
+            return ""
+        try:
+            engine = _get_rapidocr_singleton()
+            if engine is None:
+                _OCR_LAST_ERROR = f"rapidocr init error: {_RAPIDOCR_INIT_ERROR or 'unknown'}"
+                return ""
+            image = Image.open(io.BytesIO(data)).convert("RGB")
+            result, _ = engine(np.array(image))
+            lines: list[str] = []
+            for item in (result or []):
+                if not item or len(item) < 2:
+                    continue
+                text_value = str(item[1] or "").strip()
+                if text_value:
+                    lines.append(text_value)
+            joined = " ".join(lines).strip()
+            if len(joined) > 1800:
+                joined = joined[:1800]
+            return joined
+        except Exception as exc:
+            _OCR_LAST_ERROR = f"rapidocr run error: {exc}"
+            return ""
+
+    if ocr_engine == "paddle":
+        text = _try_paddle_ocr(raw_bytes)
+        if text:
+            return {"text": text, "engine_used": "paddle", "error": _OCR_LAST_ERROR}
+        text = _try_rapidocr(raw_bytes)
+        if text:
+            return {"text": text, "engine_used": "rapidocr", "error": _OCR_LAST_ERROR}
+        return {"text": "", "engine_used": "none", "error": _OCR_LAST_ERROR}
+    if ocr_engine == "rapidocr":
+        text = _try_rapidocr(raw_bytes)
+        return {"text": text, "engine_used": "rapidocr" if text else "none", "error": _OCR_LAST_ERROR}
+    if ocr_engine == "tesseract":
+        text = _try_tesseract_ocr(raw_bytes)
+        return {"text": text, "engine_used": "tesseract", "error": _OCR_LAST_ERROR}
+    # auto
+    text = _try_rapidocr(raw_bytes)
+    if text:
+        return {"text": text, "engine_used": "rapidocr", "error": _OCR_LAST_ERROR}
+    text = _try_paddle_ocr(raw_bytes)
+    if text:
+        return {"text": text, "engine_used": "paddle", "error": _OCR_LAST_ERROR}
+    text = _try_tesseract_ocr(raw_bytes)
+    return {"text": text, "engine_used": "tesseract" if text else "none", "error": _OCR_LAST_ERROR}
+
+
+
+def _parse_ocr_financial_signals(ocr_text: str) -> dict:
+    text = str(ocr_text or "")
+    compact = " ".join(text.split())
+    reject_codes = sorted(set(re.findall(r"\bK\d{3}\b", compact, flags=re.IGNORECASE)))
+    reject_codes = [code.upper() for code in reject_codes]
+
+    rate_match = re.search(r"(\d{1,2}(?:\.\d{1,2})?)\s*%", compact)
+    rate_percent = float(rate_match.group(1)) if rate_match else None
+
+    amount_candidates: list[tuple[float, str]] = []
+    for match in re.finditer(r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(만원|원)", compact):
+        raw_num = float(str(match.group(1)).replace(",", ""))
+        unit = str(match.group(2))
+        value_krw = raw_num * 10000 if unit == "만원" else raw_num
+        amount_candidates.append((value_krw, match.group(0)))
+
+    limit_amount_krw = None
+    limit_raw = ""
+    if amount_candidates:
+        limit_near = re.search(r"한도[^0-9]{0,10}(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(만원|원)", compact)
+        if limit_near:
+            raw_num = float(str(limit_near.group(1)).replace(",", ""))
+            unit = str(limit_near.group(2))
+            limit_amount_krw = raw_num * 10000 if unit == "만원" else raw_num
+            limit_raw = limit_near.group(0)
+        else:
+            picked = max(amount_candidates, key=lambda item: item[0])
+            limit_amount_krw = picked[0]
+            limit_raw = picked[1]
+
+    rate_raw = rate_match.group(0) if rate_match else ""
+    requested_amount_krw = None
+    requested_raw = ""
+    requested_match = re.search(r"(requested amount|신청금액)[^0-9]{0,10}(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(만원|원|krw)?", compact, flags=re.IGNORECASE)
+    if requested_match:
+        raw_num = float(str(requested_match.group(2)).replace(",", ""))
+        unit = str(requested_match.group(3) or "KRW").lower()
+        requested_amount_krw = int(raw_num * 10000) if unit == "만원" else int(raw_num)
+        requested_raw = requested_match.group(0)
+
+    income_amount_krw = None
+    income_raw = ""
+    income_match = re.search(r"(income|소득)[^0-9]{0,10}(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(만원|원|krw)?", compact, flags=re.IGNORECASE)
+    if income_match:
+        raw_num = float(str(income_match.group(2)).replace(",", ""))
+        unit = str(income_match.group(3) or "KRW").lower()
+        income_amount_krw = int(raw_num * 10000) if unit == "만원" else int(raw_num)
+        income_raw = income_match.group(0)
+
+    reject_mapping = _get_reject_code_mapping()
+    reject_reasons: list[str] = []
+    for code in reject_codes:
+        description = str((reject_mapping.get(code) or {}).get("description") or "").strip()
+        reject_reasons.append(f"{code} {description}".strip())
+
+    interpretation_reasons: list[str] = []
+    if reject_codes:
+        interpretation_reasons.append("OCR 텍스트에서 K코드 패턴을 검출해 거절사유코드로 해석")
+    if rate_percent is not None:
+        interpretation_reasons.append("퍼센트(%) 패턴을 검출해 금리/비율 후보로 해석")
+    if limit_amount_krw is not None:
+        interpretation_reasons.append("원/만원 단위를 검출해 한도/금액 후보로 해석")
+    if not interpretation_reasons:
+        interpretation_reasons.append("금융 패턴이 약해 파일명 기반 질문을 유지")
+
+    return {
+        "reject_codes": reject_codes,
+        "reject_reasons": reject_reasons,
+        "rate_percent": rate_percent,
+        "rate_raw": rate_raw,
+        "limit_amount_krw": int(limit_amount_krw) if limit_amount_krw is not None else None,
+        "limit_raw": limit_raw,
+        "requested_amount_krw": requested_amount_krw,
+        "requested_raw": requested_raw,
+        "income_amount_krw": income_amount_krw,
+        "income_raw": income_raw,
+        "interpretation_reasons": interpretation_reasons,
+    }
+
+
+def _build_ocr_analysis_summary(parsed: dict) -> dict:
+    reject_reasons = list(parsed.get("reject_reasons") or [])
+    reject_codes = list(parsed.get("reject_codes") or [])
+    rate_raw = str(parsed.get("rate_raw") or "").strip()
+    limit_raw = str(parsed.get("limit_raw") or "").strip()
+    requested_raw = str(parsed.get("requested_raw") or "").strip()
+    income_raw = str(parsed.get("income_raw") or "").strip()
+    limit_amount = parsed.get("limit_amount_krw")
+    requested_amount = parsed.get("requested_amount_krw")
+    reasons = list(parsed.get("interpretation_reasons") or [])
+
+    reject_line = ", ".join(reject_reasons[:3]) if reject_reasons else ("코드 미검출" if not reject_codes else ", ".join(reject_codes[:3]))
+    limit_basis_parts: list[str] = []
+    if limit_raw:
+        limit_basis_parts.append(f"이미지에서 '{limit_raw}'를 한도 후보로 추출")
+    if requested_amount and limit_amount:
+        gap = int(requested_amount) - int(limit_amount)
+        if gap > 0:
+            limit_basis_parts.append(f"요청금액 대비 한도 차이 {gap:,}원")
+    if rate_raw:
+        limit_basis_parts.append(f"금리 후보 '{rate_raw}' 검출")
+    if income_raw:
+        limit_basis_parts.append(f"소득 후보 '{income_raw}' 검출")
+    if not limit_basis_parts:
+        limit_basis_parts.append("한도/금리/소득 수치 근거가 충분하지 않아 추가 확인 필요")
+
+    action_items: list[str] = []
+    if reject_codes:
+        action_items.append("거절코드별 보완 기준(DSR, 부채, 소득증빙) 재확인")
+    if requested_amount and limit_amount and requested_amount > limit_amount:
+        action_items.append("요청금액 하향 또는 분할 신청 검토")
+    if rate_raw:
+        action_items.append("금리 산정에 영향을 준 변수(신용등급, DSR, 부채현황) 재점검")
+    if not action_items:
+        action_items.append("원본 심사 로그/상담원 코멘트로 추가 교차검증")
+
+    evidence_line_parts = [part for part in [reject_line, limit_raw, rate_raw, requested_raw, income_raw] if part]
+    evidence_line = " | ".join(evidence_line_parts[:5]) if evidence_line_parts else "OCR 텍스트에서 핵심 금융 패턴 미검출"
+
+    return {
+        "reject_reason_summary": reject_line,
+        "limit_basis_summary": "; ".join(limit_basis_parts),
+        "action_items": action_items[:3],
+        "evidence_summary": evidence_line,
+        "interpretation_reasons": reasons[:3],
+    }
+
+
+def _build_ocr_analysis_summary_v2(parsed: dict) -> dict:
+    reject_reasons = list(parsed.get("reject_reasons") or [])
+    reject_codes = [str(code).upper() for code in (parsed.get("reject_codes") or [])]
+    rate_raw = str(parsed.get("rate_raw") or "").strip()
+    limit_raw = str(parsed.get("limit_raw") or "").strip()
+    requested_raw = str(parsed.get("requested_raw") or "").strip()
+    income_raw = str(parsed.get("income_raw") or "").strip()
+    limit_amount = parsed.get("limit_amount_krw")
+    requested_amount = parsed.get("requested_amount_krw")
+    reasons = list(parsed.get("interpretation_reasons") or [])
+
+    reject_line = ", ".join(reject_reasons[:3]) if reject_reasons else ("코드 미검출" if not reject_codes else ", ".join(reject_codes[:3]))
+    limit_basis_parts: list[str] = []
+    if limit_raw:
+        limit_basis_parts.append(f"이미지에서 '{limit_raw}'를 한도 후보로 추출")
+    if requested_amount and limit_amount:
+        gap = int(requested_amount) - int(limit_amount)
+        if gap > 0:
+            limit_basis_parts.append(f"요청금액 대비 한도 차이 {gap:,}원")
+    if rate_raw:
+        limit_basis_parts.append(f"금리 후보 '{rate_raw}' 검출")
+    if income_raw:
+        limit_basis_parts.append(f"소득 후보 '{income_raw}' 검출")
+    if not limit_basis_parts:
+        limit_basis_parts.append("한도/금리/소득 수치 근거가 부족하여 추가 확인 필요")
+
+    action_items: list[str] = []
+    resolution_tips: list[str] = []
+    reject_text_blob = " ".join(reject_reasons + reject_codes).lower()
+
+    has_dsr_signal = (
+        "dsr" in reject_text_blob
+        or "k701" in reject_text_blob
+        or "k707" in reject_text_blob
+        or "총량규제" in reject_text_blob
+    )
+    has_score_signal = (
+        "k354" in reject_text_blob
+        or "k373" in reject_text_blob
+        or "k374" in reject_text_blob
+        or "등급" in reject_text_blob
+        or "index" in reject_text_blob
+    )
+
+    if has_dsr_signal:
+        action_items.append("DSR 초과 완화 계획 우선 안내")
+        resolution_tips.append("DSR 낮추는 법: 기존 대출 일부 상환, 카드론/현금서비스 사용 축소, 소득증빙 최신화 후 재심사")
+
+    if rate_raw:
+        action_items.append("금리 산정 변수 재점검")
+        resolution_tips.append("금리 낮추는 법: 신용점수 개선, 부채비율 완화, 우대금리 조건(자동이체/급여이체/관계거래) 충족")
+
+    if requested_amount and limit_amount and requested_amount > limit_amount:
+        action_items.append("요청금액 대비 한도 부족 안내")
+        resolution_tips.append("한도 늘리는 법: 신청금액 분할, 소득자료 보강, 타 부채 축소 후 재신청")
+
+    if has_score_signal:
+        action_items.append("신용등급/스코어 개선 가이드")
+        resolution_tips.append("스코어 개선법: 연체 없는 상환이력 누적, 한도 대비 사용률 관리, 단기 다중조회 최소화")
+
+    if not action_items:
+        action_items.append("원본 심사 로그/상담원 코멘트로 교차검증")
+    if not resolution_tips:
+        resolution_tips.append("재심사 전 체크리스트: 소득자료 최신화, 부채현황 정리, 신청조건(금액/기간) 보수 조정")
+
+    evidence_line_parts = [part for part in [reject_line, limit_raw, rate_raw, requested_raw, income_raw] if part]
+    evidence_line = " | ".join(evidence_line_parts[:5]) if evidence_line_parts else "OCR 텍스트에서 핵심 금융 패턴 미검출"
+
+    return {
+        "reject_reason_summary": reject_line,
+        "limit_basis_summary": "; ".join(limit_basis_parts),
+        "action_items": action_items[:3],
+        "resolution_tips": resolution_tips[:4],
+        "evidence_summary": evidence_line,
+        "interpretation_reasons": reasons[:3],
+    }
+
+
+@app.post("/prompt/image-to-question")
+async def prompt_image_to_question(file: UploadFile = File(...)) -> dict:
+    content_type = str(file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="image file is required")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="empty file")
+
+    draft_question = _build_prompt_from_image_name(str(file.filename or "심사결과 이미지"))
+    ocr_started_at = time.perf_counter()
+    ocr_result = _try_extract_image_text(raw_bytes)
+    ocr_elapsed_ms = int((time.perf_counter() - ocr_started_at) * 1000)
+    ocr_text = str(ocr_result.get("text") or "").strip()
+    ocr_engine_used = str(ocr_result.get("engine_used") or "none")
+    ocr_error = str(ocr_result.get("error") or "").strip()
+    parsed_signals = _parse_ocr_financial_signals(ocr_text)
+    analysis_summary = _build_ocr_analysis_summary_v2(parsed_signals)
+    if ocr_text:
+        compact = " ".join(ocr_text.split())
+        compact = compact[:320]
+        suggested_question = (
+            f"첨부 심사결과 이미지에서 추출된 텍스트를 기준으로 분석해줘: \"{compact}\". "
+            "부결 사유, 한도 산정 근거, 필요한 보완 항목을 요약해줘."
+        )
+    else:
+        suggested_question = draft_question
+
+    return {
+        "status": "ok",
+        "file_name": str(file.filename or ""),
+        "content_type": content_type,
+        "has_ocr_text": bool(ocr_text),
+        "ocr_preview": ocr_text[:180] if ocr_text else "",
+        "ocr_engine_used": ocr_engine_used,
+        "ocr_text_length": len(ocr_text),
+        "ocr_elapsed_ms": ocr_elapsed_ms,
+        "ocr_error": ocr_error[:300],
+        "ocr_parsed": parsed_signals,
+        "analysis_summary": analysis_summary,
+        "suggested_question": suggested_question,
+    }
+
+
 @app.post("/regulation/upload", response_model=RegulationUploadResponse)
 async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUploadResponse:
     if not files:
@@ -8825,6 +9970,8 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
         after_count = int(ingest_report.get("vector_count") or 0)
         added_count = int(ingest_report.get("added_count") or 0)
         file_stats = list(ingest_report.get("file_stats") or [])
+        knowledge_update = dict(ingest_report.get("knowledge_update") or {})
+        knowledge_summary = dict(get_regulation_knowledge_summary(file_names) or {})
         summary = ""
         with state.lock:
             summary_enabled = bool(state.regulation_upload_summary_enabled)
@@ -8857,13 +10004,35 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
         else:
             summary = "규제 문서를 벡터에 적재했습니다. (요약 생성 꺼짐)"
 
+        top_policy_tags = list((knowledge_summary.get("stats") or {}).get("top_policy_tags") or [])
+        top_reject_codes = list((knowledge_summary.get("stats") or {}).get("top_reject_codes") or [])
+        if top_policy_tags:
+            policy_tag_line = ", ".join(
+                f"{str(item.get('value') or '')} {int(item.get('count') or 0)}건"
+                for item in top_policy_tags[:3]
+                if str(item.get("value") or "").strip()
+            ).strip()
+            if policy_tag_line:
+                summary = f"{summary} | 구조화 태그: {policy_tag_line}"
+        if top_reject_codes:
+            reject_code_line = ", ".join(
+                f"{str(item.get('value') or '')} {int(item.get('count') or 0)}건"
+                for item in top_reject_codes[:2]
+                if str(item.get("value") or "").strip()
+            ).strip()
+            if reject_code_line:
+                summary = f"{summary} | 코드: {reject_code_line}"
+
         updated_at = time.strftime("%Y-%m-%dT%H:%M:%S")
 
         with state.lock:
             statuses = dict(state.agent_statuses or {})
             statuses["regulation_agent"] = {
                 "status": "completed",
-                "detail": f"문서 {len(file_names)}건 분석 완료 · 벡터 {added_count}건 추가 · summary={summary_mode}",
+                "detail": (
+                    f"문서 {len(file_names)}건 분석 완료 · 벡터 {added_count}건 추가 · "
+                    f"policy-entry {int(knowledge_update.get('entry_count') or 0)}건 · summary={summary_mode}"
+                ),
                 "updated_at": updated_at,
             }
             state.agent_statuses = statuses
@@ -8884,6 +10053,8 @@ async def regulation_upload(files: list[UploadFile] = File(...)) -> RegulationUp
                 "summary_mode": summary_mode,
                 "regulation_upload_summary_enabled": summary_enabled,
                 "file_stats": file_stats,
+                "knowledge_update": knowledge_update,
+                "knowledge_summary": knowledge_summary,
             }
         )
 

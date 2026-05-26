@@ -249,6 +249,15 @@ export function uploadRegulationFiles(files) {
   });
 }
 
+export function createPromptFromImage(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request('/prompt/image-to-question', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 export function createFaissWebSocket(onMessage) {
   const configured = (import.meta.env.VITE_BACKEND_URL || '').trim();
   let targetBase = configured || DEFAULT_BASE_URL;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import re
@@ -123,6 +124,28 @@ def _has_pending_ontology_priority() -> bool:
 def _has_pending_product_debate_priority() -> bool:
     with OLLAMA_RUNTIME_STATE_LOCK:
         return _PENDING_PRODUCT_DEBATE_REQUESTS > 0
+
+
+def get_ollama_runtime_monitor() -> dict[str, Any]:
+    with OLLAMA_RUNTIME_STATE_LOCK:
+        pending_ontology = int(_PENDING_ONTOLOGY_REQUESTS)
+        pending_product_debate = int(_PENDING_PRODUCT_DEBATE_REQUESTS)
+        ontology_priority_enabled = bool(ONTOLOGY_QUERY_PRIORITY_ENABLED)
+        gpu_enabled = bool(OLLAMA_GPU_ENABLED)
+
+    lock_now = OLLAMA_EXECUTION_LOCK.acquire(blocking=False)
+    if lock_now:
+        # Lock was free; restore original state.
+        OLLAMA_EXECUTION_LOCK.release()
+
+    return {
+        "lock_busy": not lock_now,
+        "pending_ontology_requests": pending_ontology,
+        "pending_product_debate_requests": pending_product_debate,
+        "ontology_priority_enabled": ontology_priority_enabled,
+        "ollama_gpu_enabled": gpu_enabled,
+        "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
 
 
 def _build_lightweight_ollama_options() -> dict[str, Any]:
@@ -339,11 +362,37 @@ def lightweight_ollama_generate(
     timeout_seconds: int | float = 180,
     fail_fast_if_busy: bool = False,
     priority_group: str = "default",
+    options_override: dict[str, Any] | None = None,
 ) -> str:
+    options = _build_lightweight_ollama_options()
+    if isinstance(options_override, dict):
+        merged = dict(options)
+        for key in ("num_ctx", "num_predict", "temperature", "num_thread", "num_gpu"):
+            if key in options_override:
+                merged[key] = options_override[key]
+        try:
+            merged["num_ctx"] = max(512, int(merged.get("num_ctx", options.get("num_ctx", 1536))))
+        except Exception:
+            merged["num_ctx"] = int(options.get("num_ctx", 1536))
+        try:
+            merged["num_predict"] = max(32, int(merged.get("num_predict", options.get("num_predict", 180))))
+        except Exception:
+            merged["num_predict"] = int(options.get("num_predict", 180))
+        try:
+            merged["temperature"] = max(0.0, min(1.0, float(merged.get("temperature", options.get("temperature", 0.1)))))
+        except Exception:
+            merged["temperature"] = float(options.get("temperature", 0.1))
+        if "num_thread" in merged:
+            try:
+                if int(merged["num_thread"]) <= 0:
+                    merged.pop("num_thread", None)
+            except Exception:
+                merged.pop("num_thread", None)
+        options = merged
     return _ollama_generate(
         OLLAMA_LIGHTWEIGHT_MODEL,
         prompt,
-        options=_build_lightweight_ollama_options(),
+        options=options,
         progress_callback=progress_callback,
         timeout_seconds=timeout_seconds,
         fail_fast_if_busy=fail_fast_if_busy,
